@@ -1,0 +1,74 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "meetasr"
+version = "0.1.0"
+description = "Meeting Speech Recognition + LLM Summarization — rebuilt from FunASR"
+readme = "README_meetasr.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "MeetASR Contributors" }]
+keywords = ["speech-recognition", "asr", "meeting", "llm", "summarization", "speaker-diarization"]
+
+dependencies = [
+    # Audio
+    "torch>=2.0",
+    "torchaudio",
+    "librosa",
+    "soundfile>=0.12.1",
+    "numpy",
+    "scipy>=1.4.1",
+    # Config
+    "omegaconf>=2.0",
+    # Model download
+    "modelscope",
+    "huggingface_hub",
+    # ASR tokenizers
+    "transformers",
+    "sentencepiece",
+    # API server
+    "fastapi",
+    "uvicorn[standard]",
+    "python-multipart",
+    "pydantic>=2.0",
+    # LLM
+    "openai>=1.0",
+    # FunASR (for model weight reuse)
+    "funasr",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov",
+    "black",
+    "isort",
+    "ruff",
+]
+
+[project.scripts]
+meetasr = "meetasr.bin.cli:main"
+meetasr-server = "meetasr.bin.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["meetasr*"]
+
+[tool.black]
+line-length = 100
+target-version = ["py310"]
+
+[tool.isort]
+profile = "black"
+line_length = 100
+
+[tool.ruff]
+line-length = 100
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]

@@ -1,0 +1,23 @@
+Bạn là trợ lý phân tích cuộc họp. Hãy trích xuất các QUYẾT ĐỊNH chính thức được đưa ra trong transcript dưới đây.
+
+Một quyết định là: điều được nhóm hoặc cá nhân có thẩm quyền xác nhận sẽ làm/áp dụng.
+Không phải là: ý kiến đơn lẻ, đề xuất chưa được đồng thuận, thảo luận chưa kết luận.
+
+Transcript cuộc họp:
+
+{transcript}
+
+Hãy trả về danh sách quyết định dạng JSON. KHÔNG bao bọc trong markdown code block.
+
+Format:
+[
+  {{
+    "content": "Nội dung quyết định rõ ràng, đủ ngữ cảnh",
+    "made_by": "Tên người quyết định hoặc 'Nhóm' nếu đồng thuận chung",
+    "timestamp": 230.0
+  }}
+]
+
+timestamp: thời điểm quyết định được đưa ra (giây), hoặc null nếu không rõ.
+
+Nếu không có quyết định nào, trả về: []

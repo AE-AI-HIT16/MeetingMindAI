@@ -1,0 +1,57 @@
+# MeetASR — Meeting Config Example
+# Copy this file to meeting_config.yaml and edit to your needs.
+# Run: meetasr server --config meeting_config.yaml
+
+# Global device setting (can be overridden per-model)
+device: cpu          # cpu | cuda:0 | mps
+
+# --------------------
+# ASR Model (required)
+# --------------------
+asr:
+  model: sensevoice-small      # sensevoice-small | paraformer-zh
+  hub: ms                      # ms (ModelScope) | hf (HuggingFace)
+  device: cpu
+
+# -----------------------------------
+# VAD — Voice Activity Detection
+# -----------------------------------
+vad:
+  model: fsmn-vad
+  hub: ms
+  max_single_segment_time: 60000   # max segment length in ms
+
+# -----------------------------------
+# Punctuation Restoration
+# -----------------------------------
+punc:
+  model: ct-punc
+  hub: ms
+
+# -----------------------------------
+# Speaker Diarization (optional)
+# Comment out to disable
+# -----------------------------------
+# spk:
+#   model: cam++
+#   hub: ms
+
+# -----------------------------------
+# LLM Summarization (optional)
+# Comment out to disable
+# -----------------------------------
+llm:
+  provider: openai              # openai | ollama
+  model: gpt-4o-mini
+
+  # For OpenAI:
+  api_key: ${OPENAI_API_KEY}    # reads from env var OPENAI_API_KEY
+
+  # For Ollama (local, no API key needed):
+  # provider: ollama
+  # model: llama3.2
+  # host: http://localhost:11434
+
+  language: vi                  # vi | en — output language for reports
+  temperature: 0.3
+  max_tokens: 4096

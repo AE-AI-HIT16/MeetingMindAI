@@ -1,0 +1,28 @@
+Bạn là trợ lý phân tích cuộc họp. Hãy trích xuất TẤT CẢ các action items (việc cần làm) được đề cập trong transcript dưới đây.
+
+Transcript cuộc họp:
+
+{transcript}
+
+Hãy trả về danh sách action items dạng JSON. KHÔNG bao bọc trong markdown code block.
+
+Format:
+[
+  {{
+    "task": "Mô tả công việc cụ thể và rõ ràng",
+    "assignee": "Tên người được giao hoặc null nếu không rõ",
+    "deadline": "Deadline nếu được đề cập (ví dụ: '15/07/2024', 'cuối tuần') hoặc null",
+    "priority": "high",
+    "mentioned_by": "Speaker 0",
+    "timestamp": 145.2
+  }}
+]
+
+Giá trị priority: "high" | "medium" | "low"
+- high: cần làm ngay, quan trọng, được nhấn mạnh
+- medium: cần làm nhưng không gấp
+- low: nice-to-have, có thể làm sau
+
+timestamp: thời điểm action item được đề cập (giây), hoặc null nếu không rõ.
+
+Nếu không có action item nào, trả về: []
