@@ -1,6 +1,7 @@
 [build-system]
 requires = ["setuptools>=68", "wheel"]
-build-backend = "setuptools.backends.legacy:build"
+#build-backend = "setuptools.backends.legacy:build"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "meetasr"
@@ -36,7 +37,7 @@ dependencies = [
     # LLM
     "openai>=1.0",
     # FunASR (for model weight reuse)
-    "funasr",
+#    "funasr",
 ]
 
 [project.optional-dependencies]
