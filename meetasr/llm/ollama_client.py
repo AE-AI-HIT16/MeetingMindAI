@@ -2,8 +2,6 @@
 
 from meetasr.register import tables
 from meetasr.llm.openai_client import OpenAIClient
-from typing import Optional
-import requests
 
 @tables.register("llm_classes", key="ollama")
 class OllamaClient(OpenAIClient):
@@ -39,46 +37,3 @@ class OllamaClient(OpenAIClient):
             timeout=timeout,
             retry_attempts=retry_attempts,
         )
-
-    def chat(
-            self,
-            prompt: str,
-            system: Optional[str] = None,
-            temperature: float = 0.3,
-            max_tokens: int = 4096,
-    ) -> str:
-        url = f"{self.base_url}/chat/completions"
-
-        messages = []
-
-        if system:
-            messages.append({
-                "role": "system",
-                "content": system
-            })
-
-        messages.append({
-            "role": "user",
-            "content": prompt
-        })
-
-        payload = {
-            "model": self.model,  # 👈 "llama3.2"
-            "messages": messages,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "stream": False
-        }
-
-        response = requests.post(
-            url,
-            json=payload,
-            timeout=self.timeout,
-        )
-
-        if response.status_code != 200:
-            raise RuntimeError(f"Ollama error: {response.text}")
-
-        data = response.json()
-
-        return data["choices"][0]["message"]["content"]
