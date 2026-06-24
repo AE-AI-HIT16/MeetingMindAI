@@ -1,5 +1,6 @@
 import pprint
 from meetasr.llm.llm_utils.chunking import run_pipeline_with_markdown
+from meetasr.llm.llm_utils.validate import process_transcript
 
 
 # =========================
@@ -35,7 +36,7 @@ mock_meeting = {
 # TEST CASE
 # =========================
 def test_run_pipeline_with_markdown():
-
+    process_transcript(mock_meeting)
     sentence_info = mock_meeting["sentence_info"]
 
     chunks, markdown = run_pipeline_with_markdown(
@@ -72,7 +73,7 @@ def test_run_pipeline_with_markdown():
     # =========================
     # DEBUG OUTPUT (giống mẫu bạn đưa)
     # =========================
-    pprint.pprint(sentence_info)
+    # pprint.pprint(sentence_info)
     print("\n================ CHUNKS ================\n")
     pprint.pprint(chunks)
 

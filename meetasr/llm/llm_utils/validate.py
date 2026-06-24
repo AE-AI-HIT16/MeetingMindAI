@@ -1,4 +1,5 @@
-from typing import TypedDict, List, Optional, Any
+from typing import TypedDict, List, Optional
+from copy import deepcopy
 
 
 class SentenceInfo(TypedDict):
@@ -61,8 +62,9 @@ def validate_transcript(result: TranscriptResult) -> None:
             raise ValueError(f"sentence_info[{idx}].speaker must be string or None")
 
 
-
 def normalize_sentence_info(result: TranscriptResult) -> TranscriptResult:
+    result = deepcopy(result)
+
     duration = result["duration"]
 
     cleaned = []
@@ -79,10 +81,10 @@ def normalize_sentence_info(result: TranscriptResult) -> TranscriptResult:
     # ===== 2. sort by start =====
     cleaned.sort(key=lambda x: x["start"])
 
-    # ===== 3. merge overlaps (improved) =====
+    # ===== 3. merge overlaps =====
     merged = []
+
     for cur in cleaned:
-        # clamp to duration
         cur["start"] = min(max(cur["start"], 0), duration)
         cur["end"] = min(max(cur["end"], 0), duration)
 
@@ -92,18 +94,16 @@ def normalize_sentence_info(result: TranscriptResult) -> TranscriptResult:
 
         last = merged[-1]
 
-        # overlap or touching
-        if cur["start"] <= last["end"]:
+        # chỉ merge khi overlap thật sự
+        if cur["start"] < last["end"]:
             last["end"] = max(last["end"], cur["end"])
 
-            # better merge text (concat instead of replace)
             if cur["text"]:
                 if last["text"]:
                     last["text"] += " " + cur["text"]
                 else:
                     last["text"] = cur["text"]
 
-            # unify speaker if needed
             if last["speaker"] == "Unknown" and cur["speaker"] != "Unknown":
                 last["speaker"] = cur["speaker"]
 
@@ -112,18 +112,21 @@ def normalize_sentence_info(result: TranscriptResult) -> TranscriptResult:
 
     result["sentence_info"] = merged
 
-    # ===== 4. fallback text =====
     if not result.get("text") or not result["text"].strip():
-        result["text"] = " ".join(s["text"] for s in merged).strip()
+        result["text"] = " ".join(
+            s["text"] for s in merged
+        ).strip()
 
     return result
-
 
 def process_transcript(result: TranscriptResult) -> TranscriptResult:
-    # normalize trước
-    result = normalize_sentence_info(result)
-
-    # validate lại sau normalize
+    # validate raw input trước
     validate_transcript(result)
 
-    return result
+    # normalize trên bản copy
+    normalized = normalize_sentence_info(result)
+
+    # validate lại sau normalize
+    validate_transcript(normalized)
+
+    return normalized
