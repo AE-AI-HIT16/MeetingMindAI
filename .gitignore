@@ -1,0 +1,45 @@
+# Python / Cache
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Môi trường ảo (Virtual Environments)
+venv/
+env/
+.env/
+.venv/
+
+# Môi trường và Cấu hình cá nhân
+.env
+.env.local
+meeting_config.yaml
+meeting_config.*.yaml
+!meeting_config.example.yaml
+
+# IDEs / Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# AI / Machine Learning Models (Tránh push nhầm model nặng lên GitHub)
+*.pt
+*.onnx
+*.safetensors
+/models/
+/checkpoints/
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# File âm thanh / upload test / outputs
+*.wav
+*.mp3
+*.m4a
+*.flac
+temp/
+tmp/
+output/
+reports/
