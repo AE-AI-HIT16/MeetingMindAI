@@ -1,6 +1,7 @@
 Bạn là trợ lý phân tích cuộc họp. Hãy trích xuất TẤT CẢ các action items (việc cần làm) được đề cập trong transcript dưới đây.
 
-Transcript cuộc họp:
+Dưới đây là nội dung cuộc họp với timestamp và người nói và nội dung lời thoại được viết với cấu trúc sau:
+[timestamp] [Người nói] : [Lời thoại]
 
 {transcript}
 
@@ -11,12 +12,16 @@ Format:
   {{
     "task": "Mô tả công việc cụ thể và rõ ràng",
     "assignee": "Tên người được giao hoặc null nếu không rõ",
-    "deadline": "Deadline nếu được đề cập (ví dụ: '15/07/2024', 'cuối tuần') hoặc null",
+    "deadline": "Deadline nếu được đề cập (ví dụ: '15/07/2024', 'cuối tuần', 'ngày mai', 'ngày kia') hoặc null",
     "priority": "high",
     "mentioned_by": "Speaker 0",
     "timestamp": 145.2
   }}
 ]
+
+task: là những công việc cần làm được 1 người giao cho người khác hoặc 1 người tự nhận công việc.
+Đó bắt buộc phải là một công việc chưa hoàn thành. Các công việc đã hoàn thành
+hoặc được mang ra báo cáo mà không có yêu cầu tiếp tục công việc đó thì không được coi là task
 
 Giá trị priority: "high" | "medium" | "low"
 - high: cần làm ngay, quan trọng, được nhấn mạnh

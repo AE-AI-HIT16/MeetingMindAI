@@ -31,7 +31,7 @@ class OllamaClient(OpenAIClient):
             retry_attempts: Retry attempts on failure.
         """
         super().__init__(
-            api_key="ollama",              # Ollama doesn't check key
+            api_key="ollama",
             model=model,
             base_url=f"{host}/v1",
             timeout=timeout,

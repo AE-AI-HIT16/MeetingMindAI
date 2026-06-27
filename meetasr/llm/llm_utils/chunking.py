@@ -4,7 +4,7 @@ import numpy as np
 
 import tiktoken
 
-MAX_TOKEN = 200
+MAX_TOKEN = 1500
 OVERLAP_SENTENCES = 3
 
 enc = tiktoken.encoding_for_model("gpt-4o-mini")
@@ -190,23 +190,23 @@ def run_pipeline(sentence_info: List[Dict],
                  use_adaptive_threshold: bool = False,
                  model_name: str = "all-MiniLM-L6-v2"):
 
-    print("INPUT SENTENCES:", len(sentence_info))
+    # print("INPUT SENTENCES:", len(sentence_info))
 
     windows = build_windows(sentence_info, window_size)
-    print("WINDOWS:", len(windows))
+    # print("WINDOWS:", len(windows))
 
     embeddings = windows_to_embeddings(windows, model_name)
-    print("EMBEDDINGS:", embeddings.shape)
+    # print("EMBEDDINGS:", embeddings.shape)
 
     boundaries = detect_boundaries(embeddings, threshold)
-    print("BOUNDARIES:", boundaries)
+    # print("BOUNDARIES:", boundaries)
 
     chunks = build_chunks_from_boundaries(
         sentence_info,
         boundaries
     )
 
-    print("CHUNKS:", len(chunks))
+    # print("CHUNKS:", len(chunks))
 
     return chunks
 
