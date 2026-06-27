@@ -93,7 +93,8 @@ def save_meeting_result(db: Session, meeting_id: str, report_data: MeetingReport
             db.add(Report(
                 meeting_id=meeting_id,
                 summary=report_data.summary,
-                processing_time=report_data.processing_time
+                processing_time=report_data.processing_time,
+                llm_model=report_data.llm_model
             ))
 
         # 4. Save Topics

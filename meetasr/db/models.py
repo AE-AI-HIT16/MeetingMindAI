@@ -37,6 +37,7 @@ class Report(SQLModel, table=True):
     meeting_id: str = Field(primary_key=True, foreign_key="meetings.id")
     summary: str
     processing_time: float
+    llm_model: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
     meeting: Optional["Meeting"] = Relationship(back_populates="report")
@@ -91,8 +92,14 @@ class Meeting(SQLModel, table=True):
     status: str = Field(default="pending")
     language: str = "vi"
     audio_path: str
+    
+    # AI model configuration
+    vad_model: Optional[str] = None
     asr_model: Optional[str] = None
+    punc_model: Optional[str] = None
+    spk_model: Optional[str] = None
     llm_model: Optional[str] = None
+    
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
