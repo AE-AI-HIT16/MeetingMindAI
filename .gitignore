@@ -1,14 +1,25 @@
+.venv/
 # Python / Cache
 __pycache__/
 *.py[cod]
 *$py.class
+
+*.egg-info/
+build/
+dist/
+
+.idea/
 .pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
 
 # Môi trường ảo (Virtual Environments)
 venv/
 env/
 .env/
 .venv/
+09_llm_docs_summary.md
 
 # Môi trường và Cấu hình cá nhân
 .env
@@ -19,7 +30,6 @@ meeting_config.*.yaml
 
 # IDEs / Editors
 .vscode/
-.idea/
 *.swp
 *.swo
 

@@ -6,6 +6,8 @@ import json
 import logging
 import os
 import time
+import re
+import tiktoken
 from typing import Optional
 
 from meetasr.llm.abs_llm import AbsLLMClient
@@ -253,18 +255,29 @@ class MeetingSummarizer:
 
     @staticmethod
     def _split_text(text: str, chunk_size: int) -> list[str]:
-        """Split text into chunks at line boundaries."""
-        lines = text.split("\n")
+        enc = tiktoken.encoding_for_model("gpt-4o-mini")
+
+        sentences = re.split(r"[.?!]\s*", text)
+        sentences = [s.strip() for s in sentences if s.strip()]
+
         chunks, current, current_len = [], [], 0
-        for line in lines:
-            line_len = len(line) + 1
-            if current_len + line_len > chunk_size and current:
-                chunks.append("\n".join(current))
-                current, current_len = [], 0
-            current.append(line)
-            current_len += line_len
+        overlap_size = 2
+
+        for sentence in sentences:
+            token_list = enc.encode(sentence)
+            tokens = len(token_list)
+
+            if current_len + tokens > chunk_size and current:
+                chunks.append(" ".join(current))
+                current = current[-overlap_size:]
+                current_len = sum(len(enc.encode(s)) for s in current)
+
+            current.append(sentence)
+            current_len += tokens
+
         if current:
-            chunks.append("\n".join(current))
+            chunks.append(" ".join(current))
+
         return chunks
 
 
