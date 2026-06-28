@@ -10,12 +10,13 @@ load_dotenv()
 
 
 def test_groq_basic_chat():
+    # Khởi tạo client
     client = GroqClient(
         api_key=os.getenv("GROD_API_KEY_KHANH"),
-        model="llama-3.3-70b-versatile"
+        model="llama-3.3-70b-versatile" # model
     )
 
-    path_prompt = "meetasr/llm/prompts/action_items_vi/action_items_consultation.txt"
+    path_prompt = "meetasr/llm/prompts/action_items_vi/action_items_consultation.txt" #
     path_transcript = "tests/data/consultation_mock_v2.json"
 
     prompt = read_txt(path_prompt)
@@ -30,8 +31,7 @@ def test_groq_basic_chat():
 
     prompt = prompt.replace("{transcript}", transcript)
 
-    # pprint.pprint(promt)
-
+    # request model
     response = client.chat(prompt=prompt)
 
     pprint.pprint(response)
