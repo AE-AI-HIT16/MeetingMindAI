@@ -15,7 +15,7 @@ def test_groq_basic_chat():
         model="llama-3.3-70b-versatile"
     )
 
-    path_prompt = "meetasr/llm/prompts/decisions/decisions_consultation_vi.txt"
+    path_prompt = "meetasr/llm/prompts/action_items_vi/action_items_consultation.txt"
     path_transcript = "tests/data/consultation_mock_v2.json"
 
     prompt = read_txt(path_prompt)

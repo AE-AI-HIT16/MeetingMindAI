@@ -21,7 +21,6 @@ meeting_config.*.yaml
 
 # IDEs / Editors
 .vscode/
-.idea/
 *.swp
 *.swo
 
