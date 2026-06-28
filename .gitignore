@@ -6,6 +6,7 @@ __pycache__/
 *.egg-info/
 build/
 dist/
+/models/
 
 .pytest_cache/
 .ruff_cache/
