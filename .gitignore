@@ -1,9 +1,18 @@
+.venv/
 # Python / Cache
 __pycache__/
 *.py[cod]
 *$py.class
+
+*.egg-info/
+build/
+dist/
+
 .idea/
 .pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
 
 # Môi trường ảo (Virtual Environments)
 venv/

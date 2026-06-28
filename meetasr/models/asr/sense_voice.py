@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import numpy as np
 
 from meetasr.register import tables
@@ -35,6 +36,7 @@ class SenseVoice(AbsASR):
         self.model_path = model_path
         self.device = device
         self._model = None
+        self._inference_kwargs = {}
         self._kwargs = kwargs
 
     def _ensure_loaded(self):
@@ -43,10 +45,8 @@ class SenseVoice(AbsASR):
             return
         try:
             from funasr.models.sense_voice.model import SenseVoiceSmall
-            import torch
-            import os
 
-            self._model = SenseVoiceSmall.from_pretrained(
+            self._model, self._inference_kwargs = SenseVoiceSmall.from_pretrained(
                 model=self.model_path,
                 device=self.device,
             )
@@ -81,13 +81,36 @@ class SenseVoice(AbsASR):
         results = []
         with torch.no_grad():
             for chunk in audio:
+                inference_kwargs = dict(self._inference_kwargs)
+                inference_kwargs.update(kwargs)
                 res = self._model.inference(
-                    data_in=chunk,
+                    data_in=[chunk],
                     language=language,
                     use_itn=use_itn,
-                    **kwargs,
+                    **inference_kwargs,
                 )
-                # res is list of dicts
-                if isinstance(res, (list, tuple)) and len(res) > 0:
-                    results.extend(res[0] if isinstance(res[0], list) else res)
+                if isinstance(res, tuple):
+                    res = res[0]
+                if isinstance(res, list):
+                    results.extend(_normalize_results(res))
         return results
+
+
+def _normalize_results(results: list[dict]) -> list[dict]:
+    """Normalize SenseVoice output to MeetASR ASR result format."""
+    normalized = []
+    for result in results:
+        item = dict(result)
+        text = item.get("text", "")
+        clean_text = _strip_sensevoice_tokens(text)
+        if clean_text != text:
+            item.setdefault("raw_text", text)
+            item["text"] = clean_text
+        item.setdefault("timestamp", [])
+        normalized.append(item)
+    return normalized
+
+
+def _strip_sensevoice_tokens(text: str) -> str:
+    """Remove SenseVoice metadata tokens from the displayed transcript text."""
+    return re.sub(r"^(?:<\|[^|]+\|>)+", "", text).strip()
