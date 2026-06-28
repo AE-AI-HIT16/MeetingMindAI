@@ -37,6 +37,8 @@ dependencies = [
     "openai>=1.0",
     # FunASR (for model weight reuse)
     "funasr",
+    # Vietnamese ASR backend
+    "sherpa-onnx",
 ]
 
 [project.optional-dependencies]

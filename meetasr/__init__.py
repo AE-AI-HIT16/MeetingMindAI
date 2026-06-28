@@ -6,7 +6,7 @@ from meetasr.auto.auto_pipeline import AutoPipeline
 
 # Trigger registration of all components
 from meetasr.models.vad import fsmn_vad  # noqa: F401
-from meetasr.models.asr import sense_voice, paraformer  # noqa: F401
+from meetasr.models.asr import sense_voice, paraformer, zipformer_vi  # noqa: F401
 from meetasr.models.punc import ct_transformer  # noqa: F401
 from meetasr.models.spk import campplus  # noqa: F401
 from meetasr.frontends import fbank  # noqa: F401

@@ -31,7 +31,10 @@ def download_model(
         RuntimeError: If model cannot be found or downloaded.
     """
     model_path = _resolve_model_path(model, hub, model_revision)
-    config = _load_config(model_path)
+    try:
+        config = _load_config(model_path)
+    except FileNotFoundError:
+        config = {"model": model}
     config["model_path"] = model_path
     config["hub"] = hub
     return config
@@ -110,6 +113,7 @@ _HF_ALIASES = {
     "cam++": "funasr/campplus",
     "paraformer-zh": "funasr/paraformer-zh",
     "sensevoice-small": "FunAudioLLM/SenseVoiceSmall",
+    "zipformer-vi": "hynt/Zipformer-30M-RNNT-6000h",
 }
 
 
