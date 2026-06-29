@@ -47,9 +47,6 @@ def init_db() -> None:
     logger.info("Đã khởi tạo các bảng trong cơ sở dữ liệu.")
 
 
-# ---------------------------------------------------------------------------
-# Trình cấp phát phiên làm việc (Session Factory)
-# ---------------------------------------------------------------------------
 
 def get_db() -> Generator[Session, None, None]:
     """Cấp phát một Session của SQLModel và đảm bảo nó được đóng an toàn sau khi sử dụng xong.
