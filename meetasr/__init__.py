@@ -11,7 +11,7 @@ from meetasr.models.punc import ct_transformer  # noqa: F401
 from meetasr.models.spk import campplus  # noqa: F401
 from meetasr.frontends import fbank  # noqa: F401
 from meetasr.tokenizer import char_tokenizer # noqa: F401
-from meetasr.llm import ollama_client   # noqa: F401
+from meetasr.llm import ollama_client, openai_client, groq_client   # noqa: F401
 
 
 __version__ = "0.1.0"
