@@ -100,7 +100,7 @@ def _load_config(model_path: str) -> dict:
 # Shorthand aliases — same as FunASR for compatibility
 _MS_ALIASES = {
     "fsmn-vad": "damo/speech_fsmn_vad_zh-cn-16k-common-pytorch",
-    "ct-punc": "damo/punc_ct-transformer_cn-en-common-vocab471067-large",
+    "ct-punc": "iic/punc_ct-transformer_cn-en-common-vocab471067-large",
     "cam++": "iic/speech_campplus_sv_zh-cn_16k-common",
     "paraformer-zh": "damo/speech_paraformer-large-vad-punc_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
     "paraformer-zh-streaming": "damo/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-online",
@@ -114,6 +114,7 @@ _HF_ALIASES = {
     "paraformer-zh": "funasr/paraformer-zh",
     "sensevoice-small": "FunAudioLLM/SenseVoiceSmall",
     "zipformer-vi": "hynt/Zipformer-30M-RNNT-6000h",
+    "vibert-capu": "dragonSwing/vibert-capu",
 }
 
 
