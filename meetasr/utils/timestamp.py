@@ -27,7 +27,7 @@ def merge_vad_segments(
         last = merged[-1]
         gap = seg.start_ms - last.end_ms
         would_be_len = seg.end_ms - last.start_ms
-        if gap <= max_merge_gap_ms and would_be_len <= max_segment_ms:
+        if gap <= max_merge_gap_ms and would_be_len < max_segment_ms:
             merged[-1] = Segment(last.start_ms, seg.end_ms)
         else:
             merged.append(Segment(seg.start_ms, seg.end_ms))
@@ -36,19 +36,19 @@ def merge_vad_segments(
 
 def align_timestamps_to_global(
     char_timestamps: list[list[int]],
-    segment_offset_ms: int,
+    offset_ms: int,
 ) -> list[list[int]]:
     """Shift char-level timestamps by VAD segment offset.
 
     Args:
         char_timestamps: [[start_ms, end_ms], ...] relative to segment start.
-        segment_offset_ms: Global offset (segment.start_ms).
+        offset_ms: Global offset in milliseconds.
 
     Returns:
         Timestamps adjusted to global timeline.
     """
     return [
-        [t[0] + segment_offset_ms, t[1] + segment_offset_ms]
+        [t[0] + offset_ms, t[1] + offset_ms]
         for t in char_timestamps
     ]
 

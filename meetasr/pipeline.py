@@ -16,6 +16,10 @@ from meetasr.utils.download import download_model
 from meetasr.utils.misc import deep_update
 
 
+VAD_PADDING_MS = 100
+SAMPLE_RATE = 16000
+
+
 class MeetPipeline:
     """End-to-end meeting processing pipeline.
 
@@ -81,7 +85,7 @@ class MeetPipeline:
             key = _derive_key(audio_source)
 
         audio = load_audio(audio_source)
-        duration = len(audio) / 16000.0
+        duration = len(audio) / SAMPLE_RATE
 
         # Step 1: VAD
         segments = self._run_vad(audio)
@@ -145,7 +149,7 @@ class MeetPipeline:
     def _run_vad(self, audio: np.ndarray) -> list[Segment]:
         """Run VAD or return single full-audio segment if no VAD model."""
         if self.vad is None:
-            duration_ms = int(len(audio) / 16000.0 * 1000)
+            duration_ms = int(len(audio) / SAMPLE_RATE * 1000)
             return [Segment(0, duration_ms)]
 
         t0 = time.perf_counter()
@@ -172,9 +176,12 @@ class MeetPipeline:
         t0 = time.perf_counter()
         # Slice audio for each segment
         chunks = []
+        total_ms = int(len(audio) / SAMPLE_RATE * 1000)
         for seg in segments:
-            start = int(seg.start_ms / 1000.0 * 16000)
-            end = int(seg.end_ms / 1000.0 * 16000)
+            start_ms = max(0, seg.start_ms - VAD_PADDING_MS)
+            end_ms = min(total_ms, seg.end_ms + VAD_PADDING_MS)
+            start = int(start_ms / 1000.0 * SAMPLE_RATE)
+            end = int(end_ms / 1000.0 * SAMPLE_RATE)
             chunk = audio[start:end]
             if len(chunk) > 0:
                 chunks.append(chunk)
