@@ -9,6 +9,7 @@ from meetasr.models.abs_models import AbsPunc
 
 
 @tables.register("model_classes", key="ct-punc")
+@tables.register("model_classes", key="iic/punc_ct-transformer_cn-en-common-vocab471067-large")
 class CTTransformerPunc(AbsPunc):
     """CT-Transformer punctuation restoration model.
 
@@ -67,6 +68,9 @@ class CTTransformerPunc(AbsPunc):
 
         self._ensure_loaded()
         results = self._inner.generate(input=text, **kwargs)
-        if results and isinstance(results, list):
-            return results[0].get("text", text)
+        if isinstance(results, tuple):
+            results = results[0]
+        if results and isinstance(results, list) and isinstance(results[0], dict):
+            restored = results[0].get("text", text)
+            return restored.strip() if isinstance(restored, str) else text
         return text
