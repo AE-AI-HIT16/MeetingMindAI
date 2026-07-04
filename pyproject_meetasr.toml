@@ -38,6 +38,9 @@ dependencies = [
     "openai>=1.0",
     # FunASR (for model weight reuse)
 #    "funasr",
+    # Speaker clustering (3D-Speaker port)
+    "fastcluster>=1.2.6",
+    "scikit-learn",
 ]
 
 [project.optional-dependencies]
