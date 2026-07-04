@@ -6,6 +6,7 @@ import logging
 import os
 import time
 from typing import Optional
+import torch
 
 import numpy as np
 
@@ -14,6 +15,7 @@ from meetasr.utils.audio import load_audio
 from meetasr.utils.timestamp import merge_vad_segments, build_sentence_info
 from meetasr.utils.download import download_model
 from meetasr.utils.misc import deep_update
+from meetasr.utils.diarization import chunk_segment, circle_pad, assign_speakers_by_overlap, compressed_seg
 
 
 class MeetPipeline:
@@ -203,27 +205,51 @@ class MeetPipeline:
         sentence_info: list[SentenceInfo],
         segments: list[Segment],
     ) -> list[SentenceInfo]:
-        """Assign speaker labels via embedding + clustering."""
-        import torch
+        """Assign speaker labels via embedding + clustering.
+
+        Implements 3D-Speaker diarization pipeline (T1 + T3 + T4):
+            T1: Sub-segmentation — each VAD segment → 1.5s chunks (0.75s step)
+            T3: Post-processing  — compressed_seg merges adjacent same-speaker chunks
+            T4: Alignment        — assign speaker per sentence by overlap duration
+        """
         t0 = time.perf_counter()
         try:
-            embeddings = []
+            sample_rate = 16000
+            target_len = int(1.5 * sample_rate)  # 24,000 frames
+
+            # T1: Sub-segmentation — collect all chunks across all VAD segments
+            all_chunks = []
             for seg in segments:
-                start = int(seg.start_ms / 1000.0 * 16000)
-                end = int(seg.end_ms / 1000.0 * 16000)
-                chunk = audio[start:end]
-                emb = self.spk.embed(chunk)
+                all_chunks.extend(chunk_segment(seg.start_s, seg.end_s, dur=1.5, step=0.75))
+
+            if not all_chunks:
+                logging.warning("SPK: no chunks produced — skipping diarization.")
+                return sentence_info
+
+            # T1: Extract embedding per chunk (sequential, memory-safe)
+            embeddings = []
+            for st, ed in all_chunks:
+                chunk_np = audio[int(st * sample_rate):int(ed * sample_rate)]
+                if len(chunk_np) < target_len:
+                    t = torch.from_numpy(chunk_np).float()
+                    chunk_np = circle_pad(t, target_len).numpy()
+                emb = self.spk.embed(chunk_np.astype(np.float32))
                 embeddings.append(emb)
 
+            # Cluster all chunk embeddings
             all_embs = torch.cat(embeddings, dim=0)
             labels = self.spk.cluster(all_embs)
 
-            for s, label in zip(sentence_info, labels):
-                s.speaker = label
+            # T3: Build diar segments + merge adjacent same-speaker chunks
+            diar_segs = [[c[0], c[1], int(l)] for c, l in zip(all_chunks, labels)]
+            diar_segs = compressed_seg(diar_segs)
 
-            n_speakers = len(set(labels))
+            # T4: Assign speaker per sentence by overlap duration
+            sentence_info = assign_speakers_by_overlap(sentence_info, diar_segs)
+
+            n_speakers = len({s.speaker for s in sentence_info if s.speaker is not None})
             logging.info(
-                f"SPK: {n_speakers} speaker(s) detected "
+                f"SPK: {n_speakers} speaker(s), {len(all_chunks)} chunks "
                 f"({time.perf_counter() - t0:.2f}s)"
             )
         except Exception as e:
