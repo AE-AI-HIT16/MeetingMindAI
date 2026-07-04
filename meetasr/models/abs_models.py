@@ -75,3 +75,16 @@ class AbsSpk(ABC):
             Speaker embedding tensor of shape [1, D].
         """
         ...
+
+    @abstractmethod
+    def cluster(self, embeddings: "torch.Tensor", **kwargs) -> list[int]:
+        """Cluster embeddings into speaker labels.
+
+        Args:
+            embeddings: Stacked embeddings tensor [N, D].
+            **kwargs: e.g. oracle_num for known speaker count.
+
+        Returns:
+            List of integer speaker labels of length N.
+        """
+        ...
