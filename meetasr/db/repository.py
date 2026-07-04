@@ -68,7 +68,7 @@ def save_meeting_result(db: Session, meeting_id: str, report_data: MeetingReport
             meeting.llm_model = report_data.llm_model
         db.add(meeting)
 
-        # 1. Save Transcript
+        # save Transcript
         db.add(Transcript(
             meeting_id=meeting_id,
             text=report_data.transcript.text,
@@ -76,7 +76,7 @@ def save_meeting_result(db: Session, meeting_id: str, report_data: MeetingReport
             language=report_data.transcript.language
         ))
 
-        # 2. Save Sentences
+        # save Sentences
         for sent in report_data.transcript.sentence_info:
             char_ts = json.dumps(sent.char_timestamps) if sent.char_timestamps else None
             db.add(Sentence(
@@ -88,7 +88,7 @@ def save_meeting_result(db: Session, meeting_id: str, report_data: MeetingReport
                 char_timestamps=char_ts
             ))
 
-        # 3. Save Report Summary
+        # save Report Summary
         if report_data.summary:
             db.add(Report(
                 meeting_id=meeting_id,
@@ -97,7 +97,7 @@ def save_meeting_result(db: Session, meeting_id: str, report_data: MeetingReport
                 llm_model=report_data.llm_model
             ))
 
-        # 4. Save Topics
+        #save Topics
         for topic in report_data.topics:
             db.add(Topic(
                 meeting_id=meeting_id,
@@ -107,7 +107,7 @@ def save_meeting_result(db: Session, meeting_id: str, report_data: MeetingReport
                 end_time=topic.end_time
             ))
 
-        # 5. Save Action Items
+        #save Action Items
         for item in report_data.action_items:
             db.add(ActionItem(
                 meeting_id=meeting_id,
@@ -119,7 +119,6 @@ def save_meeting_result(db: Session, meeting_id: str, report_data: MeetingReport
                 timestamp=item.timestamp
             ))
 
-        # 6. Save Decisions
         for decision in report_data.decisions:
             db.add(Decision(
                 meeting_id=meeting_id,
@@ -128,7 +127,6 @@ def save_meeting_result(db: Session, meeting_id: str, report_data: MeetingReport
                 timestamp=decision.timestamp
             ))
 
-        # Commit everything as a single transaction
         db.commit()
     except Exception as e:
         db.rollback()
