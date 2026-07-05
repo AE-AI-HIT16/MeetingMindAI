@@ -17,6 +17,7 @@ from meetasr import __version__
 from meetasr.auto.auto_pipeline import AutoPipeline
 from meetasr.api.dependencies import set_pipeline, CONFIG_PATH
 from meetasr.api.routes import health, transcribe, summarize
+from meetasr.db.connection import init_db
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -35,6 +36,8 @@ async def lifespan(app: FastAPI):
     Yields:
         Control to the running server between startup and shutdown.
     """
+    init_db()                    
+    logger.info("Database tables initialized.")
     # --- STARTUP ---
     if os.path.exists(CONFIG_PATH):
         logger.info(f"Loading pipeline from {CONFIG_PATH}...")
