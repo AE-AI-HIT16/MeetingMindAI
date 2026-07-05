@@ -12,12 +12,6 @@ class Transcript(SQLModel, table=True):
     text: str
     duration: float
     language: str
-     # lưu cấu hình model tầng Audio
-    asr_model: str = Field(default="sensevoice")
-    vad_model: str = Field(default="fsmn-vad")
-    punc_model: str = Field(default="ct-punc")
-    spk_model: str = Field(default="campplus")
-
     meeting: Optional["Meeting"] = Relationship(back_populates="transcript")
 
 
@@ -99,8 +93,8 @@ class Meeting(SQLModel, table=True):
     status: str = Field(default="pending")
     language: str = "vi"
     audio_path: str
-    
-    
+    asr_model: Optional[str] = None
+    llm_model: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
