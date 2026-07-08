@@ -37,16 +37,12 @@ dependencies = [
     # LLM
     "openai>=1.0",
     # FunASR (for model weight reuse)
-<<<<<<< HEAD
     "funasr",
     # Vietnamese ASR backend
     "sherpa-onnx",
-=======
-#    "funasr",
     # Speaker clustering (3D-Speaker port)
     "fastcluster>=1.2.6",
     "scikit-learn",
->>>>>>> 310bf0e97f653902fa1b140ce63210584ce95015
 ]
 
 [project.optional-dependencies]
