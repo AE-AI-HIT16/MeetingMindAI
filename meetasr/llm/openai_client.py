@@ -38,6 +38,7 @@ class OpenAIClient(AbsLLMClient):
         self.timeout = timeout
         self.retry_attempts = retry_attempts
         self._init_client(api_key, base_url)
+        self.base_url = base_url
 
     def _init_client(self, api_key: str, base_url: Optional[str]):
         """Create the openai.OpenAI client."""

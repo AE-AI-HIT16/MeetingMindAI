@@ -6,6 +6,9 @@ import json
 import logging
 import os
 import time
+from dataclasses import asdict
+import re
+import tiktoken
 from typing import Optional
 
 from meetasr.llm.abs_llm import AbsLLMClient
@@ -95,6 +98,7 @@ class MeetingSummarizer:
 
     def _format_transcript(self, result: TranscriptResult) -> str:
         """Convert TranscriptResult to human-readable text for LLM."""
+
         if result.sentence_info:
             lines = []
             for s in result.sentence_info:
@@ -102,7 +106,7 @@ class MeetingSummarizer:
                 spk = f"Speaker {s.speaker}: " if s.speaker is not None else ""
                 lines.append(f"{ts} {spk}{s.text}")
             return "\n".join(lines)
-        # Fallback: just the full text
+
         return result.text
 
     # ------------------------------------------------------------------
@@ -111,9 +115,10 @@ class MeetingSummarizer:
 
     def _get_summary(self, text: str) -> str:
         """Generate summary paragraph."""
-        if len(text) <= MAX_CHARS_DIRECT:
-            return self._call_summary_direct(text)
-        return self._call_summary_mapreduce(text)
+        return self._call_summary_direct(text)
+        # if len(text) <= MAX_CHARS_DIRECT:
+        #     return self._call_summary_direct(text)
+        # return self._call_summary_mapreduce(text)
 
     def _call_summary_direct(self, text: str) -> str:
         prompt = self._prompts["summarize"].format(transcript=text)
@@ -127,28 +132,28 @@ class MeetingSummarizer:
             logging.warning(f"Summary LLM call failed: {e}")
             return "[Không thể tạo tóm tắt]" if self.language == "vi" else "[Summary unavailable]"
 
-    def _call_summary_mapreduce(self, text: str) -> str:
-        """Summarize long transcripts via chunking → chunk summaries → final summary."""
-        chunks = self._split_text(text, MAX_CHARS_DIRECT)
-        logging.info(f"Transcript too long ({len(text)} chars), splitting into {len(chunks)} chunks")
-        chunk_summaries = []
-        for i, chunk in enumerate(chunks):
-            logging.info(f"Summarizing chunk {i + 1}/{len(chunks)}...")
-            s = self._call_summary_direct(chunk)
-            chunk_summaries.append(s)
-
-        # Merge chunk summaries into final summary
-        merged = "\n\n".join(chunk_summaries)
-        reduce_prompt = self._prompts["summarize"].format(transcript=merged)
-        try:
-            return self.client.chat(
-                reduce_prompt,
-                temperature=self.temperature,
-                max_tokens=self.max_tokens,
-            ).strip()
-        except Exception as e:
-            logging.warning(f"Reduce summary failed: {e}")
-            return "\n\n".join(chunk_summaries)   # return parts as fallback
+    # def _call_summary_mapreduce(self, text: str) -> str:
+    #     """Summarize long transcripts via chunking → chunk summaries → final summary."""
+    #     chunks = self._split_text(text, MAX_CHARS_DIRECT)
+    #     logging.info(f"Transcript too long ({len(text)} chars), splitting into {len(chunks)} chunks")
+    #     chunk_summaries = []
+    #     for i, chunk in enumerate(chunks):
+    #         logging.info(f"Summarizing chunk {i + 1}/{len(chunks)}...")
+    #         s = self._call_summary_direct(chunk)
+    #         chunk_summaries.append(s)
+    #
+    #     # Merge chunk summaries into final summary
+    #     merged = "\n\n".join(chunk_summaries)
+    #     reduce_prompt = self._prompts["summarize"].format(transcript=merged)
+    #     try:
+    #         return self.client.chat(
+    #             reduce_prompt,
+    #             temperature=self.temperature,
+    #             max_tokens=self.max_tokens,
+    #         ).strip()
+    #     except Exception as e:
+    #         logging.warning(f"Reduce summary failed: {e}")
+    #         return "\n\n".join(chunk_summaries)   # return parts as fallback
 
     def _get_topics(self, text: str) -> list[Topic]:
         """Extract main topics as list of Topic objects."""
@@ -224,17 +229,27 @@ class MeetingSummarizer:
         logging.warning("Returning empty fallback for this LLM call.")
         return fallback
 
-    def _load_prompts(self) -> dict[str, str]:
-        """Load prompt templates from files."""
+    def _load_prompts(self, prompt_type: str = "meeting") -> dict[str, str]:
         lang = self.language
-        # Fallback to English if language-specific prompt not found
-        def _read(name: str) -> str:
-            for suffix in [f"_{lang}.txt", "_en.txt"]:
-                path = os.path.join(_PROMPT_DIR, name + suffix)
-                if os.path.exists(path):
-                    with open(path, encoding="utf-8") as f:
-                        return f.read()
-            raise FileNotFoundError(f"Prompt file not found for '{name}' in {_PROMPT_DIR}")
+
+        def _read(task: str) -> str:
+            # folder theo task + lang
+            folder_path = os.path.join(_PROMPT_DIR, f"{task}_{lang}")
+
+            if not os.path.isdir(folder_path):
+                raise FileNotFoundError(f"Missing prompt folder: {folder_path}")
+
+            # file theo task_type_lang
+            filename = f"{task}_{prompt_type}_{lang}.txt"
+            path = os.path.join(folder_path, filename)
+
+            if os.path.exists(path):
+                with open(path, encoding="utf-8") as f:
+                    return f.read()
+
+            raise FileNotFoundError(
+                f"Missing prompt file: {path} (task={task}, type={prompt_type}, lang={lang})"
+            )
 
         return {
             "summarize": _read("summarize"),
@@ -245,27 +260,39 @@ class MeetingSummarizer:
 
     def _truncate(self, text: str, max_chars: int = MAX_CHARS_DIRECT) -> str:
         """Truncate text to max_chars for topic/action/decision extraction."""
-        if len(text) <= max_chars:
-            return text
-        # Take first half + last quarter to capture intro and closing
-        half = max_chars // 2
-        return text[:half] + "\n...[truncated]...\n" + text[-(max_chars // 4):]
+        # if len(text) <= max_chars:
+        #     return text
+        # # Take first half + last quarter to capture intro and closing
+        # half = max_chars // 2
+        # return text[:half] + "\n...[truncated]...\n" + text[-(max_chars // 4):]
+        return text
 
-    @staticmethod
-    def _split_text(text: str, chunk_size: int) -> list[str]:
-        """Split text into chunks at line boundaries."""
-        lines = text.split("\n")
-        chunks, current, current_len = [], [], 0
-        for line in lines:
-            line_len = len(line) + 1
-            if current_len + line_len > chunk_size and current:
-                chunks.append("\n".join(current))
-                current, current_len = [], 0
-            current.append(line)
-            current_len += line_len
-        if current:
-            chunks.append("\n".join(current))
-        return chunks
+    # @staticmethod
+    # def _split_text(text: str, chunk_size: int) -> list[str]:
+    #     enc = tiktoken.encoding_for_model("gpt-4o-mini")
+    #
+    #     sentences = re.split(r"[.?!]\s*", text)
+    #     sentences = [s.strip() for s in sentences if s.strip()]
+    #
+    #     chunks, current, current_len = [], [], 0
+    #     overlap_size = 2
+    #
+    #     for sentence in sentences:
+    #         token_list = enc.encode(sentence)
+    #         tokens = len(token_list)
+    #
+    #         if current_len + tokens > chunk_size and current:
+    #             chunks.append(" ".join(current))
+    #             current = current[-overlap_size:]
+    #             current_len = sum(len(enc.encode(s)) for s in current)
+    #
+    #         current.append(sentence)
+    #         current_len += tokens
+    #
+    #     if current:
+    #         chunks.append(" ".join(current))
+    #
+    #     return chunks
 
 
 def _optional_float(val) -> Optional[float]:
