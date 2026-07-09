@@ -44,6 +44,7 @@ meeting_config.*.yaml
 # OS generated files
 .DS_Store
 Thumbs.db
+*.db
 
 # File âm thanh / upload test / outputs
 *.wav
