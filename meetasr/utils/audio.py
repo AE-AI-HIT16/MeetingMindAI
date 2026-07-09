@@ -52,8 +52,9 @@ def _load_from_file(path: str, target_sr: int) -> np.ndarray:
     try:
         import soundfile as sf
         audio, sr = sf.read(path, dtype="float32", always_2d=False)
-    except Exception:
+    except Exception as e:
         # Fallback to librosa for mp3, m4a, etc.
+        logging.debug(f"soundfile failed to load {path} ({e}), falling back to librosa.")
         import librosa
         audio, sr = librosa.load(path, sr=None, mono=False, dtype=np.float32)
 
