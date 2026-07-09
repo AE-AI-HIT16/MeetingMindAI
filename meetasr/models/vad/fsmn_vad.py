@@ -46,7 +46,7 @@ class FsmnVAD(AbsVAD):
         self._frontend = None
         self._kwargs = kwargs
 
-    def _ensure_loaded(self):
+    def _ensure_loaded(self) -> None:
         """Lazy-load the underlying funasr model."""
         if self._model is not None:
             return

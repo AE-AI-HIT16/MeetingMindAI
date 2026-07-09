@@ -37,7 +37,7 @@ class CTTransformerPunc(AbsPunc):
         self._inner = None
         self._kwargs = kwargs
 
-    def _ensure_loaded(self):
+    def _ensure_loaded(self) -> None:
         """Lazy-load via FunASR AutoModel."""
         if self._inner is not None:
             return
