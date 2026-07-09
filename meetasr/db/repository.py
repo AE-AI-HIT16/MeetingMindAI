@@ -15,7 +15,8 @@ def create_meeting(
     title: str, 
     audio_path: str, 
     asr_model: Optional[str] = None, 
-    llm_model: Optional[str] = None
+    llm_model: Optional[str] = None,
+    duration: float = 0.0
 ) -> Meeting:
     """Create a new pending meeting record."""
     meeting = Meeting(
@@ -24,6 +25,7 @@ def create_meeting(
         audio_path=audio_path,
         asr_model=asr_model,
         llm_model=llm_model,
+        duration=duration,
         status="pending"
     )
     db.add(meeting)
