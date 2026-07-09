@@ -47,7 +47,7 @@ class CAMPlusPlus(AbsSpk):
             "min_cluster_size": min_cluster_size,
         }
 
-    def _ensure_loaded(self):
+    def _ensure_loaded(self) -> None:
         """Lazy-load via FunASR AutoModel."""
         if self._inner is not None:
             return

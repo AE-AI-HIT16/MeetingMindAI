@@ -51,8 +51,10 @@ def _resolve_model_path(model: str, hub: str, revision: str) -> str:
         return _download_from_modelscope(model, revision)
     elif hub == "hf":
         return _download_from_huggingface(model, revision)
+    elif hub == "none" or not hub:
+        return model
     else:
-        raise ValueError(f"Unknown hub '{hub}'. Expected 'ms' or 'hf'.")
+        raise ValueError(f"Unknown hub '{hub}'. Expected 'ms', 'hf', or 'none'.")
 
 
 def _download_from_modelscope(model_id: str, revision: str) -> str:
@@ -76,8 +78,10 @@ def _download_from_huggingface(model_id: str, revision: str) -> str:
     try:
         from huggingface_hub import snapshot_download
         model_id = _resolve_model_alias(model_id, hub="hf")
-        logging.info(f"Downloading '{model_id}' from HuggingFace (revision={revision})")
-        return snapshot_download(model_id, revision=revision)
+        # HuggingFace defaults to 'main', while ModelScope uses 'master'
+        hf_revision = "main" if revision == "master" else revision
+        logging.info(f"Downloading '{model_id}' from HuggingFace (revision={hf_revision})")
+        return snapshot_download(model_id, revision=hf_revision)
     except ImportError:
         raise RuntimeError(
             "huggingface_hub is not installed. Run: pip install huggingface_hub"

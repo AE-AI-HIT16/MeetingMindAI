@@ -25,9 +25,11 @@ class ViBERTCaPuPunc(AbsPunc):
         self.model_path = model_path
         self.device = device
         self._inner = None
+        kwargs.pop("model", None)
+        kwargs.pop("hub", None)
         self._kwargs = kwargs
 
-    def _ensure_loaded(self):
+    def _ensure_loaded(self) -> None:
         """Lazy-load the downloaded ViBERT-CaPu model."""
         if self._inner is not None:
             return
@@ -44,8 +46,31 @@ class ViBERTCaPuPunc(AbsPunc):
         try:
             self._patch_transformers_resize()
             sys.path.insert(0, str(model_dir))
-            import modeling_seq2labels
-            from gec_model import GecBERTModel
+
+            # HuggingFace cache uses symlinks. utils.py does `Path(__file__).resolve().parent`
+            # which resolves into the `blobs/` folder where `verb-form-vocab.txt` doesn't exist.
+            # We temporarily mock resolve() to prevent symlink resolution.
+            import pathlib
+            _orig_resolve = pathlib.Path.resolve
+            def _mock_resolve(self, *args, **kwargs):
+                return self.absolute()
+            pathlib.Path.resolve = _mock_resolve
+
+            # Mock FileLock because vocabulary.py tries to lock a symlink in HF cache
+            import filelock
+            _orig_filelock = filelock.FileLock
+            class MockFileLock:
+                def __init__(self, *args, **kwargs): pass
+                def __enter__(self): return self
+                def __exit__(self, *args): pass
+            filelock.FileLock = MockFileLock
+
+            try:
+                import modeling_seq2labels
+                from gec_model import GecBERTModel
+            finally:
+                pathlib.Path.resolve = _orig_resolve
+                filelock.FileLock = _orig_filelock
 
             modeling_seq2labels.Seq2LabelsOutput = dataclass(
                 modeling_seq2labels.Seq2LabelsOutput
