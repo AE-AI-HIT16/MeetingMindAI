@@ -188,16 +188,23 @@ class MeetingSummarizer:
                     temperature=self.temperature,
                     max_tokens=self.max_tokens,
                 ).strip()
-                # Strip markdown code fences if model wraps output
-                if raw.startswith("```"):
-                    raw = raw.split("```")[1]
-                    if raw.startswith("json"):
-                        raw = raw[4:]
+                
+                # Extract markdown code fence if present
+                match = re.search(r"```(?:json)?(.*?)```", raw, re.DOTALL | re.IGNORECASE)
+                if match:
+                    raw = match.group(1).strip()
+                else:
+                    # Otherwise, try to extract array brackets just in case
+                    start = raw.find('[')
+                    end = raw.rfind(']')
+                    if start != -1 and end != -1:
+                        raw = raw[start:end+1]
+                        
                 parsed = json.loads(raw)
                 if isinstance(parsed, list):
                     return parsed
             except json.JSONDecodeError as e:
-                logging.warning(f"JSON parse failed (attempt {attempt + 1}): {e}")
+                logging.warning(f"JSON parse failed (attempt {attempt + 1}): {e}\nRaw snippet: {raw[:100]}...")
             except Exception as e:
                 logging.warning(f"LLM call failed (attempt {attempt + 1}): {e}")
         logging.warning("Returning empty fallback for this LLM call.")
