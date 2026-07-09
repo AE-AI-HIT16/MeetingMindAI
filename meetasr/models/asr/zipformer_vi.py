@@ -39,7 +39,7 @@ class ZipformerViASR(AbsASR):
         self._recognizer = None
         self._kwargs = kwargs
 
-    def _ensure_loaded(self):
+    def _ensure_loaded(self) -> None:
         """Lazy-load the sherpa-onnx offline recognizer."""
         if self._recognizer is not None:
             return
@@ -87,7 +87,15 @@ class ZipformerViASR(AbsASR):
         audio: np.ndarray | list[np.ndarray],
         **kwargs,
     ) -> list[dict]:
-        """Recognize Vietnamese speech from 16 kHz mono float32 audio."""
+        """Recognize Vietnamese speech from 16 kHz mono float32 audio.
+
+        Args:
+            audio: Single 1D numpy array or list of arrays containing 16kHz audio samples.
+            **kwargs: Additional parameters (e.g., key).
+
+        Returns:
+            List of dictionaries containing text and character-level timestamps.
+        """
         self._ensure_loaded()
         chunks = [audio] if isinstance(audio, np.ndarray) else audio
 
@@ -98,15 +106,75 @@ class ZipformerViASR(AbsASR):
             stream.accept_waveform(self.sample_rate, samples)
             self._recognizer.decode_stream(stream)
             result = stream.result
-            text = getattr(result, "text", str(result)).strip()
+
+            # Try to extract per-character timestamps from token data
+            text_from_tokens, timestamps = _extract_char_timestamps(result)
+            if text_from_tokens is not None:
+                text = text_from_tokens
+            else:
+                text = getattr(result, "text", str(result)).strip()
+                timestamps = []
+
             results.append(
                 {
                     "key": kwargs.get("key", f"chunk_{index}"),
                     "text": text,
-                    "timestamp": [],
+                    "timestamp": timestamps,
                 }
             )
         return results
+
+
+def _extract_char_timestamps(result) -> tuple[str | None, list[list[int]]]:
+    """Convert sherpa-onnx token timestamps to per-character timestamps.
+
+    sherpa-onnx transducer models provide:
+        result.timestamps — list[float] of start times (seconds) per token
+        result.tokens     — list[str] of BPE tokens
+
+    The pipeline expects len(text) == len(timestamps) (one entry per character).
+    This function expands each token's timestamp to cover every character in
+    that token, and reconstructs text from tokens to guarantee alignment.
+
+    Returns:
+        (text, char_timestamps) if tokens available, else (None, []).
+    """
+    tokens = getattr(result, "tokens", None)
+    raw_timestamps = getattr(result, "timestamps", None)
+
+    if not tokens or not raw_timestamps:
+        return None, []
+    if len(tokens) != len(raw_timestamps):
+        return None, []
+
+    text_chars = []
+    char_timestamps = []
+    for i, (token, ts) in enumerate(zip(tokens, raw_timestamps)):
+        start_ms = int(ts * 1000)
+        # Estimate end_ms from next token's start, or +80ms for last
+        if i + 1 < len(raw_timestamps):
+            end_ms = int(raw_timestamps[i + 1] * 1000)
+        else:
+            end_ms = start_ms + 80
+
+        # Convert BPE token to text characters: ▁ = space
+        token_text = token.replace("▁", " ")
+
+        for c in token_text:
+            text_chars.append(c)
+            char_timestamps.append([start_ms, end_ms])
+
+    # Strip whitespace and trim timestamps to match
+    raw_text = "".join(text_chars)
+    text = raw_text.strip()
+    start_trim = len(raw_text) - len(raw_text.lstrip())
+    end_trim = len(raw_text) - len(raw_text.rstrip())
+    if end_trim > 0:
+        char_timestamps = char_timestamps[start_trim:-end_trim]
+    elif start_trim > 0:
+        char_timestamps = char_timestamps[start_trim:]
+
+    return text, char_timestamps
 
 
 def _find_required_file(model_dir: Path, patterns: tuple[str, ...]) -> Path:
