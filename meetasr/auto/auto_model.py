@@ -41,6 +41,9 @@ class AutoModel:
         config["device"] = device
 
         model_key = config.get("model", model)
+        if model_key not in tables.model_classes:
+            model_key = model
+            
         model_class = tables.model_classes.get(model_key)
 
         if model_class is None:

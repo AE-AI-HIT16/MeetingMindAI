@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Workspace - MeetASR (Bright Minimal)</title>
+  <style>
+    :root {
+      --bg-color: #FFFFFF;
+      --bg-alt: #F1F5F9;
+      --text-primary: #334155;
+      --text-secondary: #64748B;
+      --border-color: #E2E8F0;
+      
+      /* Accents */
+      --primary-blue: #3B82F6;
+      --primary-blue-bg: #EFF6FF;
+      --accent-orange: #F97316;
+      --accent-orange-hover: #EA580C;
+      
+      --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg-color);
+      color: var(--text-primary);
+      font-family: var(--font-family);
+      height: 100vh;
+      overflow: hidden;
+      display: grid;
+      grid-template-columns: 25% 50% 25%;
+    }
+
+    /* Common Styles */
+    .column {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      padding: 32px 24px;
+    }
+
+    .border-right {
+      border-right: 1px solid var(--border-color);
+    }
+
+    .section-title {
+      font-size: 13px;
+      color: var(--text-secondary);
+      margin-bottom: 24px;
+      font-weight: 600;
+    }
+
+    /* Column 1 */
+    .file-info {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      background-color: var(--primary-blue-bg);
+      padding: 16px;
+      border-radius: 12px;
+    }
+
+    .file-icon svg {
+      width: 28px;
+      height: 28px;
+      fill: none;
+      stroke: var(--primary-blue);
+      stroke-width: 2;
+    }
+
+    .file-name {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--primary-blue);
+    }
+
+    /* Column 2 */
+    .content-area {
+      flex: 1;
+      overflow-y: auto;
+      padding-right: 16px;
+    }
+
+    /* Custom scrollbar */
+    .content-area::-webkit-scrollbar {
+      width: 6px;
+    }
+    .content-area::-webkit-scrollbar-thumb {
+      background-color: var(--border-color);
+      border-radius: 10px;
+    }
+
+    .transcript-text {
+      font-size: 16px;
+      line-height: 2.4; /* Line height cực lớn tạo sự thoáng đãng */
+      color: var(--text-primary);
+      font-weight: 400;
+    }
+    
+    .transcript-text p {
+      margin-bottom: 24px;
+    }
+
+    /* Column 3 */
+    .col-right {
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      background-color: var(--bg-color);
+    }
+
+    .button-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 40px;
+    }
+
+    .btn-pastel {
+      background: var(--bg-alt);
+      border: none;
+      color: var(--text-primary);
+      padding: 14px 10px;
+      border-radius: 10px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background-color 0.2s ease;
+      text-align: center;
+    }
+
+    .btn-pastel:hover {
+      background-color: var(--border-color);
+    }
+
+    .result-list {
+      flex: 1;
+      list-style-type: none;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      margin-bottom: 32px;
+    }
+
+    .result-item {
+      font-size: 15px;
+      font-weight: 500;
+      color: var(--text-primary);
+      display: flex;
+      align-items: center;
+      padding: 12px;
+      border-radius: 8px;
+      transition: background-color 0.2s;
+    }
+    
+    .result-item:hover {
+      background-color: var(--primary-blue-bg);
+    }
+    
+    .result-item svg {
+      width: 18px;
+      height: 18px;
+      stroke: var(--primary-blue);
+      fill: none;
+      stroke-width: 2;
+      margin-right: 12px;
+    }
+
+    .btn-accent {
+      background-color: var(--accent-orange);
+      color: #FFFFFF;
+      border: none;
+      padding: 18px 32px;
+      border-radius: 9999px; /* Rounded-full */
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      width: 100%;
+      box-shadow: 0 4px 14px 0 rgba(249, 115, 22, 0.39);
+    }
+
+    .btn-accent:hover {
+      background-color: var(--accent-orange-hover);
+      transform: translateY(-1px);
+    }
+
+  </style>
+</head>
+<body>
+
+  <!-- Cột 1: Bên Trái -->
+  <div class="column border-right">
+    <div class="section-title">File người dùng truyền vào</div>
+    <div class="file-info">
+      <div class="file-icon">
+        <svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>
+      </div>
+      <div class="file-name">meeting_design_v2.wav</div>
+    </div>
+  </div>
+
+  <!-- Cột 2: Ở Giữa -->
+  <div class="column border-right">
+    <div class="section-title">Nội dung file</div>
+    <div class="content-area">
+      <div class="transcript-text">
+        <p>Hôm nay chúng ta sẽ thảo luận về định hướng thiết kế mới cho hệ thống phần mềm. Trước hết, giao diện cần được làm cho sáng sủa và mang hơi thở hiện đại hơn, sử dụng nhiều không gian trắng.</p>
+        
+        <p>Tiếp theo, bảng màu sẽ chuyển sang tông pastel nhạt kết hợp với điểm nhấn là xanh dương và cam tươi tắn. Mọi người chú ý làm các nút bấm mềm mại bằng cách bo góc mạnh tay nhé.</p>
+        
+        <p>Về phần tài liệu, tôi sẽ upload bản nháp lên hệ thống ngay sau cuộc họp. Các bạn chú ý xem xét cấu trúc grid mới nhé, nó sẽ giúp chúng ta linh hoạt hơn trong việc đáp ứng (responsive) trên nhiều màn hình.</p>
+        
+        <p>Tất cả mọi người đều đồng ý với phương án sử dụng CSS Variables để quản lý theme chứ? Được rồi, vậy chúng ta sẽ chốt phương án này. Hạn chót để hoàn thành các bản mockups là chiều thứ sáu tuần này.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Cột 3: Bên Phải -->
+  <div class="column col-right">
+    
+    <div>
+      <!-- Phần trên: 4 nút bấm lưới 2x2 nền pastel -->
+      <div class="button-grid">
+        <button class="btn-pastel">Summary</button>
+        <button class="btn-pastel">Topic</button>
+        <button class="btn-pastel">Decision</button>
+        <button class="btn-pastel">Action items</button>
+      </div>
+
+      <!-- Phần giữa: Danh sách kết quả không tiêu đề -->
+      <ul class="result-list">
+        <li class="result-item">
+          <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+          Summary.txt
+        </li>
+        <li class="result-item">
+          <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+          Decision.txt
+        </li>
+        <li class="result-item">
+          <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+          ActionItems.txt
+        </li>
+        <li class="result-item">
+          <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+          Topics.txt
+        </li>
+      </ul>
+    </div>
+
+    <!-- Phần dưới: Nút Bắt đầu to bắt mắt, bo tròn hoàn toàn -->
+    <div>
+      <button class="btn-accent">Bắt đầu xử lý</button>
+    </div>
+
+  </div>
+
+</body>
+</html>

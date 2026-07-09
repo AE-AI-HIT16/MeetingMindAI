@@ -1,0 +1,36 @@
+version: '3.8'
+
+services:
+  # POSTGRESQL
+  postgres_db:
+    image: postgres:15-alpine
+    container_name: meetasr_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  # MINIO
+  minio_storage:
+    image: minio/minio:latest
+    container_name: meetasr_minio
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000" # Cổng API để code Python gọi vào
+      - "9001:9001" # Cổng Giao diện Web (Dashboard)
+    volumes:
+      - minio_data:/data
+
+# Khai báo Volumes để dữ liệu không bị mất khi tắt máy
+volumes:
+  postgres_data:
+  minio_data:

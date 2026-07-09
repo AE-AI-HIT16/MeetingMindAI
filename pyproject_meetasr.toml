@@ -1,6 +1,7 @@
 [build-system]
 requires = ["setuptools>=68", "wheel"]
-build-backend = "setuptools.backends.legacy:build"
+#build-backend = "setuptools.backends.legacy:build"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "meetasr"
@@ -39,6 +40,9 @@ dependencies = [
     "funasr",
     # Vietnamese ASR backend
     "sherpa-onnx",
+    # Speaker clustering (3D-Speaker port)
+    "fastcluster>=1.2.6",
+    "scikit-learn",
 ]
 
 [project.optional-dependencies]
