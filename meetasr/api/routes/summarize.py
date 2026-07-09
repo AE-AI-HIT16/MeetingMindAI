@@ -90,7 +90,7 @@ async def summarize_meeting(
     file: UploadFile = File(..., description="Audio file to summarize"),
     language: str = Form("vi", description="Output language: vi | en | zh"),
     llm_model: str = Form("gpt-4o-mini", description="LLM model name (default: gpt-4o-mini)"),
-    asr_model: str = Form("sensevoice", description="ASR model: sensevoice (default) | paraformer"),
+    asr_model: str = Form("zipformer-vi", description="ASR model: zipformer-vi (default) | paraformer"),
     include_transcript: bool = Form(True, description="Include full transcript in result"),
     include_topics: bool = Form(True, description="Include key topics extraction"),
     include_actions: bool = Form(True, description="Include action items extraction"),
