@@ -15,7 +15,8 @@ def create_meeting(
     title: str, 
     audio_path: str, 
     asr_model: Optional[str] = None, 
-    llm_model: Optional[str] = None
+    llm_model: Optional[str] = None,
+    duration: float = 0.0
 ) -> Meeting:
     """Create a new pending meeting record."""
     meeting = Meeting(
@@ -24,6 +25,7 @@ def create_meeting(
         audio_path=audio_path,
         asr_model=asr_model,
         llm_model=llm_model,
+        duration=duration,
         status="pending"
     )
     db.add(meeting)
@@ -68,7 +70,7 @@ def save_meeting_result(db: Session, meeting_id: str, report_data: MeetingReport
             meeting.llm_model = report_data.llm_model
         db.add(meeting)
 
-        # 1. Save Transcript
+        # save Transcript
         db.add(Transcript(
             meeting_id=meeting_id,
             text=report_data.transcript.text,
@@ -76,7 +78,7 @@ def save_meeting_result(db: Session, meeting_id: str, report_data: MeetingReport
             language=report_data.transcript.language
         ))
 
-        # 2. Save Sentences
+        # save Sentences
         for sent in report_data.transcript.sentence_info:
             char_ts = json.dumps(sent.char_timestamps) if sent.char_timestamps else None
             db.add(Sentence(
@@ -88,7 +90,7 @@ def save_meeting_result(db: Session, meeting_id: str, report_data: MeetingReport
                 char_timestamps=char_ts
             ))
 
-        # 3. Save Report Summary
+        # save Report Summary
         if report_data.summary:
             db.add(Report(
                 meeting_id=meeting_id,
@@ -97,7 +99,7 @@ def save_meeting_result(db: Session, meeting_id: str, report_data: MeetingReport
                 llm_model=report_data.llm_model
             ))
 
-        # 4. Save Topics
+        #save Topics
         for topic in report_data.topics:
             db.add(Topic(
                 meeting_id=meeting_id,
@@ -107,7 +109,7 @@ def save_meeting_result(db: Session, meeting_id: str, report_data: MeetingReport
                 end_time=topic.end_time
             ))
 
-        # 5. Save Action Items
+        #save Action Items
         for item in report_data.action_items:
             db.add(ActionItem(
                 meeting_id=meeting_id,
@@ -119,7 +121,6 @@ def save_meeting_result(db: Session, meeting_id: str, report_data: MeetingReport
                 timestamp=item.timestamp
             ))
 
-        # 6. Save Decisions
         for decision in report_data.decisions:
             db.add(Decision(
                 meeting_id=meeting_id,
@@ -128,9 +129,23 @@ def save_meeting_result(db: Session, meeting_id: str, report_data: MeetingReport
                 timestamp=decision.timestamp
             ))
 
-        # Commit everything as a single transaction
         db.commit()
     except Exception as e:
         db.rollback()
         logger.error(f"Failed to save meeting results for {meeting_id}: {e}")
         raise
+
+
+def get_meetings(db: Session, skip: int = 0, limit: int = 20) -> List[Meeting]:
+    """Retrieve a list of meetings with pagination."""
+    return db.exec(select(Meeting).order_by(Meeting.created_at.desc()).offset(skip).limit(limit)).all()
+
+
+def delete_meeting(db: Session, meeting_id: str) -> bool:
+    """Delete a meeting and all its associated records (cascade)."""
+    meeting = db.get(Meeting, meeting_id)
+    if meeting:
+        db.delete(meeting)
+        db.commit()
+        return True
+    return False

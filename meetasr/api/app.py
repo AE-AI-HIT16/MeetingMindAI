@@ -16,7 +16,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from meetasr import __version__
 from meetasr.auto.auto_pipeline import AutoPipeline
 from meetasr.api.dependencies import set_pipeline, CONFIG_PATH
-from meetasr.api.routes import health, transcribe, summarize
+from meetasr.api.routes import health, transcribe, summarize, db_routes
+from meetasr.db.connection import init_db
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -35,6 +36,8 @@ async def lifespan(app: FastAPI):
     Yields:
         Control to the running server between startup and shutdown.
     """
+    init_db()                    
+    logger.info("Database tables initialized.")
     # --- STARTUP ---
     if os.path.exists(CONFIG_PATH):
         logger.info(f"Loading pipeline from {CONFIG_PATH}...")
@@ -79,6 +82,7 @@ app.add_middleware(
 app.include_router(health.router)
 app.include_router(transcribe.router)
 app.include_router(summarize.router)
+app.include_router(db_routes.router)
 
 
 # ------------------------------------------------------------------

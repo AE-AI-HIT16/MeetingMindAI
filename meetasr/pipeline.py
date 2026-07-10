@@ -6,6 +6,7 @@ import logging
 import os
 import time
 from typing import Optional
+import torch
 
 import numpy as np
 
@@ -14,6 +15,11 @@ from meetasr.utils.audio import load_audio
 from meetasr.utils.timestamp import merge_vad_segments, build_sentence_info
 from meetasr.utils.download import download_model
 from meetasr.utils.misc import deep_update
+from meetasr.utils.diarization import chunk_segment, circle_pad, assign_speakers_by_overlap, compressed_seg, map_chars_to_speakers
+from meetasr.utils.diarization import (chunk_segment, circle_pad, assign_speakers_by_overlap, compressed_seg,map_chars_to_speakers, split_at_speaker_turns,)
+
+VAD_PADDING_MS = 100
+SAMPLE_RATE = 16000
 
 
 class MeetPipeline:
@@ -81,7 +87,7 @@ class MeetPipeline:
             key = _derive_key(audio_source)
 
         audio = load_audio(audio_source)
-        duration = len(audio) / 16000.0
+        duration = len(audio) / SAMPLE_RATE
 
         # Step 1: VAD
         segments = self._run_vad(audio)
@@ -92,13 +98,15 @@ class MeetPipeline:
         # Step 3: Build sentence_info
         sentence_info = build_sentence_info(asr_results, segments)
 
-        # Step 4: Punctuation
-        if self.punc is not None:
-            sentence_info = self._run_punc(sentence_info)
-
-        # Step 5: Speaker diarization
+        # Step 4: Speaker diarization
+        # Must run BEFORE punctuation because punctuation changes text length,
+        # which would break char_timestamps alignment used for splitting speakers.
         if self.spk is not None:
             sentence_info = self._run_spk(audio, sentence_info, segments)
+
+        # Step 5: Punctuation
+        if self.punc is not None:
+            sentence_info = self._run_punc(sentence_info)
 
         full_text = " ".join(s.text for s in sentence_info)
 
@@ -145,7 +153,7 @@ class MeetPipeline:
     def _run_vad(self, audio: np.ndarray) -> list[Segment]:
         """Run VAD or return single full-audio segment if no VAD model."""
         if self.vad is None:
-            duration_ms = int(len(audio) / 16000.0 * 1000)
+            duration_ms = int(len(audio) / SAMPLE_RATE * 1000)
             return [Segment(0, duration_ms)]
 
         t0 = time.perf_counter()
@@ -172,9 +180,12 @@ class MeetPipeline:
         t0 = time.perf_counter()
         # Slice audio for each segment
         chunks = []
+        total_ms = int(len(audio) / SAMPLE_RATE * 1000)
         for seg in segments:
-            start = int(seg.start_ms / 1000.0 * 16000)
-            end = int(seg.end_ms / 1000.0 * 16000)
+            start_ms = max(0, seg.start_ms - VAD_PADDING_MS)
+            end_ms = min(total_ms, seg.end_ms + VAD_PADDING_MS)
+            start = int(start_ms / 1000.0 * SAMPLE_RATE)
+            end = int(end_ms / 1000.0 * SAMPLE_RATE)
             chunk = audio[start:end]
             if len(chunk) > 0:
                 chunks.append(chunk)
@@ -187,11 +198,18 @@ class MeetPipeline:
         return results
 
     def _run_punc(self, sentence_info: list[SentenceInfo]) -> list[SentenceInfo]:
-        """Restore punctuation for each sentence."""
+        """Restore punctuation for each sentence and align timestamps."""
+        from meetasr.utils.timestamp import align_punctuated_timestamps
         t0 = time.perf_counter()
         for s in sentence_info:
             try:
-                s.text = self.punc.restore(s.text)
+                raw_text = s.text
+                punc_text = self.punc.restore(raw_text)
+                if punc_text != raw_text:
+                    s.char_timestamps = align_punctuated_timestamps(
+                        raw_text, punc_text, s.char_timestamps
+                    )
+                    s.text = punc_text
             except Exception as e:
                 logging.warning(f"Punc failed for '{s.text[:30]}...': {e}")
         logging.info(f"Punc: done ({time.perf_counter() - t0:.2f}s)")
@@ -203,27 +221,72 @@ class MeetPipeline:
         sentence_info: list[SentenceInfo],
         segments: list[Segment],
     ) -> list[SentenceInfo]:
-        """Assign speaker labels via embedding + clustering."""
-        import torch
+        """Assign speaker labels via embedding + clustering.
+
+        Implements 3D-Speaker diarization pipeline (T1 + T3 + T4):
+            T1: Sub-segmentation — each VAD segment → 1.5s chunks (0.75s step)
+            T3: Post-processing  — compressed_seg merges adjacent same-speaker chunks
+            T4: Alignment        — assign speaker per sentence by overlap duration
+        """
         t0 = time.perf_counter()
         try:
-            embeddings = []
+            sample_rate = 16000
+            target_len = int(1.5 * sample_rate)  # 24,000 frames
+
+            # T1: Sub-segmentation — collect all chunks across all VAD segments
+            all_chunks = []
             for seg in segments:
-                start = int(seg.start_ms / 1000.0 * 16000)
-                end = int(seg.end_ms / 1000.0 * 16000)
-                chunk = audio[start:end]
-                emb = self.spk.embed(chunk)
+                all_chunks.extend(chunk_segment(seg.start_s, seg.end_s, dur=1.5, step=0.75))
+
+            if not all_chunks:
+                logging.warning("SPK: no chunks produced — skipping diarization.")
+                return sentence_info
+
+            # T1: Extract embedding per chunk (sequential, memory-safe)
+            embeddings = []
+            for st, ed in all_chunks:
+                chunk_np = audio[int(st * sample_rate):int(ed * sample_rate)]
+                if len(chunk_np) < target_len:
+                    t = torch.from_numpy(chunk_np).float()
+                    chunk_np = circle_pad(t, target_len).numpy()
+                emb = self.spk.embed(chunk_np.astype(np.float32))
                 embeddings.append(emb)
 
+            # Cluster all chunk embeddings
             all_embs = torch.cat(embeddings, dim=0)
             labels = self.spk.cluster(all_embs)
 
-            for s, label in zip(sentence_info, labels):
-                s.speaker = label
+            # T3: Build diar segments + merge adjacent same-speaker chunks
+            diar_segs = [[c[0], c[1], int(l)] for c, l in zip(all_chunks, labels)]
+            diar_segs = compressed_seg(diar_segs)
 
-            n_speakers = len(set(labels))
+            # T4: Word-level speaker attribution 
+            new_sentence_info = []
+            for sent in sentence_info:
+                if sent.char_timestamps:
+                    char_speakers = map_chars_to_speakers(
+                        sent.char_timestamps, diar_segs,
+                    )
+                    sub_sents = split_at_speaker_turns(sent, char_speakers)
+                    new_sentence_info.extend(sub_sents)
+                else:
+                    # Fallback: sentence-level (models không có timestamps, vd Zipformer)
+                    assign_speakers_by_overlap([sent], diar_segs)
+                    new_sentence_info.append(sent)
+
+            # Remap speaker IDs chronologically based on their first appearance
+            spk_mapping = {}
+            for sent in new_sentence_info:
+                if sent.speaker is not None:
+                    if sent.speaker not in spk_mapping:
+                        spk_mapping[sent.speaker] = len(spk_mapping)
+                    sent.speaker = spk_mapping[sent.speaker]
+
+            sentence_info = new_sentence_info
+
+            n_speakers = len(spk_mapping)
             logging.info(
-                f"SPK: {n_speakers} speaker(s) detected "
+                f"SPK: {n_speakers} speaker(s), {len(all_chunks)} chunks "
                 f"({time.perf_counter() - t0:.2f}s)"
             )
         except Exception as e:

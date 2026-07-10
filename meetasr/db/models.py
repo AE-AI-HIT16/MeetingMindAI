@@ -1,4 +1,3 @@
-"""Database models for MeetASR using SQLModel."""
 
 from datetime import datetime
 from typing import Optional, List
@@ -13,7 +12,6 @@ class Transcript(SQLModel, table=True):
     text: str
     duration: float
     language: str
-
     meeting: Optional["Meeting"] = Relationship(back_populates="transcript")
 
 
@@ -24,7 +22,7 @@ class Sentence(SQLModel, table=True):
     meeting_id: str = Field(foreign_key="meetings.id")
     text: str
     start: float
-    end: float
+    end: float 
     speaker: Optional[int] = None
     char_timestamps: Optional[str] = None
 
@@ -37,7 +35,10 @@ class Report(SQLModel, table=True):
     meeting_id: str = Field(primary_key=True, foreign_key="meetings.id")
     summary: str
     processing_time: float
-    llm_model: Optional[str] = None
+    
+    #lưu trữ cấu hình model llm
+    llm_model: Optional[str] = Field(default=None)
+    
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
     meeting: Optional["Meeting"] = Relationship(back_populates="report")
@@ -92,18 +93,12 @@ class Meeting(SQLModel, table=True):
     status: str = Field(default="pending")
     language: str = "vi"
     audio_path: str
-    
-    # AI model configuration
-    vad_model: Optional[str] = None
     asr_model: Optional[str] = None
-    punc_model: Optional[str] = None
-    spk_model: Optional[str] = None
     llm_model: Optional[str] = None
-    
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
-    # Relationships
+    #relationships
     transcript: Optional[Transcript] = Relationship(
         back_populates="meeting", 
         sa_relationship_kwargs={"uselist": False, "cascade": "all, delete-orphan"}

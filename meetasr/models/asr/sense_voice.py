@@ -39,7 +39,7 @@ class SenseVoice(AbsASR):
         self._inference_kwargs = {}
         self._kwargs = kwargs
 
-    def _ensure_loaded(self):
+    def _ensure_loaded(self) -> None:
         """Lazy-load the SenseVoice model."""
         if self._model is not None:
             return
@@ -66,7 +66,7 @@ class SenseVoice(AbsASR):
 
         Args:
             audio: Single float32 mono array or list of arrays at 16kHz.
-            language: "auto", "zh", "en", "vi", "ja", "ko", "yue".
+            language: "auto", "zh", "en", "ja", "ko", "yue".
             use_itn: Apply inverse text normalization.
             **kwargs: Additional inference parameters.
 
@@ -87,6 +87,7 @@ class SenseVoice(AbsASR):
                     data_in=[chunk],
                     language=language,
                     use_itn=use_itn,
+                    output_timestamp=True,
                     **inference_kwargs,
                 )
                 if isinstance(res, tuple):
