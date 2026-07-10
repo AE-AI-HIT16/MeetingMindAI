@@ -211,13 +211,7 @@
     <div class="section-title">Nội dung file</div>
     <div class="content-area">
       <div class="transcript-text">
-        <p>Hôm nay chúng ta sẽ thảo luận về định hướng thiết kế mới cho hệ thống phần mềm. Trước hết, giao diện cần được làm cho sáng sủa và mang hơi thở hiện đại hơn, sử dụng nhiều không gian trắng.</p>
-        
-        <p>Tiếp theo, bảng màu sẽ chuyển sang tông pastel nhạt kết hợp với điểm nhấn là xanh dương và cam tươi tắn. Mọi người chú ý làm các nút bấm mềm mại bằng cách bo góc mạnh tay nhé.</p>
-        
-        <p>Về phần tài liệu, tôi sẽ upload bản nháp lên hệ thống ngay sau cuộc họp. Các bạn chú ý xem xét cấu trúc grid mới nhé, nó sẽ giúp chúng ta linh hoạt hơn trong việc đáp ứng (responsive) trên nhiều màn hình.</p>
-        
-        <p>Tất cả mọi người đều đồng ý với phương án sử dụng CSS Variables để quản lý theme chứ? Được rồi, vậy chúng ta sẽ chốt phương án này. Hạn chót để hoàn thành các bản mockups là chiều thứ sáu tuần này.</p>
+        <p>Đang tải dữ liệu...</p>
       </div>
     </div>
   </div>
@@ -236,22 +230,7 @@
 
       <!-- Phần giữa: Danh sách kết quả không tiêu đề -->
       <ul class="result-list">
-        <li class="result-item">
-          <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
-          Summary.txt
-        </li>
-        <li class="result-item">
-          <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
-          Decision.txt
-        </li>
-        <li class="result-item">
-          <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
-          ActionItems.txt
-        </li>
-        <li class="result-item">
-          <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
-          Topics.txt
-        </li>
+        <!-- Results will be injected here via JS -->
       </ul>
     </div>
 
@@ -262,5 +241,122 @@
 
   </div>
 
+  <script>
+    document.addEventListener("DOMContentLoaded", async () => {
+      // 1. Lấy ID từ URL
+      const urlParams = new URLSearchParams(window.location.search);
+      const meetingId = urlParams.get('id');
+      if (!meetingId) {
+        window.location.href = "1_dashboard.html";
+        return;
+      }
+
+      // Các thẻ DOM cần thao tác
+      const fileNameEl = document.querySelector(".file-name");
+      const transcriptEl = document.querySelector(".transcript-text");
+      const resultListEl = document.querySelector(".result-list");
+      const btnProcess = document.querySelector(".btn-accent");
+      const tabs = document.querySelectorAll(".btn-pastel");
+
+      // Hàm fomat giây sang phút:giây (01:15)
+      const formatTime = (seconds) => {
+        const m = Math.floor(seconds / 60).toString().padStart(2, '0');
+        const s = Math.floor(seconds % 60).toString().padStart(2, '0');
+        return `${m}:${s}`;
+      };
+
+      try {
+        // 2. Fetch toàn bộ dữ liệu cuộc họp
+        const res = await fetch(`http://127.0.0.1:8000/v1/meetings/${meetingId}/report`);
+        if (!res.ok) throw new Error("Không tìm thấy cuộc họp");
+        const meeting = await res.json();
+
+        // Cập nhật tên file
+        fileNameEl.textContent = meeting.title || "Unknown File";
+
+        // 3. Xử lý trạng thái Pending (Đang chạy AI)
+        if (meeting.status !== "completed") {
+          btnProcess.textContent = "Đang xử lý AI... (vui lòng đợi)";
+          btnProcess.style.backgroundColor = "#94A3B8";
+          btnProcess.style.cursor = "not-allowed";
+          transcriptEl.innerHTML = "<p>AI đang bóc băng, vui lòng đợi trong giây lát...</p>";
+          resultListEl.innerHTML = "";
+          
+          // Cứ 3 giây check lại một lần
+          const interval = setInterval(async () => {
+            const statusRes = await fetch(`http://127.0.0.1:8000/v1/meeting/${meetingId}/status`);
+            const statusData = await statusRes.json();
+            if (statusData.status === "completed") {
+              clearInterval(interval);
+              window.location.reload(); // Chạy xong thì tải lại trang để render kết quả
+            } else if (statusData.status === "failed") {
+              clearInterval(interval);
+              btnProcess.textContent = "Xử lý thất bại!";
+              btnProcess.style.backgroundColor = "red";
+            }
+          }, 3000);
+          return; // Dừng tại đây, không render tiếp
+        }
+
+        // 4. Khi Đã Completed
+        btnProcess.textContent = "Đã xử lý xong";
+        btnProcess.style.backgroundColor = "#10B981"; // Đổi sang màu xanh báo hiệu thành công
+        btnProcess.disabled = true;
+
+        // Render Cột Giữa: Transcript (Câu thoại)
+        transcriptEl.innerHTML = "";
+        if (meeting.sentences && meeting.sentences.length > 0) {
+          meeting.sentences.forEach(s => {
+            const p = document.createElement("p");
+            const spk = s.speaker !== null ? `[Speaker ${s.speaker}]` : "";
+            p.innerHTML = `<strong>[${formatTime(s.start)} - ${formatTime(s.end)}] ${spk}</strong>: ${s.text}`;
+            transcriptEl.appendChild(p);
+          });
+        } else {
+          transcriptEl.innerHTML = "<p>Không có nội dung cuộc họp.</p>";
+        }
+
+        // Hàm thay đổi nội dung cột phải khi bấm Tab
+        const renderTab = (type) => {
+          resultListEl.innerHTML = "";
+          if (type === "Summary") {
+            const sumText = meeting.report?.summary || "Chưa có tóm tắt";
+            resultListEl.innerHTML = `<li class="result-item" style="line-height: 1.6;">${sumText}</li>`;
+          } else if (type === "Topic") {
+            meeting.topics?.forEach(t => {
+              resultListEl.innerHTML += `<li class="result-item" style="display:block; margin-bottom:10px;"><strong>${t.title}</strong><br><span style="font-size:14px; color:var(--text-secondary)">${t.description}</span></li>`;
+            });
+          } else if (type === "Decision") {
+            meeting.decisions?.forEach(d => {
+              resultListEl.innerHTML += `<li class="result-item">📌 ${d.content} (Bởi: ${d.made_by})</li>`;
+            });
+          } else if (type === "Action items") {
+            meeting.action_items?.forEach(a => {
+              const prio = a.priority === "high" ? "🔴" : a.priority === "medium" ? "🟡" : "🟢";
+              resultListEl.innerHTML += `<li class="result-item">${prio} ${a.task} - <em>${a.assignee || 'Chưa gán'}</em></li>`;
+            });
+          }
+        };
+
+        // Gắn sự kiện click cho các nút Tab
+        tabs.forEach(tab => {
+          tab.addEventListener("click", (e) => {
+            // Highlight tab đang chọn
+            tabs.forEach(t => t.style.backgroundColor = "var(--bg-alt)");
+            e.target.style.backgroundColor = "var(--border-color)";
+            // Gọi hàm render tương ứng
+            renderTab(e.target.textContent.trim());
+          });
+        });
+
+        // Mặc định tự động click vào tab Summary đầu tiên khi trang vừa load xong
+        if (tabs.length > 0) tabs[0].click();
+
+      } catch (error) {
+        console.error(error);
+        alert("Lỗi khi tải báo cáo cuộc họp!");
+      }
+    });
+  </script>
 </body>
 </html>
