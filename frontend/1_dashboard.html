@@ -82,6 +82,7 @@
     }
 
     .card-file {
+      position: relative;
       border: 1px solid var(--border-color);
       padding: 24px;
       box-shadow: var(--shadow-sm);
@@ -114,6 +115,31 @@
       color: var(--text-primary);
       text-align: center;
     }
+
+    .btn-delete {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: #EF4444;
+      padding: 6px;
+      border-radius: 6px;
+      transition: background 0.2s;
+    }
+    
+    .btn-delete:hover {
+      background: #FEE2E2;
+    }
+    
+    .btn-delete svg {
+      width: 18px;
+      height: 18px;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 2;
+    }
   </style>
 </head>
 <body>
@@ -126,37 +152,74 @@
         <div class="text">Thêm mới</div>
       </div>
 
-      <!-- Khối Danh sách file -->
-      <div class="card card-file">
-        <div class="icon">
-          <svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>
-        </div>
-        <div class="filename">meeting_01.wav</div>
-      </div>
-
-      <div class="card card-file">
-        <div class="icon">
-          <svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>
-        </div>
-        <div class="filename">project_sync.mp3</div>
-      </div>
-
-      <div class="card card-file">
-        <div class="icon">
-          <svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>
-        </div>
-        <div class="filename">interview_05.m4a</div>
-      </div>
-
-      <div class="card card-file">
-        <div class="icon">
-          <svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>
-        </div>
-        <div class="filename">design_review.wav</div>
-      </div>
-      
     </div>
   </div>
 
+  <script>
+    document.addEventListener("DOMContentLoaded", async () => {
+      const grid = document.querySelector(".grid");
+      const addCard = document.querySelector(".card-add");
+      
+      // Chuyển trang khi bấm Thêm mới
+      addCard.addEventListener("click", () => {
+        window.location.href = "2_upload.html";
+      });
+
+      try {
+        // Gọi API lấy danh sách cuộc họp
+        const response = await fetch("http://127.0.0.1:8000/v1/meetings?limit=50");
+        if (!response.ok) throw new Error("API lỗi!");
+        const meetings = await response.json();
+
+        // Xóa các thẻ nháp đi, chỉ giữ lại nút "Thêm mới"
+        grid.innerHTML = "";
+        grid.appendChild(addCard);
+
+        // Render dữ liệu thực tế từ Database
+        meetings.forEach(meeting => {
+          const card = document.createElement("div");
+          card.className = "card card-file";
+          card.style.cursor = "pointer";
+          
+          // Khi bấm vào file, chuyển sang Workspace với ID tương ứng
+          card.onclick = () => {
+            window.location.href = `3_workspace.html?id=${meeting.id}`;
+          };
+
+          card.innerHTML = `
+            <button class="btn-delete" title="Xóa cuộc họp">
+              <svg viewBox="0 0 24 24"><path d="M3 6h18"></path><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+            </button>
+            <div class="icon">
+              <svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>
+            </div>
+            <div class="filename">${meeting.title || "Unknown File"}</div>
+          `;
+          
+          const delBtn = card.querySelector(".btn-delete");
+          delBtn.onclick = async (e) => {
+            e.stopPropagation(); // Ngăn sự kiện click nhảy sang mở card
+            if (confirm("Bạn có chắc chắn muốn xóa cuộc họp này? Dữ liệu sẽ bị xóa vĩnh viễn.")) {
+              try {
+                const delRes = await fetch(`http://127.0.0.1:8000/v1/meetings/${meeting.id}`, { method: 'DELETE' });
+                if (delRes.ok) {
+                  card.remove(); // Xóa thẻ khỏi giao diện
+                } else {
+                  alert("Xóa thất bại!");
+                }
+              } catch (err) {
+                console.error(err);
+                alert("Lỗi kết nối khi xóa!");
+              }
+            }
+          };
+          
+          grid.appendChild(card);
+        });
+      } catch (error) {
+        console.error("Lỗi khi fetch danh sách meetings:", error);
+      }
+    });
+  </script>
 </body>
 </html>

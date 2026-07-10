@@ -134,7 +134,16 @@ def map_chars_to_speakers(
         char_timestamps: list[list[int]],
         diar_segs: list[list],
 ) -> list[int | None]:
-    char_speakers: list[int | None]= []
+    """Map character-level timestamps to speaker IDs.
+
+    Args:
+        char_timestamps: List of character start and end times in ms.
+        diar_segs: Diarization segments [[start_s, end_s, speaker_id], ...].
+
+    Returns:
+        List of speaker IDs corresponding to each character.
+    """
+    char_speakers: list[int | None] = []
     for ts in char_timestamps:
         char_start_s = ts[0] / 1000.0
         char_end_s = ts[1] / 1000.0
@@ -183,8 +192,18 @@ def _merge_short_groups(
 def split_at_speaker_turns(
     sentence: "SentenceInfo",
     char_speakers: list[int | None],
-    min_chars: int =3,
+    min_chars: int = 3,
 ) -> list["SentenceInfo"]:
+    """Split a sentence into multiple sub-sentences at speaker turns.
+
+    Args:
+        sentence: SentenceInfo object containing text and character timestamps.
+        char_speakers: List of speaker IDs for each character.
+        min_chars: Minimum number of characters for a valid speaker segment.
+
+    Returns:
+        List of new SentenceInfo objects divided by speaker turns.
+    """
     from meetasr.schemas import SentenceInfo
     if not char_speakers or not sentence.char_timestamps:
         return [sentence]

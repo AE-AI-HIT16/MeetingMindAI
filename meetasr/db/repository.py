@@ -134,3 +134,18 @@ def save_meeting_result(db: Session, meeting_id: str, report_data: MeetingReport
         db.rollback()
         logger.error(f"Failed to save meeting results for {meeting_id}: {e}")
         raise
+
+
+def get_meetings(db: Session, skip: int = 0, limit: int = 20) -> List[Meeting]:
+    """Retrieve a list of meetings with pagination."""
+    return db.exec(select(Meeting).order_by(Meeting.created_at.desc()).offset(skip).limit(limit)).all()
+
+
+def delete_meeting(db: Session, meeting_id: str) -> bool:
+    """Delete a meeting and all its associated records (cascade)."""
+    meeting = db.get(Meeting, meeting_id)
+    if meeting:
+        db.delete(meeting)
+        db.commit()
+        return True
+    return False
