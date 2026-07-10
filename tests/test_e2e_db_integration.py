@@ -5,6 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import Session, SQLModel, create_engine
 from unittest.mock import MagicMock
+from typing import Any
 
 from meetasr.api.app import app
 from meetasr.db.connection import get_db
@@ -14,12 +15,12 @@ from meetasr.api.dependencies import get_pipeline
 TEST_DB_URL = "sqlite:///test_meetasr.db"
 test_engine = create_engine(TEST_DB_URL, connect_args={"check_same_thread": False})
 
-def override_get_db():
+def override_get_db() -> Any:
     SQLModel.metadata.create_all(test_engine)
     with Session(test_engine) as session:
         yield session
 
-def override_get_pipeline():
+def override_get_pipeline() -> MagicMock:
     mock = MagicMock()
     mock.summarizer = MagicMock()
     return mock
@@ -29,7 +30,7 @@ app.dependency_overrides[get_pipeline] = override_get_pipeline
 client = TestClient(app)
 
 
-def test_meeting_lifecycle():
+def test_meeting_lifecycle() -> None:
     """Test: create meeting → check pending → (mock complete) → check completed."""
     # POST upload → 202
     with open("tests/data/test1.wav", "rb") as f:
