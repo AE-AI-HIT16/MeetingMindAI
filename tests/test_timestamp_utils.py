@@ -5,8 +5,9 @@ from meetasr.utils.timestamp import (
     merge_vad_segments,
     align_timestamps_to_global,
     build_sentence_info,
+    split_punctuated_sentence_info,
 )
-from meetasr.schemas import Segment
+from meetasr.schemas import Segment, SentenceInfo
 
 
 class TestMergeVadSegments:
@@ -72,3 +73,50 @@ class TestBuildSentenceInfo:
         segments = [Segment(0, 2000)]
         sents = build_sentence_info(asr_results, segments)
         assert len(sents) == 0
+
+
+class TestSplitPunctuatedSentenceInfo:
+
+    def test_split_long_segment_by_sentence_punctuation(self):
+        sentence = SentenceInfo(
+            text="Alo alo. Hôm nay mình họp. Chốt việc nhé.",
+            start=0.0,
+            end=10.0,
+            speaker=2,
+            char_timestamps=[[0, 100]],
+        )
+
+        result = split_punctuated_sentence_info([sentence])
+
+        assert [s.text for s in result] == [
+            "Alo alo.",
+            "Hôm nay mình họp.",
+            "Chốt việc nhé.",
+        ]
+        assert result[0].start == 0.0
+        assert result[-1].end == 10.0
+        assert all(s.speaker == 2 for s in result)
+        assert all(s.char_timestamps == [] for s in result)
+        assert all(s.start < s.end for s in result)
+
+    def test_keep_short_segment_unchanged(self):
+        sentence = SentenceInfo(
+            text="Alo alo. Chốt nhé.",
+            start=0.0,
+            end=2.5,
+        )
+
+        result = split_punctuated_sentence_info([sentence])
+
+        assert result == [sentence]
+
+    def test_keep_single_sentence_unchanged(self):
+        sentence = SentenceInfo(
+            text="Alo alo chưa có nhiều câu.",
+            start=0.0,
+            end=10.0,
+        )
+
+        result = split_punctuated_sentence_info([sentence])
+
+        assert result == [sentence]

@@ -38,6 +38,15 @@ class FakeASR:
         ]
 
 
+class FakePunc:
+    """Fake punctuation model returning multiple sentences for the first chunk."""
+
+    def restore(self, text):
+        if text == "xin chao":
+            return "Xin chào. Mình họp nhé."
+        return "Hôm nay họp."
+
+
 def test_transcribe_builds_transcript_from_vad_and_asr_segments():
     audio = np.zeros(4 * 16000, dtype=np.float32)
     vad = FakeVAD()
@@ -57,3 +66,30 @@ def test_transcribe_builds_transcript_from_vad_and_asr_segments():
     assert [len(chunk) for chunk in asr.chunks] == [19200, 22400]
     assert vad.detected_audio.shape == audio.shape
     assert vad.detected_audio.dtype == np.float32
+
+
+def test_transcribe_splits_long_punctuated_segments():
+    audio = np.zeros(4 * 16000, dtype=np.float32)
+    vad = FakeVAD()
+    asr = FakeASR()
+    pipeline = MeetPipeline(asr_model=asr, vad_model=vad, punc_model=FakePunc())
+
+    result = pipeline.transcribe(audio, key="sample_vi", language="vi")
+
+    assert [s.text for s in result.sentence_info] == [
+        "Xin chào. Mình họp nhé.",
+        "Hôm nay họp.",
+    ]
+
+    vad.detect = lambda audio: [Segment(0, 6000)]
+    asr.recognize = lambda chunks, **kwargs: [
+        {"text": "xin chao", "timestamp": []},
+    ]
+    result = pipeline.transcribe(audio, key="sample_vi", language="vi")
+
+    assert [s.text for s in result.sentence_info] == [
+        "Xin chào.",
+        "Mình họp nhé.",
+    ]
+    assert result.sentence_info[0].start == 0.0
+    assert result.sentence_info[-1].end == 6.0

@@ -1,7 +1,12 @@
 """VAD timestamp utilities — merge and align segment timestamps."""
 
 from __future__ import annotations
+import re
+
 from meetasr.schemas import Segment, SentenceInfo
+
+
+_SENTENCE_END_RE = re.compile(r"[^.!?。！？…]+(?:[.!?。！？…]+|$)")
 
 
 def merge_vad_segments(
@@ -131,3 +136,58 @@ def align_punctuated_timestamps(
             pass
 
     return aligned_ts
+
+
+def split_punctuated_sentence_info(
+    sentence_info: list[SentenceInfo],
+    min_segment_duration_s: float = 3.0,
+) -> list[SentenceInfo]:
+    """Split punctuated VAD-level sentences into smaller sentence items.
+
+    The ASR wrappers currently do not provide reliable word timestamps, so
+    each child sentence receives an estimated duration proportional to its
+    character length within the original segment.
+    """
+    split_sentences: list[SentenceInfo] = []
+    for sentence in sentence_info:
+        duration = sentence.end - sentence.start
+        parts = _split_text_by_sentence_end(sentence.text)
+        if duration < min_segment_duration_s or len(parts) <= 1:
+            split_sentences.append(sentence)
+            continue
+
+        total_weight = sum(_text_timing_weight(part) for part in parts)
+        if total_weight <= 0:
+            split_sentences.append(sentence)
+            continue
+
+        current_start = sentence.start
+        for index, part in enumerate(parts):
+            if index == len(parts) - 1:
+                current_end = sentence.end
+            else:
+                part_weight = _text_timing_weight(part)
+                part_duration = duration * (part_weight / total_weight)
+                current_end = current_start + part_duration
+
+            split_sentences.append(SentenceInfo(
+                text=part,
+                start=round(current_start, 2),
+                end=round(current_end, 2),
+                speaker=sentence.speaker,
+                char_timestamps=[],
+            ))
+            current_start = current_end
+
+    return split_sentences
+
+
+def _split_text_by_sentence_end(text: str) -> list[str]:
+    """Split text into non-empty sentence-like chunks and keep punctuation."""
+    parts = [match.group(0).strip() for match in _SENTENCE_END_RE.finditer(text)]
+    return [part for part in parts if part]
+
+
+def _text_timing_weight(text: str) -> int:
+    """Return a simple timing weight based on visible non-space characters."""
+    return len(re.sub(r"\s+", "", text))

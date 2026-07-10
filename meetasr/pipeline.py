@@ -12,7 +12,11 @@ import numpy as np
 
 from meetasr.schemas import TranscriptResult, MeetingReport, SentenceInfo, Segment
 from meetasr.utils.audio import load_audio
-from meetasr.utils.timestamp import merge_vad_segments, build_sentence_info
+from meetasr.utils.timestamp import (
+    build_sentence_info,
+    merge_vad_segments,
+    split_punctuated_sentence_info,
+)
 from meetasr.utils.download import download_model
 from meetasr.utils.misc import deep_update
 from meetasr.utils.diarization import chunk_segment, circle_pad, assign_speakers_by_overlap, compressed_seg, map_chars_to_speakers
@@ -107,6 +111,7 @@ class MeetPipeline:
         # Step 5: Punctuation
         if self.punc is not None:
             sentence_info = self._run_punc(sentence_info)
+            sentence_info = split_punctuated_sentence_info(sentence_info)
 
         full_text = " ".join(s.text for s in sentence_info)
 
