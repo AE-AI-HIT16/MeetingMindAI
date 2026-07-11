@@ -35,7 +35,9 @@ dependencies = [
     "uvicorn[standard]",
     "python-multipart",
     "pydantic>=2.0",
-    "sqlmodel",
+    # Database
+    "sqlmodel>=0.0.14",
+    "sqlalchemy",
     # LLM
     "openai>=1.0",
     # FunASR (for model weight reuse)

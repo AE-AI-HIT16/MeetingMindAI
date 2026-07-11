@@ -97,9 +97,54 @@
     <div class="dropzone">
       <h2 class="dropzone-title">Kéo thả tệp âm thanh</h2>
       <p class="dropzone-note">Lưu ý: Chỉ hỗ trợ tải lên 1 tệp duy nhất mỗi lần</p>
-      <button class="btn-primary">Duyệt file</button>
+      <button class="btn-primary" id="btn-browse">Duyệt file</button>
+      <input type="file" id="file-input" accept="audio/*" style="display: none;">
     </div>
   </div>
 
+  <script>
+    document.addEventListener("DOMContentLoaded", () => {
+      const btnBrowse = document.getElementById("btn-browse");
+      const fileInput = document.getElementById("file-input");
+
+      btnBrowse.addEventListener("click", () => {
+        fileInput.click();
+      });
+
+      fileInput.addEventListener("change", async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        // Thay đổi giao diện báo đang xử lý
+        btnBrowse.textContent = "Đang tải lên...";
+        btnBrowse.disabled = true;
+        btnBrowse.style.backgroundColor = "#94A3B8";
+
+        const formData = new FormData();
+        formData.append("file", file);
+
+        try {
+          const response = await fetch("http://127.0.0.1:8000/v1/meeting/summarize", {
+            method: "POST",
+            body: formData
+          });
+
+          if (!response.ok) throw new Error("Lỗi khi tải file lên");
+
+          const data = await response.json();
+          // Thành công! Chuyển ngay sang màn hình workspace
+          if (data.meeting_id) {
+            window.location.href = `3_workspace.html?id=${data.meeting_id}`;
+          }
+        } catch (error) {
+          console.error(error);
+          alert("Có lỗi xảy ra khi tải file!");
+          btnBrowse.textContent = "Duyệt file";
+          btnBrowse.disabled = false;
+          btnBrowse.style.backgroundColor = "";
+        }
+      });
+    });
+  </script>
 </body>
 </html>
