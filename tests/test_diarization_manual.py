@@ -25,11 +25,11 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
 
 # ──────────────────────────────────────────────────────────────────
-# CONFIG — chỉnh ở đây nếu cần
+# CONFIG 
 # ──────────────────────────────────────────────────────────────────
 VAD_MODEL    = "fsmn-vad"
 SPK_MODEL    = "cam++"
-DEVICE       = "cpu"        # đổi sang "cuda" nếu có GPU
+DEVICE       = "cpu"        
 HUB          = "ms"         # ModelScope
 SAMPLE_RATE  = 16000
 # ──────────────────────────────────────────────────────────────────

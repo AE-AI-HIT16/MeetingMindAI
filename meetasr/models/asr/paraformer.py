@@ -39,7 +39,7 @@ class Paraformer(AbsASR):
         self._model = None
         self._kwargs = kwargs
 
-    def _ensure_loaded(self):
+    def _ensure_loaded(self) -> None:
         """Lazy-load the Paraformer model via FunASR internals."""
         if self._model is not None:
             return

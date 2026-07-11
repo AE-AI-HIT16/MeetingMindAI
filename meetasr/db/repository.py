@@ -15,7 +15,8 @@ def create_meeting(
     title: str, 
     audio_path: str, 
     asr_model: Optional[str] = None, 
-    llm_model: Optional[str] = None
+    llm_model: Optional[str] = None,
+    duration: float = 0.0
 ) -> Meeting:
     """Create a new pending meeting record."""
     meeting = Meeting(
@@ -24,6 +25,7 @@ def create_meeting(
         audio_path=audio_path,
         asr_model=asr_model,
         llm_model=llm_model,
+        duration=duration,
         status="pending"
     )
     db.add(meeting)
@@ -132,3 +134,18 @@ def save_meeting_result(db: Session, meeting_id: str, report_data: MeetingReport
         db.rollback()
         logger.error(f"Failed to save meeting results for {meeting_id}: {e}")
         raise
+
+
+def get_meetings(db: Session, skip: int = 0, limit: int = 20) -> List[Meeting]:
+    """Retrieve a list of meetings with pagination."""
+    return db.exec(select(Meeting).order_by(Meeting.created_at.desc()).offset(skip).limit(limit)).all()
+
+
+def delete_meeting(db: Session, meeting_id: str) -> bool:
+    """Delete a meeting and all its associated records (cascade)."""
+    meeting = db.get(Meeting, meeting_id)
+    if meeting:
+        db.delete(meeting)
+        db.commit()
+        return True
+    return False

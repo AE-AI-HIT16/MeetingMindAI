@@ -129,3 +129,112 @@ def assign_speakers_by_overlap(
             s.speaker = last_spk
 
     return sentence_info
+
+def map_chars_to_speakers(
+        char_timestamps: list[list[int]],
+        diar_segs: list[list],
+) -> list[int | None]:
+    """Map character-level timestamps to speaker IDs.
+
+    Args:
+        char_timestamps: List of character start and end times in ms.
+        diar_segs: Diarization segments [[start_s, end_s, speaker_id], ...].
+
+    Returns:
+        List of speaker IDs corresponding to each character.
+    """
+    char_speakers: list[int | None] = []
+    for ts in char_timestamps:
+        char_start_s = ts[0] / 1000.0
+        char_end_s = ts[1] / 1000.0
+        best_spk = None
+        best_overlap = 0.0
+        for seg_st, seg_ed, spk_id in diar_segs:
+            overlap=min(char_end_s, seg_ed) - max(char_start_s, seg_st)
+            if overlap > best_overlap:
+                best_overlap = overlap
+                best_spk = spk_id
+        char_speakers.append(best_spk)
+    return char_speakers
+
+
+def _fill_none_gaps(char_speakers: list[int | None]) ->list[int | None]:
+    """Fill None gaps in char_speakers with the last known speaker."""
+    result = list(char_speakers)
+    last_valid = None
+    for i, spk in enumerate(result):
+        if spk is not None:
+            last_valid = spk
+        else:
+            result[i] = last_valid
+    last_valid = None
+    for i in range(len(result) -1, -1 , -1):
+        if result[i] is not None:
+            last_valid = result[i]
+        else:
+            result[i] = last_valid
+    return result
+
+def _merge_short_groups(
+        groups: list[tuple[int,int,int]],
+        min_chars: int =3,
+) -> list[tuple[int,int,int]]:
+    if len(groups) <2:
+        return groups
+    merged = [groups[0]]
+    for start_idx, end_idx, spk in groups[1:]:
+        length = end_idx - start_idx
+        if length < min_chars:
+            merged[-1] = (merged[-1][0], end_idx, merged[-1][2])
+        else:
+            merged.append((start_idx, end_idx, spk))
+    return merged
+def split_at_speaker_turns(
+    sentence: "SentenceInfo",
+    char_speakers: list[int | None],
+    min_chars: int = 3,
+) -> list["SentenceInfo"]:
+    """Split a sentence into multiple sub-sentences at speaker turns.
+
+    Args:
+        sentence: SentenceInfo object containing text and character timestamps.
+        char_speakers: List of speaker IDs for each character.
+        min_chars: Minimum number of characters for a valid speaker segment.
+
+    Returns:
+        List of new SentenceInfo objects divided by speaker turns.
+    """
+    from meetasr.schemas import SentenceInfo
+    if not char_speakers or not sentence.char_timestamps:
+        return [sentence]
+    char_speakers = _fill_none_gaps(char_speakers)
+    if all(s is None for s in char_speakers):
+        return [sentence]
+    groups: list[tuple[int, int, int]] = []
+    current_spk = char_speakers[0]
+    start_idx = 0
+    for i in range(1, len(char_speakers)):
+        if char_speakers[i] != current_spk:
+            groups.append((start_idx,i,current_spk))
+            current_spk = char_speakers[i]
+            start_idx =i
+    groups.append((start_idx,len(char_speakers),current_spk))
+    groups = _merge_short_groups(groups, min_chars)
+    text = sentence.text
+    sub_sentences: list["SentenceInfo"] = []
+    for grp_start, grp_end, spk in groups:
+        sub_text = text[grp_start:grp_end].strip()
+        if not sub_text:
+            continue
+        sub_ts = sentence.char_timestamps[grp_start: grp_end]
+        if not sub_ts:
+            continue
+        sub_stent = SentenceInfo(
+            text=sub_text,
+            start = sub_ts[0][0]/ 1000.0,
+            end = sub_ts[-1][1]/ 1000.0,
+            speaker = spk,
+            char_timestamps = sub_ts,
+        )
+        sub_sentences.append(sub_stent)
+    return sub_sentences if sub_sentences else [sentence]

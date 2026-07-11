@@ -88,5 +88,5 @@ def safe_remove(path: str) -> None:
     """Remove a temporary file, ignoring errors."""
     try:
         os.remove(path)
-    except Exception:
-        logger.debug(f"Failed to remove temp file: {path}")
+    except Exception as e:
+        logger.debug(f"Failed to remove temp file {path}: {e}")
