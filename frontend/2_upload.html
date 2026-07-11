@@ -89,17 +89,44 @@
       background-color: var(--primary-blue-hover);
       transform: translateY(-1px);
     }
+
+    .dropzone.is-dragging {
+      background-color: var(--primary-blue-light);
+      border-color: var(--primary-blue-hover);
+      transform: translateY(-2px);
+    }
+
+    .feedback {
+      margin-top: 16px;
+      font-size: 14px;
+      min-height: 20px;
+    }
+
+    .feedback.info {
+      color: var(--primary-blue-hover);
+    }
+
+    .feedback.success {
+      color: #15803d;
+    }
+
+    .feedback.error {
+      color: #dc2626;
+    }
   </style>
 </head>
 <body>
 
   <div class="upload-container">
-    <div class="dropzone">
+    <div class="dropzone" id="dropzone">
       <h2 class="dropzone-title">Kéo thả tệp âm thanh</h2>
       <p class="dropzone-note">Lưu ý: Chỉ hỗ trợ tải lên 1 tệp duy nhất mỗi lần</p>
-      <button class="btn-primary">Duyệt file</button>
+      <button class="btn-primary" id="pick-file-button" type="button">Duyệt file</button>
+      <input id="file-input" type="file" accept="audio/*" hidden />
+      <div class="feedback" id="upload-status"></div>
     </div>
   </div>
 
+  <script src="app.js"></script>
 </body>
 </html>
