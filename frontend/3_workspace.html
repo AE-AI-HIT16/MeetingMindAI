@@ -281,7 +281,7 @@
           btnProcess.style.cursor = "not-allowed";
           transcriptEl.innerHTML = "<p>AI đang bóc băng, vui lòng đợi trong giây lát...</p>";
           resultListEl.innerHTML = "";
-          
+
           // Cứ 3 giây check lại một lần
           const interval = setInterval(async () => {
             const statusRes = await fetch(`http://127.0.0.1:8000/v1/meeting/${meetingId}/status`);
