@@ -85,9 +85,11 @@ Client → Server (sau `done`): qua REST — `POST /v1/documents/{id}/finalize` 
   gọi LLM: *"đây là phần transcript tiếp theo + outline hiện tại → viết/cập nhật section"*.
 - Docs được quản lý dạng **danh sách section** (id, heading, markdown) — LLM chỉ được thêm
   section mới hoặc sửa section cuối, không viết lại toàn bộ → UI cập nhật mượt, chi phí token thấp.
-- Kết thúc: **(a) Tóm tắt** → chạy `MeetingSummarizer` (Phase 1) trên toàn transcript, sinh docs
-  tóm tắt có cấu trúc; **(b) Toàn văn** → ghép các section + hiệu đính lần cuối (1 lượt LLM
-  làm mượt chuyển đoạn, không đổi nội dung).
+- Kết thúc: **(a) Tóm tắt** → chạy `DocumentPlanner` (xem
+  [14_document_planner_design.md](14_document_planner_design.md)) trên toàn transcript — LLM tự
+  đề xuất outline phù hợp với chính nội dung (không khoá cứng theo "cuộc họp"), rồi map-reduce
+  viết từng mục; **(b) Toàn văn** → ghép các section + hiệu đính lần cuối (1 lượt LLM làm mượt
+  chuyển đoạn, không đổi nội dung).
 
 ### 3.3 Lưu trữ
 
@@ -123,39 +125,48 @@ Client → Server (sau `done`): qua REST — `POST /v1/documents/{id}/finalize` 
 
 ## 5. Phân công nhiệm vụ (3 AI Engineer + 1 Data Engineer)
 
-> Frontend Next.js do **trưởng nhóm (duykhanh)** đảm nhiệm chính theo doc 12; các thành viên
-> hỗ trợ tích hợp API ở M6.
+> **Cập nhật trạng thái:** một bản v1 chạy được **end-to-end** đã tồn tại — backend (upload →
+> chunk transcribe → speaker matching → finalize → export markdown) VÀ frontend Next.js đã nối
+> thật vào nhau (không còn mock), xem [13_phase2_limitations_and_fixes.md](13_phase2_limitations_and_fixes.md)
+> để biết chính xác phần nào đã xong / còn thiếu. **Việc của 4 người dưới đây là hoàn thiện và làm
+> cứng cáp phần đã có** theo các đề xuất trong doc 13 + 14 — không phải xây từ đầu. Cột **"Đã có sẵn"**
+> chỉ đúng file hiện tại trong repo; cột **"Frontend liên quan"** để mỗi người biết UI của phần
+> mình nằm ở đâu, không cần hỏi lại "frontend đâu rồi".
 
 ### Sơ đồ phụ thuộc
 
 ```
-[Data Eng: Upload + Storage + DB (M0)] ──► [AI Eng 1: Chunk worker (M1)] ──► [AI Eng 3: WS events (M2)]
-                                                                                      │
-[AI Eng 2: Doc generation + Finalize (M3, M4)] ◄──────────────────────────────────────┘
+[Data Eng: Storage/Media/DB — đã có khung] ──► [AI Eng 1: Worker + Speaker — đã có v1] ──► [AI Eng 3: WS/Route — đã có v1]
+                                                                                                    │
+[AI Eng 2: DocumentPlanner (đã có v1) + Export (chưa có)] ◄────────────────────────────────────────┘
                      │
                      ▼
-[AI Eng 2 + Data Eng: Export + Library (M5)] ──► [Cả nhóm: tích hợp frontend (M6), polish (M7)]
+        [Cả nhóm: hoàn thiện theo doc 13, polish M7, review frontend cùng nhau]
 ```
 
 ### Bảng nhiệm vụ chi tiết
 
-| Vai trò | Milestone | File phụ trách | Nhiệm vụ cụ thể | Verify |
+| Vai trò | Đã có sẵn (v1, review & hoàn thiện) | Việc cần làm tiếp (theo doc 13/14) | Frontend liên quan | Verify |
 |---|---|---|---|---|
-| **AI Engineer 1**<br>*Media & Chunk Processing* | M1, hỗ trợ M7 | `meetasr/processing/chunker.py`, `meetasr/processing/worker.py` (mới) | 1. Cắt audio thành chunk ~30s **theo ranh giới VAD** (không cắt giữa câu).<br>2. Worker chạy nền: với mỗi chunk gọi pipeline Phase 1 (ASR + punc + diarization), phát callback `on_segment`.<br>3. Giữ **nhất quán speaker giữa các chunk**: embedding CAM++ của segment mới so với centroid các speaker đã thấy (cosine > 0.7 → cùng người).<br>4. Đo và tối ưu: chunk đầu tiên phải ra kết quả < 15s sau khi job bắt đầu. | Test file 10 phút: transcript đầy đủ khớp bản chạy offline 1 lần; speaker nhất quán xuyên chunk; segments ghi DB dần |
-| **AI Engineer 2**<br>*LLM Doc Generation & Export* | M3, M4, M5 (export) | `meetasr/llm/doc_generator.py`, `meetasr/llm/prompts/doc_*.txt`, `meetasr/export/` (mới) | 1. Thiết kế prompt tiếng Việt: transcript delta + outline hiện tại → section markdown (JSON: `{section_id, heading, markdown}`).<br>2. Quản lý danh sách section, phát hiện chuyển chủ đề, chỉ sửa section cuối/thêm mới.<br>3. Finalize 2 mode: `summary` (tái dùng `MeetingSummarizer`) và `full_text` (ghép + hiệu đính).<br>4. Export markdown → PDF (weasyprint, nhúng font tiếng Việt) và DOCX. | Docs sinh từ transcript mẫu 30 phút: heading đúng chủ đề, không lặp/mất nội dung; PDF hiển thị đúng dấu tiếng Việt |
-| **AI Engineer 3**<br>*Backend API & Realtime Channel* | M2, M6, M7 | `meetasr/api/routes/jobs.py`, `routes/documents.py`, `meetasr/processing/queue.py` (mới), sửa `api/app.py` | 1. Job queue: 1 GPU worker tuần tự, nhiều job xếp hàng, cập nhật `status/progress`.<br>2. WS `/v1/jobs/{id}/events`: nhận callback từ worker (AI Eng 1) + doc generator (AI Eng 2), đẩy sự kiện đúng protocol mục 3.1; client vào giữa chừng nhận lại đủ sự kiện đã qua (replay từ DB).<br>3. REST: finalize, list/get documents.<br>4. M6: hỗ trợ frontend tích hợp (CORS, OpenAPI schema chuẩn để codegen TypeScript). | 2 job đồng thời: 1 chạy 1 chờ, event loop không block; client reconnect vẫn nhận đủ transcript |
-| **Data Engineer**<br>*Storage, DB & Library* | M0, M5 (library), M7 | `meetasr/storage/backend.py` (mới), `meetasr/db/models.py`, `db/repository.py` (mở rộng), `meetasr/api/routes/sources.py` | 1. Upload endpoint (multipart, giới hạn dung lượng, validate định dạng), lưu file có tổ chức, gọi ffmpeg tách audio 16kHz mono.<br>2. `StorageBackend` interface + implementation local filesystem.<br>3. 4 bảng DB mới (mục 3.3) + repository CRUD; migration từ schema Phase 1.<br>4. Serve media với HTTP Range; API Library (list sources kèm document status).<br>5. M7: xóa source cascade (file + DB), thống kê dung lượng. | Upload mp4 1GB không tràn RAM (stream to disk); `<video>` tua được; xóa source không để rác file |
+| **AI Engineer 1**<br>*Media & Speaker* | `meetasr/media.py` (ffmpeg extract), `meetasr/realtime/worker.py` (chunk 30s tuần tự), `meetasr/realtime/speaker.py` (`OnlineSpeakerMatcher` — centroid cosine + EMA, đã khắc phục speaker không nhất quán) | 1. Đổi cắt chunk cố định 30s → cắt theo **ranh giới VAD** (doc 13 §4).<br>2. Tinh chỉnh `THRESHOLD` trong `speaker.py` bằng dữ liệu thật.<br>3. **Re-cluster offline cuối phiên** (doc 13 §5): dùng `CommonClustering` sẵn có, phát sự kiện `speaker_update` mới. | `useJobEvents.ts` cần thêm case xử lý `speaker_update` (đổi nhãn speaker đã hiện) — hook đã có chỗ `switch(e.type)` để thêm case này. | Test file 2 người nói ≥ 2 phút: nhãn ổn định xuyên suốt; sau re-cluster khớp bản offline Phase 1 |
+| **AI Engineer 2**<br>*LLM Document Planner & Export* | `meetasr/llm/planner.py` (`DocumentPlanner` — Plan→Write, outline tự sinh theo nội dung, thay `MeetingSummarizer` cho Phase 2), `meetasr/llm/prompts/plan_vi.txt` + `write_section_vi.txt`, `meetasr/schemas_doc.py` (`DocSection`/`DocumentReport`), nối sẵn vào `doc_gen.py` + route finalize | 1. **Doc realtime bằng LLM thật** (doc 13 §3 + doc 14 mục 7.2): hiện `doc_delta` trong `worker.py` chỉ ghép text thô — gọi `planner.plan_only()`/`write_one_section()` theo ngưỡng ký tự tích luỹ.<br>2. **Export PDF/DOCX** (doc 13 §6): thư mục `meetasr/export/` mới, weasyprint + font Noto Sans, endpoint export.<br>3. Chạy test plan ở doc 14 mục 10 (outline đa dạng theo domain, không bịa mục rỗng, đếm số lần gọi LLM cho transcript dài). | `DocumentView.tsx` đã có nút "Xuất" chỗ (`ExportMenu` — hiện chỉ tải media) — nối vào endpoint export khi xong; `sec.kind` đã có chỗ trong `types.ts`/`useJobEvents.ts` (`DocSection.kind?`) chờ backend gửi để chọn icon theo loại mục. | Transcript 30 phút → outline khác nhau theo loại nội dung (không luôn là summary/topics/actions/decisions); PDF đọc đúng dấu tiếng Việt |
+| **AI Engineer 3**<br>*Backend API & Realtime Channel* | `meetasr/api/routes/realtime.py` (toàn bộ REST + WS `/v1/jobs/{id}/events` với **replay từ DB** khi reconnect), `meetasr/realtime/events.py` (EventBus), `meetasr/realtime/worker.py` (hàng đợi tuần tự 1-consumer — đã khắc phục tranh GPU) | 1. **Backpressure** (doc 13 §8): `asyncio.Queue` trong `events.py` hiện không giới hạn — thêm `maxsize` + chiến lược rớt bớt sự kiện cũ.<br>2. Giới hạn dung lượng khi **stream ghi đĩa** (`storage.save_stream`), không chỉ đọc hết vào RAM rồi mới check.<br>3. Endpoint xem vị trí hàng đợi (nice-to-have) khi nhiều job xếp hàng. | `frontend-next/src/lib/api.ts` + `hooks/useJobEvents.ts` đã nối thật vào các route này (không còn mock) — khi đổi protocol (vd thêm `speaker_update`), sửa **cả 2 phía cùng lúc**, dùng `types.ts` làm hợp đồng chung. | 3 upload liên tiếp → xếp hàng đúng thứ tự, `/v1/health` vẫn phản hồi nhanh khi đang xử lý; client ngắt kết nối giữa chừng rồi nối lại không mất dữ liệu |
+| **Data Engineer**<br>*Storage, DB & Library* | `meetasr/storage/backend.py` (local filesystem, đã tách interface), `meetasr/db/realtime_models.py` (`Source`/`TranscriptSegment`/`Document`), route `GET /v1/sources`, `GET /v1/sources/{id}/media` (hỗ trợ Range) | 1. **Chuyển sang MinIO/S3** (doc 13 §7): thêm `S3Storage` cùng interface (`docker-compose.yml` đã có MinIO sẵn), đổi `/media` sang trả presigned URL.<br>2. Endpoint xoá source cascade + thống kê dung lượng (M7).<br>3. Data model cho `speaker_update` mapping nếu AI Eng 1 cần lưu lịch sử re-cluster. | Trang **Thư viện** (`frontend-next/src/app/page.tsx`) đã fetch thật `GET /v1/sources` + poll 5s; **Document viewer** (`DocumentView.tsx`) đã phát `<video>/<audio>` qua `api.mediaUrl()` — khi đổi sang presigned URL S3, chỉ cần `api.mediaUrl()` trả URL khác, component không cần sửa. | Upload mp4 1GB không tràn RAM; sau khi chuyển S3, `<video>` vẫn tua được qua presigned URL; xoá source không để rác file lẫn record MinIO |
 
 ### Lịch gợi ý (6 tuần)
 
-| Tuần | AI Eng 1 | AI Eng 2 | AI Eng 3 | Data Eng | Trưởng nhóm (FE) |
+> **Lưu ý:** lịch dưới đây viết cho lúc bắt đầu từ số 0. Vì v1 đã chạy end-to-end (backend + frontend
+> đã nối thật), nhóm bắt đầu từ **Tuần 1 = đọc code v1 + doc 13/14**, rồi làm các mục "còn lại" ở
+> bảng trên — có thể rút ngắn hơn 6 tuần tuỳ năng lực đã có sẵn.
+
+| Tuần | AI Eng 1 | AI Eng 2 | AI Eng 3 | Data Eng | Frontend (cả nhóm hỗ trợ) |
 |---|---|---|---|---|---|
-| 1 | Thiết kế chunker, PoC cắt theo VAD | Thiết kế prompt, PoC sinh section từ transcript mẫu | Chốt protocol WS + OpenAPI spec | M0: upload + ffmpeg + DB | Setup Next.js, design system (doc 12 — F0, F1) |
-| 2 | M1: worker + speaker consistency | M3: doc generator hoàn chỉnh | M2: WS events + replay | Storage backend + serve media | Trang Upload + Library (F2) |
-| 3 | Tối ưu latency chunk đầu | M4: finalize 2 mode | Job queue + REST documents | Library API | Trang Processing realtime (F3) |
-| 4 | Hỗ trợ tích hợp, test E2E backend | M5: export PDF/DOCX | Tích hợp callback 2 module | M5: library hoàn chỉnh | Document viewer + export (F4) |
-| 5 | — M6: tích hợp frontend ↔ backend, demo end-to-end — | | | | |
-| 6 | — M7: polish (đồng thời, xóa, lỗi), fix bug, chuẩn bị demo — | | | | |
+| 1 | Đọc `worker.py`/`speaker.py`, đo tỉ lệ đúng speaker trên data thật | Đọc `planner.py` + doc 14, chạy test plan mục 10 doc 14 | Đọc `realtime.py`/`events.py`, đo hành vi reconnect thật | Đọc `storage/backend.py`, lên kế hoạch S3Storage | Đã có sẵn (v1) — rà soát UI thật với backend thật, ghi lại bug |
+| 2 | Cắt chunk theo VAD (doc 13 §4) | Nối `DocumentPlanner` vào doc realtime (`worker.py` doc_delta) | Thêm backpressure cho `EventBus` (doc 13 §8) | Viết `S3Storage`, đổi `/media` sang presigned URL | Thêm xử lý `speaker_update` trong `useJobEvents.ts` |
+| 3 | Re-cluster offline cuối phiên (doc 13 §5) + phát `speaker_update` | Export PDF/DOCX (doc 13 §6) | Giới hạn dung lượng khi stream ghi đĩa | Xoá cascade + thống kê dung lượng (M7) | Nối nút Export trong `DocumentView.tsx` vào endpoint mới |
+| 4 | — Cả nhóm: test tích hợp lại toàn bộ luồng sau khi mỗi người xong phần mình — | | | | |
+| 5 | — Polish chung: tinh chỉnh ngưỡng speaker, đo chi phí LLM/latency, sửa bug tích hợp — | | | | |
+| 6 | — Buffer, demo thử với data thật, chuẩn bị demo cuối — | | | | |
 
 ## 6. Rủi ro chính
 
