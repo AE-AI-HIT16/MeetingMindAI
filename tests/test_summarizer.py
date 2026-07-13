@@ -2,6 +2,7 @@
 
 import json
 import pytest
+from unittest.mock import patch, MagicMock
 from meetasr.llm.abs_llm import AbsLLMClient
 from meetasr.llm.summarizer import MeetingSummarizer
 from meetasr.schemas import TranscriptResult, SentenceInfo

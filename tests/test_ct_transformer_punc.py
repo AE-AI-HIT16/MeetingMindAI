@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from meetasr.models.punc.ct_transformer import CTTransformerPunc
 from meetasr.register import tables
 
