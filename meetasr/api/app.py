@@ -16,8 +16,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from meetasr import __version__
 from meetasr.auto.auto_pipeline import AutoPipeline
 from meetasr.api.dependencies import set_pipeline, CONFIG_PATH
-from meetasr.api.routes import health, transcribe, summarize, db_routes
+from meetasr.api.routes import health, transcribe, summarize, db_routes, realtime
 from meetasr.db.connection import init_db
+from meetasr.streaming.model_manager import ModelManager
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -49,6 +50,13 @@ async def lifespan(app: FastAPI):
             f"Config '{CONFIG_PATH}' not found. "
             "Server starts without pipeline — set MEETASR_CONFIG."
         )
+
+    # Load model trước
+    manager = ModelManager()
+
+    await manager.load_all()
+
+    app.state.models = manager
 
     yield  # server is now running and serving requests
 
@@ -83,6 +91,7 @@ app.include_router(health.router)
 app.include_router(transcribe.router)
 app.include_router(summarize.router)
 app.include_router(db_routes.router)
+app.include_router(realtime.router)
 
 
 # ------------------------------------------------------------------
