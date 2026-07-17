@@ -128,11 +128,11 @@
       border-radius: 6px;
       transition: background 0.2s;
     }
-    
+
     .btn-delete:hover {
       background: #FEE2E2;
     }
-    
+
     .btn-delete svg {
       width: 18px;
       height: 18px;
@@ -159,7 +159,7 @@
     document.addEventListener("DOMContentLoaded", async () => {
       const grid = document.querySelector(".grid");
       const addCard = document.querySelector(".card-add");
-      
+
       // Chuyển trang khi bấm Thêm mới
       addCard.addEventListener("click", () => {
         window.location.href = "2_upload.html";
@@ -180,7 +180,7 @@
           const card = document.createElement("div");
           card.className = "card card-file";
           card.style.cursor = "pointer";
-          
+
           // Khi bấm vào file, chuyển sang Workspace với ID tương ứng
           card.onclick = () => {
             window.location.href = `3_workspace.html?id=${meeting.id}`;
@@ -195,7 +195,7 @@
             </div>
             <div class="filename">${meeting.title || "Unknown File"}</div>
           `;
-          
+
           const delBtn = card.querySelector(".btn-delete");
           delBtn.onclick = async (e) => {
             e.stopPropagation(); // Ngăn sự kiện click nhảy sang mở card
@@ -213,7 +213,7 @@
               }
             }
           };
-          
+
           grid.appendChild(card);
         });
       } catch (error) {
