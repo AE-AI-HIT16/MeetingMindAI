@@ -42,6 +42,7 @@ class MeetPipeline:
         punc_model=None,
         spk_model=None,
         llm_summarizer=None,
+        doc_planner=None,
         device: str = "cpu",
     ):
         """Initialize MeetPipeline with pre-built model instances.
@@ -59,6 +60,7 @@ class MeetPipeline:
         self.punc = punc_model
         self.spk = spk_model
         self.summarizer = llm_summarizer
+        self.doc_planner = doc_planner
         self.device = device
 
     # ------------------------------------------------------------------
