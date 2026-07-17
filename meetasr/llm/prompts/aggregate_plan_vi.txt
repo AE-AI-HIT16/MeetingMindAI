@@ -1,0 +1,41 @@
+Dưới đây là tóm tắt cấu trúc từng đoạn của một transcript dài:
+{structured_summaries}
+
+Hãy:
+1. Xác định thể loại nội dung (vd: "Cuộc họp công việc", "Bài giảng", "Podcast"...)
+2. Đề xuất outline tối đa 6 mục dựa trên những gì THỰC SỰ xuất hiện trong các tóm tắt.
+3. Chỉ đưa một mục vào outline nếu có bằng chứng rõ ràng trong ít nhất một đoạn.
+4. Với mỗi mục, khai báo "source_keys": danh sách TẤT CẢ các nhãn (keys) từ dữ liệu
+  Bước 1 mà mục đó cần gom để viết bài. Gộp các nhãn đồng nghĩa vào cùng một mục
+  (vd: "doanh_thu", "revenue", "financial_data" đều thuộc mục tài chính).
+5. Nếu nội dung quá ngắn hoặc chỉ là trò chuyện vô nghĩa, chỉ tạo duy nhất 1 mục "summary".
+
+Trả JSON (Bắt buộc trả CHUỖI JSON THUẦN TÚY, KHÔNG dùng markdown code block, bắt đầu bằng '{{' và kết thúc bằng '}}'):
+{{
+  "content_kind": "...",
+  "outline": [
+    {{
+      "id": "s1",
+      "heading": "Tóm tắt",
+      "kind": "summary",
+      "source_keys": ["summary"]
+    }},
+    {{
+      "id": "s2",
+      "heading": "...",
+      "kind": "...",
+      "source_keys": ["key1", "key2_dong_nghia", ...]
+    }}
+  ]
+}}
+
+Quy tắc cho source_keys:
+- Liệt kê TẤT CẢ các nhãn từ dữ liệu Bước 1 mà mục này cần dùng.
+- Gộp nhãn đồng nghĩa vào cùng một mục (vd: "doanh_thu" và "revenue" → cùng mục tài chính).
+- Luôn bao gồm nhãn kind trong source_keys.
+- Nếu mục là "summary", source_keys = ["summary"].
+
+Quy tắc cấu trúc:
+- Trường "id" phải là duy nhất cho mỗi mục (s1, s2, s3...).
+- Nhãn "kind" ưu tiên: summary, key_points, action_items, decisions, quotes, timeline, glossary, open_questions, people. Nếu cần loại khác, đặt tự do.
+- Mục đầu tiên luôn là "summary".

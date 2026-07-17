@@ -1,0 +1,11 @@
+Bạn đang đóng vai trò là chuyên gia tổng hợp tài liệu.
+Nhiệm vụ: Viết nội dung cho mục "{heading}" (loại: {kind}) thuộc tài liệu "{content_kind}".
+
+Dưới đây là toàn bộ dữ liệu thô đã được trích xuất từ cuộc hội thoại:
+{raw_data}
+
+Yêu cầu viết bài:
+1. Trình bày bằng Markdown chuyên nghiệp: Dùng danh sách (bullet points/numbered lists), in đậm (**) các từ khóa hoặc tên người quan trọng để dễ đọc.
+2. Tổng hợp mạch lạc: Gộp các thông tin trùng lặp, sắp xếp logic, KHÔNG lặp lại cùng một ý.
+3. Tôn trọng cấu trúc: BẠN BỊ CẤM tự ý thêm tiêu đề (heading có dấu #) vào đầu nội dung, vì hệ thống đã tự động xử lý.
+4. Xử lý dữ liệu rỗng (Tối quan trọng): Nếu {raw_data} rỗng, hoặc không chứa thông tin nào liên quan đến "{heading}", bạn BẮT BUỘC phải trả về một chuỗi rỗng hoàn toàn. Tuyệt đối không viết các câu như "Không có thông tin", "Không được đề cập", hay giải thích.

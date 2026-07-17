@@ -1,0 +1,25 @@
+Từ đoạn transcript sau, hãy trích xuất thông tin có cấu trúc.
+
+Đoạn transcript:
+{chunk}
+
+Trả về JSON (KHÔNG bao bọc trong markdown code block):
+{{
+  "summary": "Tóm tắt 1-2 câu nội dung đoạn này. Nếu đoạn này chỉ là rác/chào hỏi, để chuỗi rỗng ''",
+  "action_items": [
+    {{"task": "...", "who": "...", "deadline": "..."}}
+  ],
+  "decisions": [
+    {{"content": "...", "made_by": "..."}}
+  ],
+  "key_points": ["..."],
+  "quotes": ["..."],
+  "extra": {{
+    "ten_truong_thong_tin_dac_thu": "Nội dung (nếu đoạn này chứa thông tin quan trọng nhưng không thuộc các mục trên, ví dụ: thuật ngữ, ngân sách, số liệu)"
+  }}
+}}
+
+Quy tắc tối thượng:
+- Chỉ điền thông tin có bằng chứng rõ ràng trong transcript.
+- Nếu không có thông tin, trả về mảng rỗng [] hoặc chuỗi/dict rỗng "".
+- KHÔNG bịa nội dung. KHÔNG suy diễn ngoài những gì được nói.
