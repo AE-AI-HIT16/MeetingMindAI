@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 import numpy as np
 import pytest
 
@@ -44,6 +45,19 @@ def test_detect_empty_audio_returns_empty_without_loading_model():
     """Empty audio should return no speech segments and skip model loading."""
     vad = FsmnVAD()
     audio = np.array([], dtype=np.float32)
+
+    assert vad.detect(audio) == []
+
+
+def test_detect_short_audio_returns_empty_without_loading_model(monkeypatch):
+    """Audio too short for frontend frames should not reach FunASR."""
+    vad = FsmnVAD()
+    monkeypatch.setattr(
+        vad,
+        "_ensure_loaded",
+        lambda: pytest.fail("short audio must not load the model"),
+    )
+    audio = np.zeros(1599, dtype=np.float32)
 
     assert vad.detect(audio) == []
 

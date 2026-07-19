@@ -241,3 +241,17 @@ Phase 5 (runs in parallel with Phase 4+)
 - [ ] REST API endpoints operational
 - [ ] CLI `meetasr` executable
 - [ ] OpenAI + Ollama model integrations
+
+---
+
+## Next: Project Phase 2 — "NotebookLM for Audio/Video"
+
+The offline pipeline above ("Project Phase 1") is complete. Phase 2: upload
+video/audio → structured document generated **in realtime** (content streams in
+as the media is processed) → user picks **summary** or **full text** → export
+**PDF/DOCX**. Media and documents are stored in a web library, and the frontend
+is rebuilt with **Next.js + TypeScript**.
+
+- Plan, architecture & team tasks: [11_phase2_notebooklm_plan.md](11_phase2_notebooklm_plan.md) (milestones M0–M7)
+- Frontend rebuild plan: [12_frontend_nextjs_plan.md](12_frontend_nextjs_plan.md) (milestones F0–F5)
+- Background knowledge: [skills/06_realtime_streaming_skill.md](../skills/06_realtime_streaming_skill.md)

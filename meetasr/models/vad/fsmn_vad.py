@@ -97,7 +97,9 @@ class FsmnVAD(AbsVAD):
             List of Segment(start_ms, end_ms), sorted by start_ms.
         """
         self._validate_audio(audio)
-        if audio.size == 0:
+        # funasr's WavFrontendOnline requires at least enough samples for lfr_m frames
+        # Usually ~400-800 samples minimum at 16kHz. We use 1600 (100ms) to be safe.
+        if audio.size < 1600:
             return []
 
         self._ensure_loaded()
