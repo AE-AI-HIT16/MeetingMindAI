@@ -20,6 +20,10 @@ from meetasr.api.routes import health, transcribe, summarize, db_routes, realtim
 from meetasr.db.connection import init_db
 from meetasr.streaming.model_manager import ModelManager
 
+# --- Phase 2 (AI Engineer 3) ---
+from meetasr.realtime.events import EventBus
+from meetasr.realtime.job_queue import RealtimeJobQueue
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -58,11 +62,25 @@ async def lifespan(app: FastAPI):
 
     app.state.models = manager
 
+    # --- Phase 2 Startup (AI Engineer 3) ---
+    # Khởi tạo EventBus và JobQueue, lưu vào app.state để các route truy cập
+    event_bus = EventBus()
+    app.state.event_bus = event_bus
+
+    job_queue = RealtimeJobQueue(event_bus=event_bus)
+    app.state.job_queue = job_queue
+    job_queue.start()  # khởi động consumer coroutine nền
+    logger.info("Phase 2: EventBus and RealtimeJobQueue started.")
+
     yield  # server is now running and serving requests
 
     # --- SHUTDOWN ---
     logger.info("Shutting down... Cleaning up ML models and freeing VRAM.")
     set_pipeline(None)  # release reference so GC can free RAM/VRAM
+
+    # --- Phase 2 Shutdown (AI Engineer 3) ---
+    await job_queue.stop()
+    logger.info("Phase 2: RealtimeJobQueue stopped.")
 
 
 # ------------------------------------------------------------------
