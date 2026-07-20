@@ -1,6 +1,7 @@
 """Tests for audio loading utilities."""
 
 import io
+import subprocess
 import numpy as np
 import pytest
 from meetasr.utils.audio import load_audio, SAMPLE_RATE
@@ -49,3 +50,41 @@ class TestLoadAudio:
         assert result.dtype == np.float32
         assert result.ndim == 1
         assert abs(len(result) - len(audio)) < 100  # allow small resampling diff
+
+    def test_load_m4a_uses_ffmpeg(self, tmp_path, monkeypatch):
+        """Compressed M4A input should be decoded by the FFmpeg executable."""
+        m4a_path = tmp_path / "test.m4a"
+        m4a_path.write_bytes(b"fake m4a for mocked ffmpeg")
+        expected = np.array([0.25, -0.5, 0.75], dtype="<f4")
+        captured = {}
+
+        monkeypatch.setattr("meetasr.utils.audio.shutil.which", lambda name: "/usr/bin/ffmpeg")
+
+        def fake_run(command, **kwargs):
+            captured["command"] = command
+            return subprocess.CompletedProcess(command, 0, expected.tobytes(), b"")
+
+        monkeypatch.setattr("meetasr.utils.audio.subprocess.run", fake_run)
+
+        result = load_audio(str(m4a_path))
+
+        np.testing.assert_array_equal(result, expected)
+        assert captured["command"][0] == "/usr/bin/ffmpeg"
+        assert captured["command"][captured["command"].index("-ar") + 1] == str(SAMPLE_RATE)
+        assert captured["command"][captured["command"].index("-ac") + 1] == "1"
+
+    def test_load_m4a_reports_ffmpeg_decode_error(self, tmp_path, monkeypatch):
+        """Invalid compressed audio should produce a useful decode error."""
+        m4a_path = tmp_path / "broken.m4a"
+        m4a_path.write_bytes(b"not audio")
+
+        monkeypatch.setattr("meetasr.utils.audio.shutil.which", lambda name: "/usr/bin/ffmpeg")
+        monkeypatch.setattr(
+            "meetasr.utils.audio.subprocess.run",
+            lambda command, **kwargs: subprocess.CompletedProcess(
+                command, 1, b"", b"Invalid data found when processing input"
+            ),
+        )
+
+        with pytest.raises(ValueError, match="Invalid data found"):
+            load_audio(str(m4a_path))
