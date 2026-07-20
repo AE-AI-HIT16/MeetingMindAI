@@ -132,6 +132,7 @@ class AutoPipeline:
         client = llm_class(**client_kwargs)
         return DocumentPlanner(
             client=client,
+            language=llm_cfg.get("language", "vi"),
             temperature=llm_cfg.get("temperature", 0.3),
             max_tokens=llm_cfg.get("max_tokens", 4096),
         )
@@ -154,7 +155,9 @@ class AutoPipeline:
         # Build client kwargs — strip non-client keys
         client_kwargs = {
             k: v for k, v in llm_cfg.items()
-            if k not in ("provider", "language", "temperature", "max_tokens")
+            if k not in (
+                "provider", "language", "temperature", "max_tokens", "use_planner"
+            )
         }
         # Resolve env vars in api_key
         if "api_key" in client_kwargs:

@@ -53,6 +53,7 @@ class MeetPipeline:
             punc_model: AbsPunc instance. If None, skips punctuation step.
             spk_model: AbsSpk instance. If None, skips speaker diarization.
             llm_summarizer: MeetingSummarizer instance. If None, skips LLM step.
+            doc_planner: DocumentPlanner instance for Phase 2 structured documents.
             device: Torch device string.
         """
         self.asr = asr_model

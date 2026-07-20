@@ -1,9 +1,19 @@
 """Tests for DocumentPlanner with mock LLM client."""
 
 import json
+
 import pytest
+
 from meetasr.llm.abs_llm import AbsLLMClient
-from meetasr.llm.planner import DocumentPlanner, _parse_json_object
+from meetasr.llm.planner import (
+    MAX_AGGREGATE_DATA_CHARS,
+    MAX_REDUCE_DATA_CHARS,
+    SHORT_TRANSCRIPT_CHARS,
+    DocumentPlanner,
+    _parse_json_object,
+)
+from meetasr.llm.planner_chunk import OVERLAP_LINES, chunk_with_overlap
+from meetasr.llm.planner_validation import normalize_extraction, normalize_outline
 from meetasr.schemas import TranscriptResult, SentenceInfo
 from meetasr.schemas_doc import DocumentReport
 
@@ -167,6 +177,47 @@ class TestShortTranscript:
         assert report.content_kind == "Tài liệu"
         assert report.sections == []
 
+    def test_empty_transcript_does_not_call_llm(self):
+        """An empty transcript returns an empty report without inviting hallucination."""
+        mock = MockLLMClient({})
+        planner = DocumentPlanner(client=mock)
+        report = planner.plan_and_write(
+            TranscriptResult(key="empty", text="", duration=0.0)
+        )
+
+        assert report.content_kind == "Tài liệu"
+        assert report.sections == []
+        assert mock.calls == []
+
+    def test_malformed_sections_are_ignored_and_duplicate_ids_are_fixed(self):
+        """Single-pass output is normalized before building the report."""
+        response = json.dumps({
+            "content_kind": "Podcast",
+            "sections": [
+                "invalid",
+                {"id": "s1", "heading": "A", "kind": "summary", "markdown": "One"},
+                {"id": "s1", "heading": "B", "kind": "quotes", "markdown": "Two"},
+                {"id": "s4", "heading": "Empty", "kind": "notes", "markdown": ""},
+            ],
+        })
+        mock = MockLLMClient({"Chúng ta sẽ làm": response})
+        report = DocumentPlanner(client=mock).plan_and_write(_short_transcript())
+
+        assert [section.id for section in report.sections] == ["s1", "s3"]
+        assert [section.heading for section in report.sections] == ["A", "B"]
+
+    def test_short_path_prompt_stays_within_context_budget(self):
+        """The largest single-pass input must stay below 8,000 characters."""
+        mock = MockLLMClient({"a": _single_pass_response()})
+        transcript = TranscriptResult(
+            key="context-limit",
+            text="a" * (SHORT_TRANSCRIPT_CHARS - 1),
+            duration=1.0,
+        )
+        DocumentPlanner(client=mock).plan_and_write(transcript)
+        assert len(mock.calls) == 1
+        assert len(mock.calls[0]) <= 8000
+
 
 # ------------------------------------------------------------------
 # Test: Long transcript → N extraction + 1 aggregate + K reduce
@@ -204,14 +255,20 @@ class TestLongTranscript:
         planner = DocumentPlanner(client=counting)
         report = planner.plan_and_write(_long_transcript())
 
-        # Count calls: should NOT be 1 (that's short path)
-        assert counting.call_count > 1
+        formatted = planner._format_transcript(_long_transcript())
+        n_chunks = len(chunk_with_overlap(formatted, overlap_lines=OVERLAP_LINES))
+        assert len(report.sections) == 3
+        assert counting.call_count == n_chunks + 1 + len(report.sections)
 
-        # Parse what happened: aggregate returns 3 outline sections
-        # Total = N_chunks + 1 (aggregate) + K (reduce per section with data)
-        # We can't predict exact N_chunks, but we know it's > 1
-        n_chunks = counting.call_count - 1 - len(report.sections)
-        assert n_chunks >= 1  # at least 1 chunk extracted
+    def test_all_long_path_prompts_stay_within_context_budget(self):
+        """Every long-path prompt must remain below the 8,000-character limit."""
+        counting = CountingLLMClient({
+            "Đây là câu số": _structured_extract_response(),
+            "tóm tắt cấu trúc": _aggregate_plan_response(),
+            "dữ liệu thô": "Section markdown content.",
+        })
+        DocumentPlanner(client=counting).plan_and_write(_long_transcript(1000))
+        assert all(len(prompt) <= 8000 for prompt in counting.calls)
 
 
 # ------------------------------------------------------------------
@@ -240,6 +297,67 @@ class TestNoHallucination:
 
         # This must not be a vacuous loop: no source data means no sections.
         assert report.sections == []
+
+    def test_non_summary_section_does_not_fallback_to_summaries(self):
+        """Missing action evidence must not be replaced with general summaries."""
+        planner = DocumentPlanner(client=MockLLMClient({}))
+        raw_data = planner._gather_for_section(
+            {
+                "id": "s2",
+                "heading": "Công việc",
+                "kind": "action_items",
+                "source_keys": ["action_items"],
+            },
+            [{"chunk_index": 0, "summary": "Có thảo luận chung."}],
+        )
+        assert raw_data == ""
+
+    def test_nested_extra_fields_are_available_to_sections(self):
+        """Open-ended fields under extra are flattened for planning and reducing."""
+        extraction = normalize_extraction(
+            {"summary": "Bàn ngân sách.", "extra": {"ngan_sach": "500 triệu"}},
+            chunk_index=0,
+        )
+        planner = DocumentPlanner(client=MockLLMClient({}))
+        raw_data = planner._gather_for_section(
+            {
+                "id": "s2",
+                "heading": "Ngân sách",
+                "kind": "finance",
+                "source_keys": ["ngan_sach"],
+            },
+            [extraction],
+        )
+        assert raw_data == "ngan_sach: 500 triệu"
+
+    def test_non_summary_outline_cannot_use_summary_as_evidence(self):
+        """Malformed source keys must not route summaries into factual sections."""
+        outline = normalize_outline([
+            {
+                "id": "s2",
+                "heading": "Công việc",
+                "kind": "action_items",
+                "source_keys": ["summary", "action_items"],
+            }
+        ])
+        assert outline[0]["source_keys"] == ["action_items"]
+
+    def test_aggregate_and_reduce_data_are_bounded(self):
+        """Internal context passed to final LLM calls must stay bounded."""
+        planner = DocumentPlanner(client=MockLLMClient({}))
+        extractions = [
+            {"chunk_index": index, "summary": "x" * 1000, "facts": ["y" * 1000]}
+            for index in range(20)
+        ]
+        raw_data = planner._gather_for_section(
+            {"kind": "facts", "source_keys": ["facts"]}, extractions
+        )
+        assert len(raw_data) <= MAX_REDUCE_DATA_CHARS
+
+        # The aggregate prompt is captured even when its response is invalid.
+        planner._aggregate_plan(extractions)
+        aggregate_prompt = planner.client.calls[-1]
+        assert len(aggregate_prompt) <= MAX_AGGREGATE_DATA_CHARS + 1800
 
 
 # ------------------------------------------------------------------
@@ -293,6 +411,31 @@ class TestParseJson:
     def test_parse_invalid_json_raises(self):
         with pytest.raises(Exception):
             _parse_json_object("not json at all")
+
+    def test_parse_json_array_raises(self):
+        with pytest.raises(ValueError, match="JSON object"):
+            _parse_json_object("[]")
+
+
+def test_configured_language_is_used_to_load_prompts(monkeypatch):
+    """DocumentPlanner must load the configured prompt language."""
+    from meetasr.llm.llm_utils import prompts
+
+    captured: dict[str, str] = {}
+
+    def fake_loader(language: str) -> dict[str, str]:
+        captured["language"] = language
+        return {
+            "single_pass": "{transcript}",
+            "structured_extract": "{chunk}",
+            "aggregate_plan": "{structured_summaries}",
+            "reduce_section": "{heading}{kind}{content_kind}{raw_data}",
+        }
+
+    monkeypatch.setattr(prompts, "load_generic_prompts", fake_loader)
+    planner = DocumentPlanner(client=MockLLMClient({}), language="en")
+    assert planner.language == "en"
+    assert captured["language"] == "en"
 
 
 # ------------------------------------------------------------------

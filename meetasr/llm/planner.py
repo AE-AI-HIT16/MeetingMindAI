@@ -4,8 +4,8 @@ Replaces MeetingSummarizer for Phase 2. MeetingSummarizer is kept untouched
 for Phase 1 API compatibility.
 
 Architecture (optimized from doc 14 original Plan→Write):
-- < 30 min transcript: 1 LLM call (full text, plan + write combined)
-- >= 30 min: N structured extraction + 1 aggregate + K reduce
+- Transcript that fits the configured context budget: 1 LLM call
+- Longer transcript: N structured extraction + 1 aggregate + K reduce
   Total: N + 1 + K calls (vs N + K*N + K in original design)
 
 Chunking strategy: overlap 5 lines between chunks to preserve pronoun
@@ -17,20 +17,26 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 import time
 
 from meetasr.llm.abs_llm import AbsLLMClient
 from meetasr.llm.planner_chunk import OVERLAP_LINES, chunk_with_overlap
+from meetasr.llm.planner_validation import (
+    join_text_parts,
+    normalize_extraction,
+    normalize_outline,
+    normalize_written_sections,
+    parse_json_object as _parse_json_object,
+)
 from meetasr.schemas import TranscriptResult
 from meetasr.schemas_doc import DocSection, DocumentReport
 
 logger = logging.getLogger(__name__)
 
 MAX_CHARS_PER_CHUNK = 6000
-SHORT_TRANSCRIPT_CHARS = 18000  # ~30 min of transcript
-MAX_CONCURRENT_LLM = 5
-DOCUMENT_LANGUAGE = "vi"
+SHORT_TRANSCRIPT_CHARS = 6400
+MAX_AGGREGATE_DATA_CHARS = 6200
+MAX_REDUCE_DATA_CHARS = 7000
 
 
 class DocumentPlanner:
@@ -45,15 +51,16 @@ class DocumentPlanner:
     def __init__(
         self,
         client: AbsLLMClient,
+        language: str = "vi",
         temperature: float = 0.3,
         max_tokens: int = 4096,
     ) -> None:
         self.client = client
-        self.language = DOCUMENT_LANGUAGE
+        self.language = language.strip() or "vi"
         self.temperature = temperature
         self.max_tokens = max_tokens
         from meetasr.llm.llm_utils.prompts import load_generic_prompts
-        self._prompts = load_generic_prompts(language=DOCUMENT_LANGUAGE)
+        self._prompts = load_generic_prompts(language=self.language)
 
     # ------------------------------------------------------------------
     # Public API
@@ -64,7 +71,10 @@ class DocumentPlanner:
         t0 = time.perf_counter()
         full_text = self._format_transcript(transcript)
 
-        if len(full_text) < SHORT_TRANSCRIPT_CHARS:
+        if not full_text.strip():
+            logger.warning("DocumentPlanner received an empty transcript.")
+            report = DocumentReport(content_kind="Tài liệu")
+        elif len(full_text) < SHORT_TRANSCRIPT_CHARS:
             report = self._short_path(full_text)
         else:
             report = self._long_path(full_text)
@@ -75,7 +85,7 @@ class DocumentPlanner:
         return report
 
     # ------------------------------------------------------------------
-    # Short path (< 30 min) — 1 LLM call via single_pass_vi.txt
+    # Short path — one call within the 8,000-character input budget
     # ------------------------------------------------------------------
 
     def _short_path(self, full_text: str) -> DocumentReport:
@@ -91,30 +101,16 @@ class DocumentPlanner:
                 prompt, temperature=self.temperature, max_tokens=self.max_tokens
             )
             data = _parse_json_object(raw)
-            content_kind = data.get("content_kind", "Tài liệu")
-            raw_sections = data.get("sections", [])
+            content_kind = _safe_text(data.get("content_kind"), "Tài liệu")
+            sections = normalize_written_sections(data.get("sections"))
         except Exception as e:
             logger.warning("Short-path single_pass failed (%s), fallback.", e)
             content_kind = "Tài liệu"
-            raw_sections = []
-
-        sections = []
-        for sec in raw_sections:
-            md = sec.get("markdown", "")
-            found = bool(md.strip())
-            sections.append(DocSection(
-                id=sec.get("id", "s"),
-                heading=sec.get("heading", ""),
-                kind=sec.get("kind", "summary"),
-                markdown=md,
-                found=found,
-            ))
-
-        sections = [s for s in sections if s.found]
+            sections = []
         return DocumentReport(content_kind=content_kind, sections=sections)
 
     # ------------------------------------------------------------------
-    # Long path (>= 30 min) — structured extraction + aggregate + reduce
+    # Long path — structured extraction + aggregate + reduce
     # ------------------------------------------------------------------
 
     def _long_path(self, full_text: str) -> DocumentReport:
@@ -164,8 +160,7 @@ class DocumentPlanner:
                 raw = self.client.chat(
                     prompt, temperature=self.temperature, max_tokens=2048
                 )
-                data = _parse_json_object(raw)
-                data["chunk_index"] = i
+                data = normalize_extraction(_parse_json_object(raw), i)
                 results.append(data)
             except Exception as e:
                 logger.warning("Extraction failed for chunk %d: %s", i, e)
@@ -196,12 +191,14 @@ class DocumentPlanner:
                     extras.append(f"  {key}: present")
                 elif isinstance(val, str) and val.strip():
                     extras.append(f"  {key}: present")
+                elif isinstance(val, (int, float, bool)):
+                    extras.append(f"  {key}: present")
             line = f"[{idx}] {s}"
             if extras:
                 line += "\n" + "\n".join(extras)
             summaries.append(line)
 
-        combined = "\n".join(summaries)
+        combined = join_text_parts(summaries, MAX_AGGREGATE_DATA_CHARS)
         prompt = self._prompts["aggregate_plan"].format(
             structured_summaries=combined
         )
@@ -210,8 +207,8 @@ class DocumentPlanner:
                 prompt, temperature=self.temperature, max_tokens=1024
             )
             data = _parse_json_object(raw)
-            content_kind = data.get("content_kind", "Tài liệu")
-            outline = data.get("outline", [])
+            content_kind = _safe_text(data.get("content_kind"), "Tài liệu")
+            outline = normalize_outline(data.get("outline"))
             if not outline:
                 raise ValueError("empty outline")
             return content_kind, outline
@@ -229,29 +226,40 @@ class DocumentPlanner:
         resolving label aliases (e.g. 'doanh_thu', 'revenue' → same
         section). This method mechanically collects matching keys.
         """
-        source_keys = section.get(
-            "source_keys", [section.get("kind", "summary")]
-        )
+        kind = _safe_text(section.get("kind"), "summary")
+        source_keys = section.get("source_keys", [kind])
+        if isinstance(source_keys, str):
+            source_keys = [source_keys]
+        elif not isinstance(source_keys, list):
+            source_keys = [kind]
         parts: list[str] = []
+        seen: set[tuple[str, str]] = set()
 
         for ext in extractions:
             for key in source_keys:
+                if not isinstance(key, str):
+                    continue
                 val = ext.get(key)
                 if not val:
                     continue
-                if isinstance(val, list):
-                    parts.append(json.dumps(val, ensure_ascii=False))
+                if isinstance(val, (list, dict)):
+                    rendered = json.dumps(val, ensure_ascii=False)
                 else:
-                    parts.append(str(val))
+                    rendered = str(val)
+                marker = (key, rendered)
+                if marker not in seen:
+                    parts.append(f"{key}: {rendered}")
+                    seen.add(marker)
 
-        # Fallback: if nothing gathered, collect summaries as context
-        if not parts:
+        # Only the summary section may fall back to chunk summaries. Other
+        # sections without evidence must be omitted instead of fabricated.
+        if not parts and kind == "summary" and "summary" in source_keys:
             for ext in extractions:
                 s = ext.get("summary", "")
                 if s:
                     parts.append(s)
 
-        return "\n\n".join(parts)
+        return join_text_parts(parts, MAX_REDUCE_DATA_CHARS)
 
     def _call_reduce(self, section: dict, content_kind: str, raw_data: str) -> str:
         """Reduce gathered data into final markdown for one section."""
@@ -283,29 +291,7 @@ class DocumentPlanner:
             return "\n".join(lines)
         return result.text
 
-    # NOTE: _chunk() removed — chunking now handled by
-    # meetasr.llm.planner_chunk.chunk_with_overlap()
-    # See docs/chunking_analysis.md for rationale.
 
-
-def _parse_json_object(raw: str) -> dict:
-    """Extract JSON object from LLM response.
-
-    Handles both raw JSON and markdown-wrapped code blocks.
-
-    Args:
-        raw: Raw LLM response text.
-
-    Returns:
-        Parsed JSON as dict.
-
-    Raises:
-        json.JSONDecodeError: If no valid JSON found.
-    """
-    match = re.search(r"```(?:json)?(.*?)```", raw, re.DOTALL | re.IGNORECASE)
-    text = match.group(1).strip() if match else raw.strip()
-    if not match:
-        start, end = text.find("{"), text.rfind("}")
-        if start != -1 and end != -1:
-            text = text[start : end + 1]
-    return json.loads(text, strict=False)
+def _safe_text(value: object, default: str) -> str:
+    """Return a non-empty stripped string or a default value."""
+    return value.strip() if isinstance(value, str) and value.strip() else default

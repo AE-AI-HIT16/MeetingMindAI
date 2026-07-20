@@ -1,9 +1,6 @@
 """Chunking utilities for DocumentPlanner.
 
-Handles:
-- Overlap for pronoun/coreference resolution
-- Monster lines (single line > max_chars)
-- Optional token-based measurement via tiktoken
+Handles overlap for pronoun/coreference resolution and oversized ASR lines.
 
 See docs/chunking_analysis.md for design rationale.
 """
@@ -30,8 +27,13 @@ def _split_monster_line(line: str, max_chars: int) -> list[str]:
         max_chars: Target max size per piece.
 
     Returns:
-        List of sub-lines, each <= max_chars (best effort).
+        List of sub-lines, each no longer than max_chars.
+
+    Raises:
+        ValueError: If max_chars is not positive.
     """
+    if max_chars <= 0:
+        raise ValueError("max_chars must be greater than zero")
     if len(line) <= max_chars:
         return [line]
 
@@ -41,13 +43,20 @@ def _split_monster_line(line: str, max_chars: int) -> list[str]:
         # Fallback: split on commas
         parts = re.split(r'(?<=,)\s+', line)
     if len(parts) == 1:
-        # Last resort: hard-cut at max_chars boundaries
-        return [line[i:i + max_chars] for i in range(0, len(line), max_chars)]
+        return [line[i : i + max_chars] for i in range(0, len(line), max_chars)]
+
+    # A malformed ASR sentence may still exceed max_chars even after a
+    # punctuation split. Hard-cut those individual parts before merging.
+    bounded_parts: list[str] = []
+    for part in parts:
+        bounded_parts.extend(
+            part[i : i + max_chars] for i in range(0, len(part), max_chars)
+        )
 
     # Merge small parts back together up to max_chars
     merged: list[str] = []
     current = ""
-    for part in parts:
+    for part in bounded_parts:
         if len(current) + len(part) + 1 > max_chars and current:
             merged.append(current)
             current = part
@@ -75,8 +84,18 @@ def chunk_with_overlap(
 
     Returns:
         List of text chunks with overlap for pronoun resolution.
+
+    Raises:
+        ValueError: If max_chars or overlap_lines is invalid.
     """
-    # Pre-process: split monster lines
+    if max_chars <= 0:
+        raise ValueError("max_chars must be greater than zero")
+    if overlap_lines < 0:
+        raise ValueError("overlap_lines must be non-negative")
+    if not text:
+        return [text]
+
+    # Pre-process: split monster lines.
     raw_lines = text.split("\n")
     lines: list[str] = []
     for line in raw_lines:
@@ -86,27 +105,31 @@ def chunk_with_overlap(
         else:
             lines.append(line)
 
-    if not lines:
-        return [text]
-
     chunks: list[str] = []
     current: list[str] = []
-    size = 0
 
     for line in lines:
-        line_len = len(line) + 1  # +1 for \n
-
-        if size + line_len > max_chars and current:
+        candidate = "\n".join([*current, line])
+        if len(candidate) > max_chars and current:
             chunks.append("\n".join(current))
-            # Overlap: carry last N lines into next chunk
-            overlap = current[-overlap_lines:] if len(current) > overlap_lines else current[:]
-            current = list(overlap)
-            size = sum(len(ln) + 1 for ln in current)
 
-        current.append(line)
-        size += line_len
+            # Carry only the newest lines that fit together with the next
+            # original line. This guarantees progress and prevents overlap
+            # from making the new chunk larger than max_chars.
+            overlap: list[str] = []
+            if overlap_lines:
+                for previous in reversed(current[-overlap_lines:]):
+                    with_previous = "\n".join([previous, *overlap, line])
+                    if len(with_previous) > max_chars:
+                        break
+                    overlap.insert(0, previous)
+            current = [*overlap, line]
+        else:
+            current.append(line)
 
     if current:
         chunks.append("\n".join(current))
 
+    if any(len(chunk) > max_chars for chunk in chunks):
+        raise AssertionError("chunk_with_overlap produced an oversized chunk")
     return chunks or [text]

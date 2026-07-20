@@ -1,5 +1,7 @@
 """Tests for chunk_with_overlap and _split_monster_line."""
 
+import pytest
+
 from meetasr.llm.planner_chunk import chunk_with_overlap, _split_monster_line
 
 
@@ -31,6 +33,7 @@ def test_monster_line_gets_split():
     # Monster line should be sub-split so no single sub-line exceeds max_chars
     # But chunks can hold multiple sub-lines. Verify sub-splitting happened.
     assert len(result) > 1  # must have split
+    assert all(len(chunk) <= 2000 for chunk in result)
     # Each individual sub-line (from _split_monster_line) should be <= max_chars
     from meetasr.llm.planner_chunk import _split_monster_line
     pieces = _split_monster_line(monster, max_chars=2000)
@@ -94,6 +97,8 @@ def test_overlap_zero():
     chunk2_lines = result[1].split("\n")
     # With 0 overlap, last line of chunk 1 should NOT be first line of chunk 2
     assert chunk1_lines[-1] != chunk2_lines[0]
+    flattened = [line for chunk in result for line in chunk.split("\n")]
+    assert flattened == lines
 
 
 def test_all_content_preserved():
@@ -128,3 +133,25 @@ def test_monster_line_sentence_boundary_split():
     rejoined = " ".join(pieces)
     for i in range(20):
         assert f"Câu thứ {i}" in rejoined
+
+
+def test_long_sentence_part_is_hard_cut():
+    """A punctuation split containing an oversized part must still be bounded."""
+    monster = "a" * 500 + ". short sentence."
+    pieces = _split_monster_line(monster, max_chars=100)
+    assert all(len(piece) <= 100 for piece in pieces)
+
+
+def test_all_chunks_respect_max_chars():
+    """Overlap must never make a produced chunk exceed its configured limit."""
+    lines = ["x" * 95 for _ in range(20)]
+    chunks = chunk_with_overlap("\n".join(lines), max_chars=200, overlap_lines=5)
+    assert all(len(chunk) <= 200 for chunk in chunks)
+
+
+def test_invalid_chunk_arguments():
+    """Invalid size and overlap settings fail with actionable errors."""
+    with pytest.raises(ValueError, match="max_chars"):
+        chunk_with_overlap("text", max_chars=0)
+    with pytest.raises(ValueError, match="overlap_lines"):
+        chunk_with_overlap("text", overlap_lines=-1)

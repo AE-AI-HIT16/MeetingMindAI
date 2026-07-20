@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import logging
 import uuid
+from typing import Any, Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlmodel import Session
 
 from meetasr.api.dependencies import get_pipeline
@@ -26,10 +27,46 @@ router = APIRouter(tags=["Document"])
 # Request / Response schemas
 # ------------------------------------------------------------------
 
+class SentencePayload(BaseModel):
+    """Validated sentence from a transcript payload."""
+
+    text: str
+    start: float = Field(ge=0)
+    end: float = Field(ge=0)
+    speaker: int | None = Field(default=None, ge=0)
+    char_timestamps: list[list[int]] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_time_range(self) -> "SentencePayload":
+        """Ensure sentence timestamps form a valid range."""
+        if self.end < self.start:
+            raise ValueError("sentence end must be greater than or equal to start")
+        return self
+
+
+class TranscriptPayload(BaseModel):
+    """Validated transcript accepted by the document endpoint."""
+
+    key: str = "doc-upload"
+    text: str = ""
+    duration: float = Field(default=0.0, ge=0)
+    language: str = Field(default="vi", min_length=2, max_length=16)
+    sentence_info: list[SentencePayload] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_content(self) -> "TranscriptPayload":
+        """Reject empty transcripts before an LLM call can hallucinate content."""
+        if not self.text.strip() and not any(
+            sentence.text.strip() for sentence in self.sentence_info
+        ):
+            raise ValueError("transcript must contain text or at least one sentence")
+        return self
+
+
 class GenerateDocumentRequest(BaseModel):
     """Request body for Phase 2 document generation."""
 
-    transcript_data: dict = Field(
+    transcript_data: TranscriptPayload = Field(
         ..., description="JSON transcript (same format as /v1/meeting/summarize-text)"
     )
 
@@ -45,11 +82,30 @@ class DocumentReportResponse(BaseModel):
     """Full document report returned after processing."""
 
     meeting_id: str
+    format: Literal["json"] = "json"
     content_kind: str = ""
-    sections: list[dict] = Field(default_factory=list)
+    sections: list[dict[str, Any]] = Field(default_factory=list)
     language: str = "vi"
     llm_model: str = ""
     processing_time: float = 0.0
+
+
+class MarkdownDocumentResponse(BaseModel):
+    """Markdown representation of a generated document."""
+
+    meeting_id: str
+    format: Literal["markdown"] = "markdown"
+    content: str
+
+
+class DocumentStatusResponse(BaseModel):
+    """Current status of a document generation job."""
+
+    id: str
+    title: str
+    status: str
+    created_at: str
+    updated_at: str
 
 
 # ------------------------------------------------------------------
@@ -59,6 +115,7 @@ class DocumentReportResponse(BaseModel):
 def _process_document(
     meeting_id: str,
     transcript_result: TranscriptResult,
+    planner: Any,
 ) -> None:
     """Background worker: run DocumentPlanner pipeline.
 
@@ -68,8 +125,6 @@ def _process_document(
         try:
             repository.update_meeting_status(db, meeting_id, "processing")
 
-            pipeline = get_pipeline()
-            planner = pipeline.doc_planner
             if planner is None:
                 raise RuntimeError("DocumentPlanner not configured")
 
@@ -134,34 +189,24 @@ async def generate_document(
             },
         )
 
-    # Parse transcript payload
-    try:
-        t_data = request.transcript_data
-        sentences = [SentenceInfo(**s) for s in t_data.get("sentence_info", [])]
-        transcript_result = TranscriptResult(
-            key=t_data.get("key", "doc-upload"),
-            text=t_data.get("text", ""),
-            duration=float(t_data.get("duration", 0.0)),
-            sentence_info=sentences,
-        )
-    except (TypeError, ValueError) as e:
-        logger.warning("Invalid transcript payload: %s", e)
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={
-                "error": {
-                    "code": "invalid_payload",
-                    "message": f"Malformed transcript schema: {e}",
-                }
-            },
-        )
+    t_data = request.transcript_data
+    sentences = [
+        SentenceInfo(**sentence.model_dump()) for sentence in t_data.sentence_info
+    ]
+    transcript_result = TranscriptResult(
+        key=t_data.key,
+        text=t_data.text,
+        duration=t_data.duration,
+        language=t_data.language,
+        sentence_info=sentences,
+    )
 
     meeting_id = str(uuid.uuid4())
     try:
         repository.create_meeting(
             db=db,
             id=meeting_id,
-            title=t_data.get("key", "doc-upload"),
+            title=t_data.key,
             audio_path="",
             duration=transcript_result.duration,
         )
@@ -181,15 +226,19 @@ async def generate_document(
         _process_document,
         meeting_id,
         transcript_result,
+        pipeline.doc_planner,
     )
     return GenerateDocumentResponse(meeting_id=meeting_id, status="pending")
 
 
-@router.get("/v2/documents/{meeting_id}/status")
+@router.get(
+    "/v2/documents/{meeting_id}/status",
+    response_model=DocumentStatusResponse,
+)
 async def get_document_status(
     meeting_id: str,
     db: Session = Depends(get_db),
-) -> dict:
+) -> DocumentStatusResponse:
     """Poll the processing status of a document generation job."""
     meeting = repository.get_meeting(db, meeting_id)
     if not meeting:
@@ -202,21 +251,24 @@ async def get_document_status(
                 }
             },
         )
-    return {
-        "id": meeting.id,
-        "title": meeting.title,
-        "status": meeting.status,
-        "created_at": meeting.created_at.isoformat(),
-        "updated_at": meeting.updated_at.isoformat(),
-    }
+    return DocumentStatusResponse(
+        id=meeting.id,
+        title=meeting.title,
+        status=meeting.status,
+        created_at=meeting.created_at.isoformat(),
+        updated_at=meeting.updated_at.isoformat(),
+    )
 
 
-@router.get("/v2/documents/{meeting_id}/report")
+@router.get(
+    "/v2/documents/{meeting_id}/report",
+    response_model=DocumentReportResponse | MarkdownDocumentResponse,
+)
 async def get_document_report(
     meeting_id: str,
-    format: str = "json",
+    format: Literal["json", "markdown"] = "json",
     db: Session = Depends(get_db),
-) -> dict:
+) -> DocumentReportResponse | MarkdownDocumentResponse:
     """Retrieve the generated document report.
 
     Args:
@@ -263,26 +315,48 @@ async def get_document_report(
     try:
         report_data = _json.loads(report_row.summary)
     except (ValueError, TypeError):
-        report_data = {"raw": report_row.summary}
+        report_data = {}
+    if not isinstance(report_data, dict):
+        report_data = {}
+
+    raw_sections = report_data.get("sections", [])
+    sections = (
+        [section for section in raw_sections if isinstance(section, dict)]
+        if isinstance(raw_sections, list)
+        else []
+    )
+    content_kind = _string_value(report_data.get("content_kind"), "Tài liệu")
 
     if format == "markdown":
         # Build markdown from sections
-        lines = [f"# {report_data.get('content_kind', 'Document')}", ""]
-        for sec in report_data.get("sections", []):
-            if sec.get("found", True) and sec.get("markdown", "").strip():
-                lines += [f"## {sec.get('heading', '')}", "", sec["markdown"], ""]
-        return {
-            "meeting_id": meeting_id,
-            "format": "markdown",
-            "content": "\n".join(lines).strip(),
-        }
+        lines = [f"# {content_kind}", ""]
+        for section in sections:
+            markdown = _string_value(section.get("markdown"), "")
+            if section.get("found", True) and markdown:
+                heading = _string_value(section.get("heading"), "Tóm tắt")
+                lines += [f"## {heading}", "", markdown, ""]
+        return MarkdownDocumentResponse(
+            meeting_id=meeting_id,
+            content="\n".join(lines).strip(),
+        )
 
-    return {
-        "meeting_id": meeting_id,
-        "format": "json",
-        "content_kind": report_data.get("content_kind", ""),
-        "sections": report_data.get("sections", []),
-        "language": report_data.get("language", "vi"),
-        "llm_model": report_data.get("llm_model", ""),
-        "processing_time": report_data.get("processing_time", 0),
-    }
+    return DocumentReportResponse(
+        meeting_id=meeting_id,
+        content_kind=content_kind,
+        sections=sections,
+        language=_string_value(report_data.get("language"), "vi"),
+        llm_model=_string_value(report_data.get("llm_model"), ""),
+        processing_time=_float_value(report_data.get("processing_time")),
+    )
+
+
+def _string_value(value: object, default: str) -> str:
+    """Return a safe response string for persisted, potentially stale JSON."""
+    return value.strip() if isinstance(value, str) and value.strip() else default
+
+
+def _float_value(value: object) -> float:
+    """Return a safe numeric response value for persisted JSON."""
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    return 0.0
