@@ -1,0 +1,111 @@
+<html>
+
+<body>
+
+<button onclick="start()">
+Start
+</button>
+
+<script>
+
+let ws;
+
+
+async function start(){
+
+    ws = new WebSocket(
+        "ws://localhost:8000/v1/realtime/stream"
+    );
+
+    ws.binaryType = "arraybuffer";
+
+
+    ws.onmessage = e => {
+
+        console.log(
+            "ASR:",
+            JSON.parse(e.data)
+        );
+
+    };
+
+
+    const stream =
+        await navigator.mediaDevices
+        .getUserMedia({
+            audio:true
+        });
+
+
+    const context =
+        new AudioContext({
+            sampleRate:16000
+        });
+
+
+    const source =
+        context.createMediaStreamSource(stream);
+
+
+    const processor =
+        context.createScriptProcessor(
+            4096,
+            1,
+            1
+        );
+
+
+    source.connect(processor);
+
+    processor.connect(
+        context.destination
+    );
+
+
+    processor.onaudioprocess =
+        e => {
+
+        let input =
+            e.inputBuffer
+            .getChannelData(0);
+
+
+        // float32 -> PCM16
+
+        let pcm16 =
+            new Int16Array(
+                input.length
+            );
+
+
+        for(
+            let i=0;
+            i<input.length;
+i++){
+
+            pcm16[i]=
+                Math.max(
+                    -1,
+                    Math.min(
+                        1,
+                        input[i]
+                    )
+                ) * 32767;
+
+        }
+
+
+        ws.send(
+            pcm16.buffer
+        );
+
+    };
+
+}
+
+
+</script>
+
+
+</body>
+</html>

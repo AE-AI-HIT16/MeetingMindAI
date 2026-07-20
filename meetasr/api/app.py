@@ -55,26 +55,12 @@ async def lifespan(app: FastAPI):
             "Server starts without pipeline — set MEETASR_CONFIG."
         )
 
-    # Load model trước
-    manager = ModelManager()
-
-    await manager.load_all()
-
-
-    job_queue = RealtimeJobQueue(event_bus=event_bus)
-    app.state.job_queue = job_queue
-    job_queue.start()  # khởi động consumer coroutine nền
-    logger.info("Phase 2: EventBus and RealtimeJobQueue started.")
-
     yield  # server is now running and serving requests
 
     # --- SHUTDOWN ---
     logger.info("Shutting down... Cleaning up ML models and freeing VRAM.")
     set_pipeline(None)  # release reference so GC can free RAM/VRAM
 
-    # --- Phase 2 Shutdown (AI Engineer 3) ---
-    await job_queue.stop()
-    logger.info("Phase 2: RealtimeJobQueue stopped.")
 
 
 # ------------------------------------------------------------------
