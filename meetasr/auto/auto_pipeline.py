@@ -132,7 +132,6 @@ class AutoPipeline:
         client = llm_class(**client_kwargs)
         return DocumentPlanner(
             client=client,
-            language=llm_cfg.get("language", "vi"),
             temperature=llm_cfg.get("temperature", 0.3),
             max_tokens=llm_cfg.get("max_tokens", 4096),
         )
@@ -172,5 +171,3 @@ class AutoPipeline:
             temperature=llm_cfg.get("temperature", 0.3),
             max_tokens=llm_cfg.get("max_tokens", 4096),
         )
-    
-    

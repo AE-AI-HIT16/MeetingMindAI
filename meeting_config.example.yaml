@@ -25,10 +25,25 @@ punc:
   hub: hf
 
 llm:
+<<<<<<< Updated upstream
   provider: groq
   model: openai/gpt-oss-20b
   api_key: ${oc.env:GROQ_API_KEY}
   language: vi
+=======
+  provider: openai              # openai | ollama
+  model: gpt-4o-mini
+
+  # For OpenAI:
+  api_key: ${OPENAI_API_KEY}    # reads from env var OPENAI_API_KEY
+
+  # For Ollama (local, no API key needed):
+  # provider: ollama
+  # model: llama3.2
+  # host: http://localhost:11434
+
+  language: vi                  # fixed Vietnamese output for the current system
+>>>>>>> Stashed changes
   temperature: 0.3
   max_tokens: 4096
   timeout: 120

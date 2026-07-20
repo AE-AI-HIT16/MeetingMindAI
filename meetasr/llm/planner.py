@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 MAX_CHARS_PER_CHUNK = 6000
 SHORT_TRANSCRIPT_CHARS = 18000  # ~30 min of transcript
 MAX_CONCURRENT_LLM = 5
+DOCUMENT_LANGUAGE = "vi"
 
 
 class DocumentPlanner:
@@ -37,7 +38,6 @@ class DocumentPlanner:
 
     Args:
         client: Any AbsLLMClient implementation.
-        language: Output language code.
         temperature: LLM sampling temperature.
         max_tokens: Max tokens per LLM call.
     """
@@ -45,16 +45,15 @@ class DocumentPlanner:
     def __init__(
         self,
         client: AbsLLMClient,
-        language: str = "vi",
         temperature: float = 0.3,
         max_tokens: int = 4096,
     ) -> None:
         self.client = client
-        self.language = language
+        self.language = DOCUMENT_LANGUAGE
         self.temperature = temperature
         self.max_tokens = max_tokens
         from meetasr.llm.llm_utils.prompts import load_generic_prompts
-        self._prompts = load_generic_prompts(language=language)
+        self._prompts = load_generic_prompts(language=DOCUMENT_LANGUAGE)
 
     # ------------------------------------------------------------------
     # Public API
@@ -309,4 +308,4 @@ def _parse_json_object(raw: str) -> dict:
         start, end = text.find("{"), text.rfind("}")
         if start != -1 and end != -1:
             text = text[start : end + 1]
-    return json.loads(text)
+    return json.loads(text, strict=False)
