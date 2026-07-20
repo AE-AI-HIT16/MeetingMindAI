@@ -18,11 +18,7 @@ from meetasr.auto.auto_pipeline import AutoPipeline
 from meetasr.api.dependencies import set_pipeline, CONFIG_PATH
 from meetasr.api.routes import health, transcribe, summarize, db_routes, realtime
 from meetasr.db.connection import init_db
-from meetasr.streaming.model_manager import ModelManager
 
-# --- Phase 2 (AI Engineer 3) ---
-from meetasr.realtime.events import EventBus
-from meetasr.realtime.job_queue import RealtimeJobQueue
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -48,6 +44,8 @@ async def lifespan(app: FastAPI):
         logger.info(f"Loading pipeline from {CONFIG_PATH}...")
         pipeline = AutoPipeline.from_yaml(CONFIG_PATH)
         set_pipeline(pipeline)
+
+        app.state.pipeline = pipeline
         logger.info("Pipeline ready.")
     else:
         logger.warning(
@@ -62,6 +60,10 @@ async def lifespan(app: FastAPI):
     set_pipeline(None)  # release reference so GC can free RAM/VRAM
 
 
+# Set log cho api realtime
+
+root = logging.getLogger()
+root.setLevel(logging.INFO)
 
 # ------------------------------------------------------------------
 # App Initialization

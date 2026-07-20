@@ -22,6 +22,14 @@ class AudioQueue:
     async def get(self):
         return await self.queue.get()
 
+    def task_done(self):
+        """Đánh dấu một item lấy từ queue đã được xử lý xong."""
+        self.queue.task_done()
+
+    async def join(self):
+        """Chờ cho đến khi tất cả item trong queue được xử lý."""
+        await self.queue.join()
+
     # Dùng để xóa toàn bộ dữ liệu trong queue
     async def clear(self):
         """
@@ -45,3 +53,12 @@ class AudioQueue:
             "Cleared %d audio chunks from queue",
             cleared
         )
+
+    def qsize(self):
+        return self.queue.qsize()
+
+    def empty(self):
+        return self.queue.empty()
+
+    def full(self):
+        return self.queue.full()
