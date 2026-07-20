@@ -1,6 +1,7 @@
 from meetasr.streaming.session import StreamSession
 from meetasr.streaming.worker import AudioWorker
 from meetasr.streaming.audio_receiver import AudioReceiver
+from meetasr.auto.auto_pipeline import AutoPipeline
 
 import asyncio
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -12,15 +13,16 @@ router = APIRouter()
 async def realtime_stream(websocket: WebSocket):
     await websocket.accept()
 
-    manager = websocket.app.state.models
-
+    # Khởi tạo phiên
     session = StreamSession(websocket)
 
+    # Khởi tạo nơi chunk dữ liệu
     receiver = AudioReceiver(session)
 
-    processor = DummyProcessor(manager)
+    # Khởi tạo luồng pipeline
+    pipeline = websocket.app.state.pipeline
 
-    worker = AudioWorker(session, processor)
+    worker = AudioWorker(session, pipeline)
 
     session.worker_task = asyncio.create_task(
         worker.run()

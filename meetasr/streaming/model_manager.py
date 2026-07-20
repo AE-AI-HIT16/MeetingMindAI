@@ -1,4 +1,7 @@
-from meetasr.streaming.processor.dummy_processor import DummyProcessor
+from meetasr.streaming.init_model.asr import ZipformerViLoader
+from meetasr.streaming.init_model.cam_plus import CAMPlusPlusLoader
+from meetasr.streaming.init_model.punctuation import ViBERTCaPuLoader
+from meetasr.streaming.init_model.vad import FsmnVADLoader
 
 
 # Quản lý các model
@@ -12,23 +15,13 @@ class ModelManager:
     async def load_all(self):
 
         # Các model này chỉ là ví dụ, cần đổi sang model thật khi dùng
-        self.models["asr"] = WhisperModel(
-            "large-v3",
-            device="cuda"
-        )
+        self.models["vad"] = FsmnVADLoader.load()
 
-        self.models["vad"] = VADModel(
-            "silero",
-            device="cuda"
-        )
+        self.models["asr"] = ZipformerViLoader()
 
-        self.models["diarizer"] = DiarizerModel(
-            device="cuda"
-        )
+        self.models["cam_plus"] = CAMPlusPlusLoader()
 
-        self.models["DummyProcessor"] = Dummy(
-            device="cuda"
-        )
+        self.models["punctuation"] = ViBERTCaPuLoader()
 
 
     def get_model(self, name):

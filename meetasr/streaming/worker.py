@@ -1,15 +1,16 @@
 import asyncio
+import numpy as np
+from meetasr.pipeline import MeetPipeline
 
 
 # Nơi khởi chạy luồng logic
+# Sử dụng luồng hoạt động của pipeline.py luôn
 class AudioWorker:
 
-    def __init__(self, session, processor):
+    def __init__(self, session, pipeline : MeetPipeline):
 
         self.session = session
-
-        # Cần đổi sang list processer để chứa nhiều processer
-        self.processor = processor
+        self.pipeline = pipeline
 
     async def run(self):
 
@@ -20,15 +21,17 @@ class AudioWorker:
             # Lấy dữ liệu từ trong queue
             audio = await self.session.audio_queue.get()
 
+            # Convert PCM16 bytes từ microphone thành numpy float32
+            audio = np.frombuffer(
+                audio,
+                dtype=np.int16,
+            ).astype(np.float32) / 32768.0
+
             # Đưa gữ liệu cho processer xử lý và nhận kết quả
             # (chỗ này cần gọi nhiều và thực hiện tuần tự nếu xử lý cần nhiều bước logic
             # Gọi các model vào xử lý ở đây
             # process có kiểu dữ liệu là AudioProcessor
-            result = await loop.run_in_executor(
-                None,
-                self.processor.process,
-                audio,
-            )
+            result = self.pipeline.transcribe(audio)
 
             # Gửi kết quả cho websocket
             if result is not None:

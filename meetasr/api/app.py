@@ -60,12 +60,6 @@ async def lifespan(app: FastAPI):
 
     await manager.load_all()
 
-    app.state.models = manager
-
-    # --- Phase 2 Startup (AI Engineer 3) ---
-    # Khởi tạo EventBus và JobQueue, lưu vào app.state để các route truy cập
-    event_bus = EventBus()
-    app.state.event_bus = event_bus
 
     job_queue = RealtimeJobQueue(event_bus=event_bus)
     app.state.job_queue = job_queue
