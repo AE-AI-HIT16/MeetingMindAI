@@ -12,6 +12,7 @@ import sys
 def cmd_transcribe(args):
     """Run transcription on one or more audio files."""
     from meetasr.auto.auto_pipeline import AutoPipeline
+    from meetasr.utils.llm_export import transcript_to_llm_payload
 
     if args.config:
         pipeline = AutoPipeline.from_yaml(args.config)
@@ -32,7 +33,20 @@ def cmd_transcribe(args):
         result = pipeline.transcribe(audio_path, language=args.language)
 
         if args.output_format == "json":
-            print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
+            output = json.dumps(
+                transcript_to_llm_payload(result),
+                ensure_ascii=False,
+                indent=2,
+            )
+            if args.output_dir:
+                os.makedirs(args.output_dir, exist_ok=True)
+                stem = os.path.splitext(os.path.basename(audio_path))[0]
+                out_path = os.path.join(args.output_dir, f"{stem}.json")
+                with open(out_path, "w", encoding="utf-8") as f:
+                    f.write(output)
+                print(f"Saved JSON: {out_path}", file=sys.stderr)
+            else:
+                print(output)
         elif args.output_format == "srt":
             srt_text = result.to_srt()
             if args.output_dir:
