@@ -16,16 +16,17 @@ keywords = ["speech-recognition", "asr", "meeting", "llm", "summarization", "spe
 dependencies = [
     # Audio
     "torch>=2.0",
-    "torchaudio",
     "librosa",
     "soundfile>=0.12.1",
     "numpy",
     "scipy>=1.4.1",
     # Config
     "omegaconf>=2.0",
-    # Model download
+    # Model download & Utilities
     "modelscope",
     "huggingface_hub",
+    "filelock",
+    "python-dotenv",
     # ASR tokenizers
     "transformers",
     "sentencepiece",
@@ -34,6 +35,9 @@ dependencies = [
     "uvicorn[standard]",
     "python-multipart",
     "pydantic>=2.0",
+    # Database
+    "sqlmodel>=0.0.14",
+    "sqlalchemy",
     # LLM
     "openai>=1.0",
     # FunASR (for model weight reuse)
@@ -45,12 +49,17 @@ dependencies = [
     # Speaker clustering (3D-Speaker port)
     "fastcluster>=1.2.6",
     "scikit-learn",
+    # NLP & Embeddings
+    "sentence-transformers",
+    "tiktoken",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0",
+    "pytest-asyncio",
     "pytest-cov",
+    "httpx",
     "black",
     "isort",
     "ruff",

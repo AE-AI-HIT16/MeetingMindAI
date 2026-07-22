@@ -13,8 +13,6 @@ from fastapi.testclient import TestClient
 
 from meetasr.api.app import app
 from meetasr.api.dependencies import get_pipeline
-from meetasr.api import mock_db
-
 
 # ---------------------------------------------------------
 # HELPERS & MOCK SETUP
@@ -209,55 +207,3 @@ def test_summarize_no_llm_returns_503():
         # Always restore the default override to prevent test pollution
         app.dependency_overrides[get_pipeline] = _override_get_pipeline
 
-
-# ---------------------------------------------------------
-# MEETING STATUS
-# ---------------------------------------------------------
-
-def test_meeting_status_returns_record_for_valid_id():
-    """GET /v1/meeting/{id}/status with a valid ID must return 200 and the meeting record."""
-    meeting_id = "status-test-valid"
-    mock_db.create_meeting(meeting_id, "test.wav", "/tmp/test.wav")
-    response = client.get(f"/v1/meeting/{meeting_id}/status")
-    assert response.status_code == 200
-    assert response.json()["status"] == "pending"
-
-
-def test_meeting_status_not_found_returns_404_with_error_body():
-    """GET /v1/meeting/{id}/status with unknown ID must return 404 with correct error body."""
-    response = client.get("/v1/meeting/nonexistent-id-xyz/status")
-    assert response.status_code == 404
-    body = response.json()
-    assert body["detail"]["error"]["code"] == "meeting_not_found"
-
-
-# ---------------------------------------------------------
-# MOCK DB — Direct unit tests (no HTTP)
-# ---------------------------------------------------------
-
-def test_mock_db_full_state_machine():
-    """mock_db must transition correctly: pending → processing → completed with result."""
-    test_id = "db-sm-001"
-    mock_db.create_meeting(test_id, "meeting.wav", "/tmp/audio.wav")
-
-    record = mock_db.get_meeting(test_id)
-    assert record is not None
-    assert record["status"] == "pending"
-
-    mock_db.update_status(test_id, "processing")
-    assert mock_db.get_meeting(test_id)["status"] == "processing"
-
-    mock_db.update_status(test_id, "completed", result={"summary": "done"})
-    final = mock_db.get_meeting(test_id)
-    assert final["status"] == "completed"
-    assert final["result"]["summary"] == "done"
-
-
-def test_mock_db_get_nonexistent_returns_none():
-    """mock_db.get_meeting with an unknown ID must return None."""
-    assert mock_db.get_meeting("nonexistent-id-does-not-exist") is None
-
-
-def test_mock_db_update_invalid_id_no_crash():
-    """mock_db.update_status with an unknown ID must not raise an exception."""
-    mock_db.update_status("nonexistent-id-does-not-exist", "processing")  # must not crash

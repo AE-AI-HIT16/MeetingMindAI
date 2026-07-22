@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Optional
+from typing import Optional, Any
 
 from omegaconf import OmegaConf
 
@@ -101,7 +101,7 @@ class AutoPipeline:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _build_optional(config: dict, key: str, device: str):
+    def _build_optional(config: dict, key: str, device: str) -> Any:
         """Build an optional model component from config[key]."""
         if key not in config or not config[key]:
             return None
@@ -111,7 +111,7 @@ class AutoPipeline:
         return AutoModel(**cfg)
 
     @staticmethod
-    def _build_llm(llm_cfg: dict):
+    def _build_llm(llm_cfg: dict) -> Any:
         """Build a MeetingSummarizer from LLM config."""
         from meetasr.llm.summarizer import MeetingSummarizer
         from meetasr.register import tables

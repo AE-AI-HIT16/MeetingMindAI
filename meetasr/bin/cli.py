@@ -9,7 +9,7 @@ import os
 import sys
 
 
-def cmd_transcribe(args):
+def cmd_transcribe(args: argparse.Namespace) -> None:
     """Run transcription on one or more audio files."""
     from meetasr.auto.auto_pipeline import AutoPipeline
     from meetasr.utils.llm_export import transcript_to_llm_payload
@@ -62,7 +62,7 @@ def cmd_transcribe(args):
             print(result.text)
 
 
-def cmd_summarize(args):
+def cmd_summarize(args: argparse.Namespace) -> None:
     """Run full meeting summarization."""
     from meetasr.auto.auto_pipeline import AutoPipeline
 
@@ -100,7 +100,7 @@ def cmd_summarize(args):
             print(output)
 
 
-def cmd_server(args):
+def cmd_server(args: argparse.Namespace) -> None:
     """Start the FastAPI server."""
     import uvicorn
     if args.config:
@@ -114,7 +114,7 @@ def cmd_server(args):
     )
 
 
-def main():
+def main() -> None:
     """Main CLI entry point."""
     parser = argparse.ArgumentParser(
         prog="meetasr",

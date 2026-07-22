@@ -87,7 +87,7 @@ class ViBERTCaPuPunc(AbsPunc):
             raise RuntimeError(f"Failed to load ViBERT-CaPu: {e}") from e
 
     @staticmethod
-    def _patch_transformers_resize():
+    def _patch_transformers_resize() -> None:
         """Keep old custom model code compatible with newer transformers."""
         import transformers
 

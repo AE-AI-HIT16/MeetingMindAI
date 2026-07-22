@@ -2,11 +2,14 @@
 
 import logging
 import os
+import shutil
+import subprocess
 from typing import Union
 
 import numpy as np
 
 SAMPLE_RATE = 16000  # All models expect 16kHz mono float32
+FFMPEG_FORMATS = {".aac", ".m4a", ".mp3", ".mp4", ".webm"}
 
 
 def load_audio(
@@ -48,7 +51,10 @@ def load_audio(
 
 
 def _load_from_file(path: str, target_sr: int) -> np.ndarray:
-    """Load audio from file using soundfile/librosa."""
+    """Load audio from a file, using FFmpeg for compressed containers."""
+    if os.path.splitext(path)[1].lower() in FFMPEG_FORMATS:
+        return _load_with_ffmpeg(path, target_sr)
+
     try:
         import soundfile as sf
         audio, sr = sf.read(path, dtype="float32", always_2d=False)
@@ -63,6 +69,50 @@ def _load_from_file(path: str, target_sr: int) -> np.ndarray:
             audio = audio.mean(axis=0, dtype=np.float32)
 
     return _postprocess(audio, sr, target_sr)
+
+
+def _load_with_ffmpeg(path: str, target_sr: int) -> np.ndarray:
+    """Decode a file to mono float32 PCM with the FFmpeg executable."""
+    ffmpeg = shutil.which("ffmpeg")
+    if ffmpeg is None:
+        raise RuntimeError(
+            "FFmpeg is required to decode this audio format. "
+            "Install ffmpeg and ensure it is available on PATH."
+        )
+
+    command = [
+        ffmpeg,
+        "-nostdin",
+        "-v",
+        "error",
+        "-i",
+        path,
+        "-vn",
+        "-ac",
+        "1",
+        "-ar",
+        str(target_sr),
+        "-f",
+        "f32le",
+        "-acodec",
+        "pcm_f32le",
+        "pipe:1",
+    ]
+    try:
+        result = subprocess.run(command, capture_output=True, check=False)
+    except OSError as exc:
+        raise RuntimeError(f"Failed to start FFmpeg: {exc}") from exc
+
+    if result.returncode != 0:
+        detail = result.stderr.decode("utf-8", errors="replace").strip()
+        raise ValueError(f"FFmpeg could not decode audio file {path!r}: {detail}")
+
+    audio = np.frombuffer(result.stdout, dtype="<f4").copy()
+    if audio.size == 0:
+        raise ValueError(f"FFmpeg decoded no audio samples from {path!r}")
+    if not np.isfinite(audio).all():
+        raise ValueError(f"Decoded audio contains non-finite samples: {path!r}")
+    return audio
 
 
 def _load_from_bytes(data: bytes, target_sr: int) -> np.ndarray:
