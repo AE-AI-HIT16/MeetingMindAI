@@ -42,15 +42,13 @@ class MockLLMClient(AbsLLMClient):
 
 
 class CountingLLMClient(AbsLLMClient):
-    """Mock LLM that counts calls per keyword category."""
+    """Mock LLM that records prompts without exposing a call counter."""
 
     def __init__(self, responses: dict[str, str]) -> None:
         self.responses = responses
-        self.call_count = 0
         self.calls: list[str] = []
 
     def chat(self, prompt: str, **kwargs) -> str:
-        self.call_count += 1
         self.calls.append(prompt)
         for keyword, response in self.responses.items():
             if keyword in prompt:
@@ -164,6 +162,10 @@ class TestShortTranscript:
         assert report.language == "vi"
         # Only 1 LLM call for short path
         assert len(mock.calls) == 1
+        assert planner.last_run_metrics is not None
+        assert planner.last_run_metrics.path == "short"
+        assert planner.last_run_metrics.llm_calls == 1
+        assert planner.last_run_metrics.calls_by_stage == {"single_pass": 1}
 
     def test_short_path_fallback_on_error(self):
         """If LLM returns invalid JSON, short path falls back gracefully."""
@@ -177,6 +179,21 @@ class TestShortTranscript:
         assert report.content_kind == "Tài liệu"
         assert report.sections == []
 
+    def test_client_failure_is_counted_by_planner(self):
+        """Planner metrics count attempted and failed calls without client counters."""
+        class FailingLLMClient(AbsLLMClient):
+            def chat(self, prompt: str, **kwargs) -> str:
+                raise RuntimeError("LLM unavailable")
+
+        planner = DocumentPlanner(client=FailingLLMClient())
+        report = planner.plan_and_write(_short_transcript())
+
+        assert report.content_kind == "Tài liệu"
+        assert planner.last_run_metrics is not None
+        assert planner.last_run_metrics.llm_calls == 1
+        assert planner.last_run_metrics.llm_failures == 1
+        assert planner.last_run_metrics.failures_by_stage == {"single_pass": 1}
+
     def test_empty_transcript_does_not_call_llm(self):
         """An empty transcript returns an empty report without inviting hallucination."""
         mock = MockLLMClient({})
@@ -188,6 +205,9 @@ class TestShortTranscript:
         assert report.content_kind == "Tài liệu"
         assert report.sections == []
         assert mock.calls == []
+        assert planner.last_run_metrics is not None
+        assert planner.last_run_metrics.path == "empty"
+        assert planner.last_run_metrics.llm_calls == 0
 
     def test_malformed_sections_are_ignored_and_duplicate_ids_are_fixed(self):
         """Single-pass output is normalized before building the report."""
@@ -258,7 +278,16 @@ class TestLongTranscript:
         formatted = planner._format_transcript(_long_transcript())
         n_chunks = len(chunk_with_overlap(formatted, overlap_lines=OVERLAP_LINES))
         assert len(report.sections) == 3
-        assert counting.call_count == n_chunks + 1 + len(report.sections)
+        assert planner.last_run_metrics is not None
+        assert planner.last_run_metrics.path == "long"
+        assert planner.last_run_metrics.chunk_count == n_chunks
+        assert planner.last_run_metrics.calls_by_stage == {
+            "extraction": n_chunks,
+            "aggregate": 1,
+            "reduce": len(report.sections),
+        }
+        assert planner.last_run_metrics.llm_calls == n_chunks + 1 + len(report.sections)
+        assert len(counting.calls) == planner.last_run_metrics.llm_calls
 
     def test_all_long_path_prompts_stay_within_context_budget(self):
         """Every long-path prompt must remain below the 8,000-character limit."""

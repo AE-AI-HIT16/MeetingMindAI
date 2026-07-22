@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+from dataclasses import dataclass, field
 
 from meetasr.llm.abs_llm import AbsLLMClient
 from meetasr.llm.planner_chunk import OVERLAP_LINES, chunk_with_overlap
@@ -37,6 +38,44 @@ MAX_CHARS_PER_CHUNK = 6000
 SHORT_TRANSCRIPT_CHARS = 6400
 MAX_AGGREGATE_DATA_CHARS = 6200
 MAX_REDUCE_DATA_CHARS = 7000
+
+
+@dataclass
+class PlannerRunMetrics:
+    """Metrics collected by one :meth:`DocumentPlanner.plan_and_write` run.
+
+    Counts are owned by the planner rather than inferred from optional client
+    attributes. A call is counted when attempted, including failed LLM calls.
+    """
+
+    path: str = "empty"
+    input_chars: int = 0
+    chunk_count: int = 0
+    section_count: int = 0
+    llm_calls: int = 0
+    llm_failures: int = 0
+    calls_by_stage: dict[str, int] = field(default_factory=dict)
+    failures_by_stage: dict[str, int] = field(default_factory=dict)
+    llm_seconds_by_stage: dict[str, float] = field(default_factory=dict)
+    total_seconds: float = 0.0
+
+    def to_dict(self) -> dict[str, object]:
+        """Return a logging/serialization-safe snapshot."""
+        return {
+            "path": self.path,
+            "input_chars": self.input_chars,
+            "chunk_count": self.chunk_count,
+            "section_count": self.section_count,
+            "llm_calls": self.llm_calls,
+            "llm_failures": self.llm_failures,
+            "calls_by_stage": dict(self.calls_by_stage),
+            "failures_by_stage": dict(self.failures_by_stage),
+            "llm_seconds_by_stage": {
+                stage: round(seconds, 4)
+                for stage, seconds in self.llm_seconds_by_stage.items()
+            },
+            "total_seconds": round(self.total_seconds, 4),
+        }
 
 
 class DocumentPlanner:
@@ -59,6 +98,7 @@ class DocumentPlanner:
         self.language = language.strip() or "vi"
         self.temperature = temperature
         self.max_tokens = max_tokens
+        self.last_run_metrics: PlannerRunMetrics | None = None
         from meetasr.llm.llm_utils.prompts import load_generic_prompts
         self._prompts = load_generic_prompts(language=self.language)
 
@@ -70,25 +110,36 @@ class DocumentPlanner:
         """Full pipeline: structured extract → aggregate plan → reduce."""
         t0 = time.perf_counter()
         full_text = self._format_transcript(transcript)
+        metrics = PlannerRunMetrics(input_chars=len(full_text))
 
         if not full_text.strip():
             logger.warning("DocumentPlanner received an empty transcript.")
             report = DocumentReport(content_kind="Tài liệu")
         elif len(full_text) < SHORT_TRANSCRIPT_CHARS:
-            report = self._short_path(full_text)
+            metrics.path = "short"
+            report = self._short_path(full_text, metrics)
         else:
-            report = self._long_path(full_text)
+            metrics.path = "long"
+            report = self._long_path(full_text, metrics)
 
         report.language = self.language
         report.llm_model = getattr(self.client, "model", "")
-        report.processing_time = round(time.perf_counter() - t0, 2)
+        metrics.section_count = len(report.sections)
+        metrics.total_seconds = time.perf_counter() - t0
+        report.processing_time = round(metrics.total_seconds, 2)
+        self.last_run_metrics = metrics
+        logger.info("DocumentPlanner metrics: %s", metrics.to_dict())
         return report
 
     # ------------------------------------------------------------------
     # Short path — one call within the 8,000-character input budget
     # ------------------------------------------------------------------
 
-    def _short_path(self, full_text: str) -> DocumentReport:
+    def _short_path(
+        self,
+        full_text: str,
+        metrics: PlannerRunMetrics | None = None,
+    ) -> DocumentReport:
         """Single LLM call for short transcripts using single_pass prompt.
 
         Uses single_pass_vi.txt which returns complete JSON with
@@ -97,8 +148,11 @@ class DocumentPlanner:
         """
         prompt = self._prompts["single_pass"].format(transcript=full_text)
         try:
-            raw = self.client.chat(
-                prompt, temperature=self.temperature, max_tokens=self.max_tokens
+            raw = self._call_llm(
+                "single_pass",
+                prompt,
+                max_tokens=self.max_tokens,
+                metrics=metrics,
             )
             data = _parse_json_object(raw)
             content_kind = _safe_text(data.get("content_kind"), "Tài liệu")
@@ -113,23 +167,29 @@ class DocumentPlanner:
     # Long path — structured extraction + aggregate + reduce
     # ------------------------------------------------------------------
 
-    def _long_path(self, full_text: str) -> DocumentReport:
+    def _long_path(
+        self,
+        full_text: str,
+        metrics: PlannerRunMetrics | None = None,
+    ) -> DocumentReport:
         """Structured extraction pipeline for long transcripts."""
         chunks = chunk_with_overlap(
             full_text,
             max_chars=MAX_CHARS_PER_CHUNK,
             overlap_lines=OVERLAP_LINES,
         )
+        if metrics is not None:
+            metrics.chunk_count = len(chunks)
         logger.info(
             "Long path: %d chunks (overlap=%d lines), running extraction.",
             len(chunks), OVERLAP_LINES,
         )
 
         # Step 1: Structured extraction (sequential — parallel is future optimization)
-        extractions = self._run_extractions(chunks)
+        extractions = self._run_extractions(chunks, metrics)
 
         # Step 2: Aggregate plan
-        content_kind, outline = self._aggregate_plan(extractions)
+        content_kind, outline = self._aggregate_plan(extractions, metrics)
 
         # Step 3: Reduce each section from extraction results
         sections = []
@@ -137,7 +197,7 @@ class DocumentPlanner:
             raw_data = self._gather_for_section(sec, extractions)
             if not raw_data.strip():
                 continue
-            md = self._call_reduce(sec, content_kind, raw_data)
+            md = self._call_reduce(sec, content_kind, raw_data, metrics)
             found = bool(md.strip())
             sections.append(DocSection(
                 id=sec.get("id", "s"),
@@ -150,15 +210,22 @@ class DocumentPlanner:
         sections = [s for s in sections if s.found]
         return DocumentReport(content_kind=content_kind, sections=sections)
 
-    def _run_extractions(self, chunks: list[str]) -> list[dict]:
+    def _run_extractions(
+        self,
+        chunks: list[str],
+        metrics: PlannerRunMetrics | None = None,
+    ) -> list[dict]:
         """Run structured extraction on all chunks (sequential with logging)."""
         results = []
         for i, chunk in enumerate(chunks):
             logger.info("Extracting chunk %d/%d", i + 1, len(chunks))
             prompt = self._prompts["structured_extract"].format(chunk=chunk)
             try:
-                raw = self.client.chat(
-                    prompt, temperature=self.temperature, max_tokens=2048
+                raw = self._call_llm(
+                    "extraction",
+                    prompt,
+                    max_tokens=2048,
+                    metrics=metrics,
                 )
                 data = normalize_extraction(_parse_json_object(raw), i)
                 results.append(data)
@@ -167,7 +234,11 @@ class DocumentPlanner:
                 results.append({"chunk_index": i, "summary": ""})
         return results
 
-    def _aggregate_plan(self, extractions: list[dict]) -> tuple[str, list[dict]]:
+    def _aggregate_plan(
+        self,
+        extractions: list[dict],
+        metrics: PlannerRunMetrics | None = None,
+    ) -> tuple[str, list[dict]]:
         """Aggregate structured results into content_kind + outline.
 
         Dynamically scans ALL keys from extraction dicts so the
@@ -203,8 +274,11 @@ class DocumentPlanner:
             structured_summaries=combined
         )
         try:
-            raw = self.client.chat(
-                prompt, temperature=self.temperature, max_tokens=1024
+            raw = self._call_llm(
+                "aggregate",
+                prompt,
+                max_tokens=1024,
+                metrics=metrics,
             )
             data = _parse_json_object(raw)
             content_kind = _safe_text(data.get("content_kind"), "Tài liệu")
@@ -261,7 +335,13 @@ class DocumentPlanner:
 
         return join_text_parts(parts, MAX_REDUCE_DATA_CHARS)
 
-    def _call_reduce(self, section: dict, content_kind: str, raw_data: str) -> str:
+    def _call_reduce(
+        self,
+        section: dict,
+        content_kind: str,
+        raw_data: str,
+        metrics: PlannerRunMetrics | None = None,
+    ) -> str:
         """Reduce gathered data into final markdown for one section."""
         prompt = self._prompts["reduce_section"].format(
             heading=section.get("heading", ""),
@@ -270,12 +350,49 @@ class DocumentPlanner:
             raw_data=raw_data,
         )
         try:
-            return self.client.chat(
-                prompt, temperature=self.temperature, max_tokens=self.max_tokens
+            return self._call_llm(
+                "reduce",
+                prompt,
+                max_tokens=self.max_tokens,
+                metrics=metrics,
             ).strip()
         except Exception as e:
             logger.warning("Reduce failed for '%s': %s", section.get("heading"), e)
             return ""
+
+    def _call_llm(
+        self,
+        stage: str,
+        prompt: str,
+        *,
+        max_tokens: int,
+        metrics: PlannerRunMetrics | None,
+    ) -> str:
+        """Call the LLM and record planner-owned attempt/failure/timing metrics."""
+        if metrics is not None:
+            metrics.llm_calls += 1
+            metrics.calls_by_stage[stage] = metrics.calls_by_stage.get(stage, 0) + 1
+
+        started = time.perf_counter()
+        try:
+            return self.client.chat(
+                prompt,
+                temperature=self.temperature,
+                max_tokens=max_tokens,
+            )
+        except Exception:
+            if metrics is not None:
+                metrics.llm_failures += 1
+                metrics.failures_by_stage[stage] = (
+                    metrics.failures_by_stage.get(stage, 0) + 1
+                )
+            raise
+        finally:
+            if metrics is not None:
+                elapsed = time.perf_counter() - started
+                metrics.llm_seconds_by_stage[stage] = (
+                    metrics.llm_seconds_by_stage.get(stage, 0.0) + elapsed
+                )
 
     # ------------------------------------------------------------------
     # Helpers
