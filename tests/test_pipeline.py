@@ -22,6 +22,16 @@ class FakeVAD:
         ]
 
 
+class ShortChunkVAD(FakeVAD):
+    """VAD configured to keep chunks at or below 30 seconds."""
+
+    max_segment_ms = 30000
+
+    def detect(self, audio):
+        self.detected_audio = audio
+        return [Segment(0, 60010)]
+
+
 class FakeASR:
     """Fake ASR that records chunks and returns one result per chunk."""
 
@@ -47,6 +57,77 @@ class FakePunc:
         return "Hôm nay họp."
 
 
+class TimestampedFakeASR(FakeASR):
+    """Fake ASR returning chunk-relative character timestamps."""
+
+    def recognize(self, chunks, **kwargs):
+        self.chunks = chunks
+        self.kwargs = kwargs
+        return [
+            {"text": "xin", "timestamp": [[0, 100], [100, 200], [200, 300]]},
+            {"text": "hop", "timestamp": [[0, 100], [100, 200], [200, 300]]},
+        ]
+
+
+class LongFormFakeASR:
+    """ASR with native VAD and punctuation, like Faster-Whisper."""
+
+    uses_internal_vad = True
+    has_native_punctuation = True
+
+    def __init__(self):
+        self.audio = None
+        self.kwargs = None
+
+    def recognize_long_form(self, audio, **kwargs):
+        self.audio = audio
+        self.kwargs = kwargs
+        return [{
+            "text": "xin chao.",
+            "timestamp": [[1000, 1100]] * 9,
+        }]
+
+    def recognize(self, *args, **kwargs):
+        raise AssertionError("Long-form ASR must not receive VAD chunks")
+
+
+class GapRescueVAD(FakeVAD):
+    def detect(self, audio):
+        self.detected_audio = audio
+        return [Segment(2000, 4500)]
+
+
+class GapRescueFakeASR(LongFormFakeASR):
+    def __init__(self):
+        super().__init__()
+        self.calls = []
+
+    def recognize_long_form(self, audio, **kwargs):
+        self.calls.append((audio, kwargs))
+        if len(self.calls) == 1:
+            return [
+                {"text": "mot", "timestamp": [[0, 1000]] * 3},
+                {"text": "ba", "timestamp": [[5000, 6000]] * 2},
+            ]
+        return [{
+            "text": "giua them",
+            "timestamp": [
+                [0, 200], [200, 400], [400, 600], [600, 800],
+                [4200, 4300], [4300, 4400], [4400, 4500], [4500, 4600],
+                [4600, 4800],
+            ],
+        }]
+
+
+class RecordingPunc:
+    def __init__(self):
+        self.calls = []
+
+    def restore(self, text):
+        self.calls.append(text)
+        return text
+
+
 def test_transcribe_builds_transcript_from_vad_and_asr_segments():
     audio = np.zeros(4 * 16000, dtype=np.float32)
     vad = FakeVAD()
@@ -66,6 +147,22 @@ def test_transcribe_builds_transcript_from_vad_and_asr_segments():
     assert [len(chunk) for chunk in asr.chunks] == [19200, 22400]
     assert vad.detected_audio.shape == audio.shape
     assert vad.detected_audio.dtype == np.float32
+
+
+def test_transcribe_offsets_word_timestamps_from_padded_chunk_start():
+    audio = np.zeros(4 * 16000, dtype=np.float32)
+    pipeline = MeetPipeline(asr_model=TimestampedFakeASR(), vad_model=FakeVAD())
+
+    result = pipeline.transcribe(audio, key="sample_vi", language="vi")
+
+    # First VAD segment begins at 500 ms but the ASR chunk begins at 400 ms
+    # after 100 ms left padding. Whisper timestamps are relative to that chunk.
+    assert result.sentence_info[0].char_timestamps == [
+        [400, 500],
+        [500, 600],
+        [600, 700],
+    ]
+    assert (result.sentence_info[0].start, result.sentence_info[0].end) == (0.4, 0.7)
 
 
 def test_transcribe_splits_long_punctuated_segments():
@@ -93,3 +190,53 @@ def test_transcribe_splits_long_punctuated_segments():
     ]
     assert result.sentence_info[0].start == 0.0
     assert result.sentence_info[-1].end == 6.0
+
+
+def test_run_vad_respects_model_max_segment_duration():
+    vad = ShortChunkVAD()
+    pipeline = MeetPipeline(asr_model=FakeASR(), vad_model=vad)
+    audio = np.zeros(60 * 16000, dtype=np.float32)
+
+    segments = pipeline._run_vad(audio)
+
+    assert [(segment.start_ms, segment.end_ms) for segment in segments] == [
+        (0, 30000),
+        (30000, 60010),
+    ]
+
+
+def test_transcribe_uses_whisper_long_form_without_external_punctuation():
+    audio = np.zeros(4 * 16000, dtype=np.float32)
+    vad = FakeVAD()
+    asr = LongFormFakeASR()
+    punc = RecordingPunc()
+    pipeline = MeetPipeline(asr_model=asr, vad_model=vad, punc_model=punc)
+
+    result = pipeline.transcribe(audio, key="long_form", language="vi")
+
+    assert np.array_equal(asr.audio, audio)
+    assert asr.kwargs == {"language": "vi"}
+    assert np.array_equal(vad.detected_audio, audio)
+    assert punc.calls == []
+    assert result.text == "xin chao."
+    assert result.sentence_info[0].char_timestamps == [[1000, 1100]] * 9
+    assert (result.sentence_info[0].start, result.sentence_info[0].end) == (1.0, 1.1)
+
+
+def test_transcribe_rescues_only_vad_confirmed_gap_and_clips_context():
+    audio = np.zeros(6 * 16000, dtype=np.float32)
+    asr = GapRescueFakeASR()
+    pipeline = MeetPipeline(
+        asr_model=asr,
+        vad_model=GapRescueVAD(),
+        enable_gap_rescue=True,
+    )
+
+    result = pipeline.transcribe(audio, key="gap_rescue", language="vi")
+
+    assert [sentence.text for sentence in result.sentence_info] == [
+        "mot", "giua", "ba",
+    ]
+    assert len(asr.calls) == 2
+    assert len(asr.calls[1][0]) == 5 * 16000
+    assert asr.calls[1][1]["key"] == "gap_rescue_0"
