@@ -1,8 +1,12 @@
 """Tests for audio loading utilities."""
 
 import io
+import sys
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
+from meetasr.utils import audio as audio_utils
 from meetasr.utils.audio import load_audio, SAMPLE_RATE
 
 
@@ -49,3 +53,24 @@ class TestLoadAudio:
         assert result.dtype == np.float32
         assert result.ndim == 1
         assert abs(len(result) - len(audio)) < 100  # allow small resampling diff
+
+    def test_librosa_fallback_downmixes_channel_first_audio(self, monkeypatch):
+        """librosa M4A fallback returns [channels, samples], not [samples, channels]."""
+        left = make_sine()
+        right = left * 0.5
+        channel_first = np.stack([left, right], axis=0)
+
+        def fail_soundfile_read(*args, **kwargs):
+            raise RuntimeError("unsupported container")
+
+        fake_soundfile = SimpleNamespace(read=fail_soundfile_read)
+        fake_librosa = SimpleNamespace(
+            load=lambda *args, **kwargs: (channel_first, SAMPLE_RATE),
+        )
+        monkeypatch.setitem(sys.modules, "soundfile", fake_soundfile)
+        monkeypatch.setitem(sys.modules, "librosa", fake_librosa)
+
+        result = audio_utils._load_from_file("sample.m4a", SAMPLE_RATE)
+
+        assert result.shape == left.shape
+        np.testing.assert_allclose(result, (left + right) / 2)

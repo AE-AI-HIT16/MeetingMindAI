@@ -57,6 +57,10 @@ def _load_from_file(path: str, target_sr: int) -> np.ndarray:
         logging.debug(f"soundfile failed to load {path} ({e}), falling back to librosa.")
         import librosa
         audio, sr = librosa.load(path, sr=None, mono=False, dtype=np.float32)
+        # librosa returns multi-channel audio as [channels, samples], unlike
+        # soundfile's [samples, channels] layout handled by _postprocess.
+        if audio.ndim == 2:
+            audio = audio.mean(axis=0, dtype=np.float32)
 
     return _postprocess(audio, sr, target_sr)
 
