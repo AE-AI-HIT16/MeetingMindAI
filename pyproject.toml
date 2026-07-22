@@ -49,6 +49,14 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+export = [
+    "bleach>=6.0",
+    "docxcompose>=1.4",
+    "docxtpl>=0.19",
+    "markdown-it-py>=3.0",
+    "python-docx>=1.1",
+    "weasyprint>=60.0",
+]
 dev = [
     "pytest>=7.0",
     "pytest-cov",
@@ -63,6 +71,12 @@ meetasr-server = "meetasr.bin.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["meetasr*"]
+
+[tool.setuptools.package-data]
+"meetasr.export" = [
+    "fonts/*.ttf",
+    "templates/docx/*.docx",
+]
 
 [tool.black]
 line-length = 100
