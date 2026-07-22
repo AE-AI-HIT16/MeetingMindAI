@@ -13,11 +13,55 @@ Config example:
 from __future__ import annotations
 
 import logging
+import os
+import site
+from pathlib import Path
 
 import numpy as np
 
 from meetasr.register import tables
 from meetasr.models.abs_models import AbsASR
+
+
+_DECODE_OPTIONS = (
+    "beam_size",
+    "temperature",
+    "condition_on_previous_text",
+    "compression_ratio_threshold",
+    "log_prob_threshold",
+    "no_speech_threshold",
+)
+_LONG_FORM_OPTIONS = (
+    "vad_filter",
+    "vad_parameters",
+    "hallucination_silence_threshold",
+)
+_CUDA_DLL_DIRECTORIES = []
+_CUDA_DLL_DIRECTORIES_CONFIGURED = False
+
+
+def _configure_windows_cuda_runtime() -> None:
+    """Expose pip-installed NVIDIA DLLs before CTranslate2 is imported."""
+    global _CUDA_DLL_DIRECTORIES_CONFIGURED
+    if os.name != "nt" or _CUDA_DLL_DIRECTORIES_CONFIGURED:
+        return
+
+    _CUDA_DLL_DIRECTORIES_CONFIGURED = True
+    dll_paths = []
+    for site_package in site.getsitepackages():
+        root = Path(site_package) / "nvidia"
+        for package in ("cublas", "cudnn", "cuda_nvrtc"):
+            dll_directory = root / package / "bin"
+            if dll_directory.is_dir():
+                dll_paths.append(str(dll_directory))
+                _CUDA_DLL_DIRECTORIES.append(
+                    os.add_dll_directory(str(dll_directory))
+                )
+
+    if dll_paths:
+        os.environ["PATH"] = os.pathsep.join(
+            [*dll_paths, os.environ.get("PATH", "")]
+        )
 
 
 @tables.register("model_classes", key="faster-whisper")
@@ -27,6 +71,9 @@ class FasterWhisperASR(AbsASR):
     Compatible with OpenAI Whisper model sizes (tiny → large-v3).
     Uses CTranslate2 for fast inference with native word timestamps.
     """
+
+    uses_internal_vad = True
+    has_native_punctuation = True
 
     def __init__(
         self,
@@ -60,6 +107,7 @@ class FasterWhisperASR(AbsASR):
         if self._model is not None:
             return
         try:
+            _configure_windows_cuda_runtime()
             from faster_whisper import WhisperModel
 
             # Ignore model_path if it's just the registry key from AutoModel
@@ -109,42 +157,134 @@ class FasterWhisperASR(AbsASR):
         if isinstance(audio, np.ndarray):
             audio = [audio]
 
+        decode_options = self._decode_options(kwargs)
+
         results = []
         for idx, chunk in enumerate(audio):
-            segments_gen, info = self._model.transcribe(
+            segments_gen, _ = self._model.transcribe(
                 chunk,
                 language=language if language != "auto" else None,
-                beam_size=kwargs.get("beam_size", 5),
                 word_timestamps=True,
                 vad_filter=False,  # MeetASR has its own VAD
+                **decode_options,
             )
 
-            # Expand word timestamps → per-character timestamps
-            # so that len(text) == len(char_timestamps)
-            text_chars = []
-            char_timestamps = []
-
-            for segment in segments_gen:
-                if segment.words:
-                    for word in segment.words:
-                        ts = [int(word.start * 1000), int(word.end * 1000)]
-                        for c in word.word:
-                            text_chars.append(c)
-                            char_timestamps.append(ts)
-
-            # Strip whitespace and trim timestamps to match
-            raw_text = "".join(text_chars)
-            text = raw_text.strip()
-            start_trim = len(raw_text) - len(raw_text.lstrip())
-            end_trim = len(raw_text) - len(raw_text.rstrip())
-            if end_trim > 0:
-                char_timestamps = char_timestamps[start_trim:-end_trim]
-            elif start_trim > 0:
-                char_timestamps = char_timestamps[start_trim:]
-
-            results.append({
-                "key": kwargs.get("key", f"chunk_{idx}"),
-                "text": text,
-                "timestamp": char_timestamps,
-            })
+            results.append(self._result_from_segments(
+                segments_gen,
+                key=kwargs.get("key", f"chunk_{idx}"),
+            ))
         return results
+
+    def recognize_long_form(
+        self,
+        audio: np.ndarray,
+        language: str = "vi",
+        **kwargs,
+    ) -> list[dict]:
+        """Transcribe one complete recording with Faster-Whisper's VAD.
+
+        Faster-Whisper restores timestamps to the original audio timeline after
+        its internal VAD removes silence. This avoids feeding arbitrary fixed
+        chunks to Whisper, which can otherwise drop words at chunk boundaries.
+        """
+        self._ensure_loaded()
+        if not isinstance(audio, np.ndarray):
+            raise TypeError("recognize_long_form expects one numpy audio array")
+
+        long_form_options = {
+            name: self._kwargs[name]
+            for name in _LONG_FORM_OPTIONS
+            if name in self._kwargs
+        }
+        long_form_options.update({
+            name: kwargs[name]
+            for name in _LONG_FORM_OPTIONS
+            if name in kwargs
+        })
+        long_form_options.setdefault("vad_filter", True)
+        long_form_options.setdefault(
+            "vad_parameters", {"min_silence_duration_ms": 500}
+        )
+        long_form_options.setdefault("hallucination_silence_threshold", 2.0)
+
+        segments_gen, _ = self._model.transcribe(
+            audio,
+            language=language if language != "auto" else None,
+            word_timestamps=True,
+            **long_form_options,
+            **self._decode_options(kwargs),
+        )
+        key = kwargs.get("key", "long_form")
+        results = []
+        for index, segment in enumerate(segments_gen):
+            result = self._result_from_segments([segment], key=f"{key}_{index}")
+            if result["text"]:
+                results.append(result)
+        return results
+
+    def _decode_options(self, runtime_kwargs: dict) -> dict:
+        """Merge configured decode controls with per-call overrides."""
+        options = {
+            name: self._kwargs[name]
+            for name in _DECODE_OPTIONS
+            if name in self._kwargs
+        }
+        options.update({
+            name: runtime_kwargs[name]
+            for name in _DECODE_OPTIONS
+            if name in runtime_kwargs
+        })
+        return options
+
+    @staticmethod
+    def _result_from_segments(segments_gen, key: str) -> dict:
+        """Expand word timestamps and preserve native per-segment quality data."""
+        text_chars = []
+        char_timestamps = []
+        segment_quality = []
+
+        for segment in segments_gen:
+            if not segment.words:
+                continue
+            quality = FasterWhisperASR._quality_from_segment(segment)
+            if quality:
+                segment_quality.append(quality)
+            for word in segment.words:
+                timestamp = [int(word.start * 1000), int(word.end * 1000)]
+                for char in word.word:
+                    text_chars.append(char)
+                    char_timestamps.append(timestamp)
+
+        raw_text = "".join(text_chars)
+        text = raw_text.strip()
+        start_trim = len(raw_text) - len(raw_text.lstrip())
+        end_trim = len(raw_text) - len(raw_text.rstrip())
+        if end_trim > 0:
+            char_timestamps = char_timestamps[start_trim:-end_trim]
+        elif start_trim > 0:
+            char_timestamps = char_timestamps[start_trim:]
+
+        result = {"key": key, "text": text, "timestamp": char_timestamps}
+        if segment_quality:
+            result["segment_quality"] = segment_quality
+        return result
+
+    @staticmethod
+    def _quality_from_segment(segment) -> dict:
+        """Return JSON-safe quality fields exposed by Faster-Whisper, if present."""
+        quality = {}
+        for name in (
+            "start",
+            "end",
+            "avg_logprob",
+            "no_speech_prob",
+            "compression_ratio",
+        ):
+            value = getattr(segment, name, None)
+            if value is None:
+                continue
+            try:
+                quality[name] = float(value)
+            except (TypeError, ValueError):
+                continue
+        return quality

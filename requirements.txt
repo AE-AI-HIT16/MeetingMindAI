@@ -1,0 +1,30 @@
+# Audio
+torch>=2.0
+torchaudio
+librosa
+soundfile>=0.12.1
+numpy
+scipy>=1.4.1
+
+# Configuration and model download
+omegaconf>=2.0
+modelscope
+huggingface_hub
+
+# ASR and tokenizers
+funasr
+faster-whisper>=1.2,<2
+sherpa-onnx
+transformers
+sentencepiece
+
+# Speaker clustering
+fastcluster>=1.2.6
+scikit-learn
+
+# API and LLM
+fastapi
+uvicorn[standard]
+python-multipart
+pydantic>=2.0
+openai>=1.0
