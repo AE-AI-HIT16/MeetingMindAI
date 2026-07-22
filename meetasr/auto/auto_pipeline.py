@@ -38,8 +38,8 @@ class AutoPipeline:
         """Build a MeetPipeline from a configuration dictionary.
 
         Args:
-            config: Dict with keys: "asr" (required), "vad", "punc", "spk", "llm".
-                    Each sub-dict must have a "model" key.
+            config: Dict with keys: "asr" (required), "vad", "punc", "spk",
+                "llm", and optional pipeline behavior settings.
 
         Returns:
             Configured MeetPipeline instance.
@@ -64,6 +64,9 @@ class AutoPipeline:
         if "llm" in config and config["llm"]:
             summarizer = cls._build_llm(config["llm"])
 
+        pipeline_cfg = config.get("pipeline") or {}
+        gap_rescue_cfg = pipeline_cfg.get("gap_rescue") or {}
+
         return MeetPipeline(
             asr_model=asr_model,
             vad_model=vad_model,
@@ -71,6 +74,7 @@ class AutoPipeline:
             spk_model=spk_model,
             llm_summarizer=summarizer,
             device=device,
+            enable_gap_rescue=gap_rescue_cfg.get("enabled", False),
         )
 
     @classmethod
