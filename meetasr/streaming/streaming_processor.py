@@ -32,6 +32,9 @@ class StreamingProcessor:
         self.session = session
         self.pipeline = pipeline
 
+        # DEBUG: đếm số lần process được gọi
+        self._debug_chunk_count = 0
+
     # ----------------------------------------------------------
 
     def process(self):
@@ -50,25 +53,34 @@ class StreamingProcessor:
 
         pending_s = self.session.pending_audio.size / SAMPLE_RATE
 
-        segments = self.pipeline.vad.detect(
+        # segments = self.pipeline.vad.detect(
+        #     self.session.pending_audio,
+        #     cache=self.session.vad_state,
+        #     is_final=True,
+        # )
+
+        segments = split_fixed_segments(
             self.session.pending_audio,
-            cache=self.session.vad_state,
-            is_final=True,
+            segment_ms=3000,
         )
 
-        print("=" * 50)
-        print(f"pending audio duration: {pending_s:.2f}s")
-        print(f"VAD returned {len(segments)} segments")
+        # DEBUG: đếm số lần process được gọi
+        self._debug_chunk_count += 1
+        if (self._debug_chunk_count == 10):
+            print("=" * 50)
+            print(f"pending audio duration: {pending_s:.2f}s")
+            print(f"VAD returned {len(segments)} segments")
 
-        for i, seg in enumerate(segments):
-            print(
-                f"  Segment {i}: "
-                f"{seg.start_ms / 1000:.3f}s -> "
-                f"{seg.end_ms / 1000:.3f}s "
-                f"(duration={(seg.end_ms - seg.start_ms) / 1000:.3f}s)"
-            )
+            for i, seg in enumerate(segments):
+                print(
+                    f"  Segment {i}: "
+                    f"{seg.start_ms / 1000:.3f}s -> "
+                    f"{seg.end_ms / 1000:.3f}s "
+                    f"(duration={(seg.end_ms - seg.start_ms) / 1000:.3f}s)"
+                )
 
-        print("=" * 50)
+            print("=" * 50)
+            self._debug_chunk_count = 0
 
         log_key = (len(segments), int(pending_s))
         if getattr(self, "_last_vad_log", None) != log_key:
@@ -151,3 +163,52 @@ class StreamingProcessor:
         )
 
     # ----------------------------------------------------------
+
+# DEBUG
+
+from meetasr.schemas import Segment
+
+SAMPLE_RATE = 16000
+
+
+def split_fixed_segments(
+    audio: np.ndarray,
+    segment_ms: int = 3000,
+) -> list[Segment]:
+    """
+    Chia audio thành các segment cố định.
+
+    Args:
+        audio:
+            Float32 mono audio 16kHz.
+        segment_ms:
+            Độ dài mỗi segment (ms), mặc định 3 giây.
+
+    Returns:
+        List[Segment] với start_ms/end_ms.
+    """
+
+    total_ms = int(
+        len(audio) / SAMPLE_RATE * 1000
+    )
+
+    segments = []
+
+    start_ms = 0
+
+    while start_ms < total_ms:
+        end_ms = min(
+            start_ms + segment_ms,
+            total_ms,
+        )
+
+        segments.append(
+            Segment(
+                start_ms,
+                end_ms,
+            )
+        )
+
+        start_ms = end_ms
+
+    return segments

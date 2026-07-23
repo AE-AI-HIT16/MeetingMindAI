@@ -37,16 +37,17 @@ class ASRWorker:
                 try:
                     duration_s = len(audio) / 16000.0
                     print(
-                        f"ASR: start transcribe window=%.2fs asr_q=%d",
-                        duration_s,
-                        self.session.asr_queue.qsize(),
+                        f"ASR: start transcribe "
+                        f"window={duration_s:.2f}s "
+                        f"asr_q={self.session.asr_queue.qsize()}"
                     )
 
                     result = (await self._transcribe(audio))
 
+                    text_len = len(result.text) if result and result.text else 0
+
                     print(
-                        f"ASR: done text_len=%d",
-                        len(result.text) if result and result.text else 0,
+                        f"ASR: done text_len={text_len}"
                     )
 
                     await self._send_result(result)

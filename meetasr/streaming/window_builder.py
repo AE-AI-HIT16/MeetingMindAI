@@ -98,9 +98,8 @@ class SegmentWindowBuilder:
             return
 
         print(
-            f"Window: enqueue asr window=%.2fs asr_q=%d",
-            duration,
-            self.session.asr_queue.qsize(),
+            f"Window: enqueue ASR window={duration:.2f}s "
+            f"asr_q={self.session.asr_queue.qsize()}"
         )
 
         await self.session.asr_queue.put(audio)
