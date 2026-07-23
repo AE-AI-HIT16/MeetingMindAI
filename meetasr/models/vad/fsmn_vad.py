@@ -91,7 +91,9 @@ class FsmnVAD(AbsVAD):
 
         Args:
             audio: Float32 mono audio at 16kHz.
-            **kwargs: Overrides (max_single_segment_time, etc.)
+            **kwargs: Overrides (max_single_segment_time, min_segment_ms,
+                cache, is_final). ``cache`` is mutated in place for streaming
+                sessions that reuse ``session.vad_state``.
 
         Returns:
             List of Segment(start_ms, end_ms), sorted by start_ms.
@@ -105,21 +107,43 @@ class FsmnVAD(AbsVAD):
         self._ensure_loaded()
         max_ms = kwargs.get("max_single_segment_time", self.max_segment_ms)
         min_ms = kwargs.get("min_segment_ms", self.min_segment_ms)
+        cache = kwargs.get("cache")
+        if cache is None:
+            cache = {}
+        is_final = kwargs.get("is_final", True)
 
-        segments_raw = self._run_inference(audio, max_single_segment_time=max_ms)
+        segments_raw = self._run_inference(
+            audio,
+            max_single_segment_time=max_ms,
+            cache=cache,
+            is_final=is_final,
+        )
         return _normalize_segments(segments_raw, min_segment_ms=min_ms)
 
-    def _run_inference(self, audio: np.ndarray, max_single_segment_time: int):
-        """Run the underlying model and return raw VAD segments."""
+    def _run_inference(
+        self,
+        audio: np.ndarray,
+        max_single_segment_time: int,
+        cache: dict | None = None,
+        is_final: bool = True,
+    ):
+        """Run the underlying model and return raw VAD segments.
+
+        ``cache`` is passed through to FunASR and mutated in place so callers
+        (realtime streaming) can persist state via ``session.vad_state``.
+        """
+        if cache is None:
+            cache = {}
+
         import torch
         with torch.no_grad():
             results = self._model.inference(
                 data_in=[audio],
                 key=["audio"],
                 frontend=self._frontend,
-                cache={},
+                cache=cache,
                 device=self.device,
-                is_final=True,
+                is_final=is_final,
                 max_single_segment_time=max_single_segment_time,
             )
 

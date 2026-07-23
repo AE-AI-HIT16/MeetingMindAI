@@ -181,6 +181,11 @@ class MeetingReport:
 
         return "\n".join(lines)
 
+    @dataclass
+    class Segment:
+        start_ms: int
+        end_ms: int
+
 
 # ---------------------------------------------------------------------------
 # Helpers

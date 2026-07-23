@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from meetasr.streaming.audio_validator import validate_audio
+from meetasr.streaming.validate import validate_audio
 
 
 class AudioReceiver:
@@ -17,7 +17,7 @@ class AudioReceiver:
         self,
         session,
         *,
-        chunk_size: int = 32000,  # ~1 giây PCM16 mono 16kHz
+        chunk_size: int = 3200,  # ~0.1 giây PCM16 mono 16kHz
     ):
         self.session = session
         self.chunk_size = chunk_size
@@ -30,10 +30,7 @@ class AudioReceiver:
 
         audio = validate_audio(audio)
 
-        # Lưu lại nếu cần replay/debug
-        self.session.audio_buffer.append(audio)
-
-        # Ghép frame vào buffer
+        # Ghép frame vào buffer (ring buffer float32 được worker ghi)
         self._buffer.extend(audio)
 
         # Cắt thành các chunk cố định
