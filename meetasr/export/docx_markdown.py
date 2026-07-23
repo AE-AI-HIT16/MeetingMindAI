@@ -24,15 +24,25 @@ class _ListState:
     next_number: int = 1
 
 
-def render_markdown(document: Any, markdown: str) -> None:
-    """Append rendered Markdown blocks to a python-docx document/subdocument."""
-    renderer = _DocxMarkdownRenderer(document)
+def render_markdown(
+    document: Any,
+    markdown: str,
+    *,
+    heading_level_offset: int = 0,
+) -> None:
+    """Append rendered Markdown blocks to a python-docx document/subdocument.
+
+    ``heading_level_offset`` adjusts Markdown heading levels before mapping
+    them to Word styles. For example, ``-1`` maps ``##`` to ``Heading 1``.
+    """
+    renderer = _DocxMarkdownRenderer(document, heading_level_offset)
     renderer.render(parse_markdown(markdown))
 
 
 class _DocxMarkdownRenderer:
-    def __init__(self, document: Any) -> None:
+    def __init__(self, document: Any, heading_level_offset: int = 0) -> None:
         self.document = document
+        self.heading_level_offset = heading_level_offset
         self.list_states: list[_ListState] = []
         self.item_paragraph_counts: list[int] = []
         self.quote_depth = 0
@@ -43,7 +53,11 @@ class _DocxMarkdownRenderer:
             token = tokens[index]
 
             if token.type == "heading_open":
-                level = min(max(int(token.tag[1:]), 1), 6)
+                markdown_level = int(token.tag[1:])
+                level = min(
+                    max(markdown_level + self.heading_level_offset, 1),
+                    6,
+                )
                 paragraph = self.document.add_paragraph(
                     style=self._style(f"Heading {level}", "Normal")
                 )
@@ -141,6 +155,7 @@ class _DocxMarkdownRenderer:
         from docx.shared import Cm
 
         depth = len(self.list_states)
+        # Templates own the page/style baseline; only list depth adds indent.
         paragraph.paragraph_format.left_indent = Cm(0.63 * depth)
         if self.item_paragraph_counts[-1] == 0:
             paragraph.paragraph_format.first_line_indent = Cm(-0.4)

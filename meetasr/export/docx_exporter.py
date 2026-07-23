@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 import io
-from datetime import date
+from collections.abc import Mapping
+from datetime import datetime
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from meetasr.export.docx_markdown import render_markdown
+from meetasr.export.markdown_parser import strip_leading_document_heading
 from meetasr.export.service import ExportArtifact, MissingExportDependency
 
 
-DocxTemplateName = Literal["minimal"]
+DocxTemplateName = Literal["minimal", "modern"]
 
 _DOCX_MEDIA_TYPE = (
     "application/vnd.openxmlformats-officedocument."
@@ -20,7 +22,14 @@ _DOCX_MEDIA_TYPE = (
 _TEMPLATE_DIRECTORY = Path(__file__).resolve().parent / "templates" / "docx"
 _TEMPLATES: dict[str, Path] = {
     "minimal": _TEMPLATE_DIRECTORY / "minimal.docx",
+    "modern": _TEMPLATE_DIRECTORY / "modern.docx",
 }
+_RESERVED_CONTEXT_KEYS = frozenset({"title", "generated_at", "time", "body"})
+
+
+def _markdown_body(markdown: str) -> str:
+    """Compatibility wrapper for the shared template-body normalization."""
+    return strip_leading_document_heading(markdown)
 
 
 def _load_docx_template_class():
@@ -51,22 +60,56 @@ def _resolve_template(template: str) -> Path:
     return path
 
 
+def _missing_context_fields(
+    document: Any,
+    context: Mapping[str, Any] | None,
+) -> list[str]:
+    """Return template-specific variables that have no usable value."""
+    supplied = context or {}
+    requested = document.get_undeclared_template_variables()
+    custom_fields = requested - _RESERVED_CONTEXT_KEYS
+
+    return sorted(
+        field
+        for field in custom_fields
+        if field not in supplied
+        or supplied[field] is None
+        or (
+            isinstance(supplied[field], str)
+            and not supplied[field].strip()
+        )
+    )
+
+
 def export_docx(
     markdown: str,
     title: str,
     *,
     template: DocxTemplateName = "minimal",
     generated_at: str | None = None,
+    context: Mapping[str, Any] | None = None,
 ) -> ExportArtifact:
-    """Export Markdown using the placeholders in ``minimal.docx``.
+    """Export Markdown using a registered DOCX template.
 
-    The template owns page layout and visual styles. This function supplies its
-    three placeholders: ``title``, ``generated_at`` and the ``body`` subdocument.
+    The exporter owns the system fields ``title``, ``generated_at``, ``time``
+    and ``body``. Template-specific fields such as ``author`` or ``department``
+    can be supplied through ``context``. Extra fields are harmless when the
+    selected template does not reference them.
+
+    A leading Markdown H1 is omitted because the template renders the document
+    title.
     """
     DocxTemplate = _load_docx_template_class()
     template_path = _resolve_template(template)
 
     document = DocxTemplate(str(template_path))
+    missing_fields = _missing_context_fields(document, context)
+    if missing_fields:
+        fields = ", ".join(missing_fields)
+        raise ValueError(
+            f"DOCX template '{template}' requires context fields: {fields}"
+        )
+
     try:
         body = document.new_subdoc()
     except (ImportError, ModuleNotFoundError) as exc:
@@ -74,16 +117,29 @@ def export_docx(
             "DOCX template rendering requires docxcompose. "
             "Install with: pip install -e '.[export]'"
         ) from exc
-    render_markdown(body, markdown)
+    # The template owns the document title, so body sections start at Word
+    # Heading 1 even though canonical Markdown represents them with ##.
+    render_markdown(
+        body,
+        _markdown_body(markdown),
+        heading_level_offset=-1,
+    )
 
-    document.render(
+    now = datetime.now()
+    template_context: dict[str, Any] = {
+        key: value
+        for key, value in (context or {}).items()
+        if key not in _RESERVED_CONTEXT_KEYS
+    }
+    template_context.update(
         {
             "title": title,
-            "generated_at": generated_at or date.today().strftime("%d/%m/%Y"),
+            "generated_at": generated_at or now.strftime("%d/%m/%Y"),
+            "time": now.strftime("%H:%M"),
             "body": body,
-        },
-        autoescape=True,
+        }
     )
+    document.render(template_context, autoescape=True)
 
     output = io.BytesIO()
     document.save(output)
