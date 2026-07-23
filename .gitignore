@@ -56,4 +56,4 @@ tmp/
 output/
 reports/
 
-FunASR/
+.pnpm-store/
