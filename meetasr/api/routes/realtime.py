@@ -1,6 +1,8 @@
 from meetasr.streaming.session import StreamSession
 from meetasr.streaming.worker import AudioWorker
 from meetasr.streaming.audio_receiver import AudioReceiver
+from meetasr.streaming.asr_worker import ASRWorker
+from meetasr.streaming.window_builder import SegmentWindowBuilder
 
 import asyncio
 import logging
@@ -24,20 +26,76 @@ async def realtime_stream(websocket: WebSocket):
     receiver = AudioReceiver(session)
 
     pipeline = websocket.app.state.pipeline
-    worker = AudioWorker(session, pipeline)
 
-    session.worker_task = asyncio.create_task(worker.run())
+    window_builder = SegmentWindowBuilder(session)
+
+    asr_worker = ASRWorker(session,pipeline,)
+
+    session.asr_task = asyncio.create_task(
+        asr_worker.run()
+    )
+
+    worker = AudioWorker(
+        session,
+        pipeline,
+        window_builder
+    )
+
+    worker_task = asyncio.create_task(
+        worker.run()
+    )
+
+    session.worker_task = worker_task
 
     try:
         while True:
+
             audio = await websocket.receive_bytes()
+
             await receiver.receive(audio)
 
     except WebSocketDisconnect:
-        logger.info("Client disconnected")
+        logger.info(
+            "Client disconnected"
+        )
 
     except Exception:
-        logger.exception("Realtime stream crashed")
+        logger.exception(
+            "Realtime stream crashed"
+        )
 
     finally:
-        await session.close()
+
+        # Đẩy phần audio còn dư
+        try:
+            await receiver.flush()
+        except Exception:
+            logger.exception(
+                "Audio flush failed"
+            )
+
+
+        # Đóng session
+        try:
+            await session.close()
+        except Exception:
+            logger.exception(
+                "Session close failed"
+            )
+
+
+        # Dừng worker
+        if worker_task:
+
+            worker_task.cancel()
+
+            try:
+                await worker_task
+
+            except asyncio.CancelledError:
+                pass
+
+            except Exception:
+                logger.exception(
+                    "Worker shutdown failed"
+                )

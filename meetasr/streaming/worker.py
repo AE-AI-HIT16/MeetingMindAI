@@ -1,32 +1,56 @@
-import asyncio
 import numpy as np
+
 from meetasr.pipeline import MeetPipeline
+from meetasr.streaming.streaming_processor import StreamingProcessor
 
 
 class AudioWorker:
 
-    def __init__(self, session, pipeline: MeetPipeline):
+    def __init__(
+            self,
+            session,
+            pipeline,
+            window_builder,
+    ):
         self.session = session
         self.pipeline = pipeline
+        self.window_builder = window_builder
+
+        self.processor = StreamingProcessor(
+            session=session,
+            pipeline=pipeline,
+        )
 
     async def run(self):
 
         while True:
 
-            # Lấy dữ liệu từ queue
-            audio = await self.session.audio_queue.get()
+            # Lấy chunk PCM16 từ queue
+            chunk = await self.session.audio_queue.get()
 
-            # Convert PCM16 bytes thành numpy float32
+            # PCM16 -> float32 [-1, 1]
             audio = np.frombuffer(
-                audio,
+                chunk,
                 dtype=np.int16,
             ).astype(np.float32) / 32768.0
 
-            # Xử lý ASR
-            result = self.pipeline.transcribe(audio)
+            # Lưu chunk vào ring buffer
+            self.session.audio_buffer.append(audio)
 
-            # Gửi kết quả qua websocket
-            if result is not None:
-                await self.session.websocket.send_json(result.to_dict())
+            # Ghép vào pending buffer
+            if self.session.pending_audio.size == 0:
+                self.session.pending_audio = audio
+            else:
+                self.session.pending_audio = np.concatenate(
+                    (
+                        self.session.pending_audio,
+                        audio,
+                    )
+                )
+
+            # Chạy Streaming VAD
+            self.processor.process()
+
+            await self.window_builder.process()
 
             self.session.audio_queue.task_done()

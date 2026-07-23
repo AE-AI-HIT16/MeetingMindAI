@@ -17,7 +17,7 @@ class AudioReceiver:
         self,
         session,
         *,
-        chunk_size: int = 32000,  # ~1 giây PCM16 mono 16kHz
+        chunk_size: int = 3200,  # ~0.1 giây PCM16 mono 16kHz
     ):
         self.session = session
         self.chunk_size = chunk_size
