@@ -1,0 +1,54 @@
+# Faster-Whisper Large-v3 preset for one 8 GB NVIDIA GPU.
+#
+# Before running, set:
+#   $env:ASR_MODEL_PATH = "D:/MeetingMindAI/models/whisper-large-v3-ct2"
+#
+# Copy this file to an untracked local config, then adjust component paths as needed.
+
+# Keep auxiliary models on CPU so the GPU is reserved for Whisper.
+device: cpu
+
+pipeline:
+  gap_rescue:
+    # Keep disabled until it passes more timestamped meeting benchmarks.
+    enabled: false
+
+asr:
+  model: faster-whisper
+  hub: none
+  model_path: ${oc.env:ASR_MODEL_PATH}
+  device: cuda:0
+  compute_type: float16
+  num_workers: 1
+
+  # Decode one recording at a time. Faster-Whisper's internal VAD keeps the
+  # original global timestamps, so MeetPipeline does not cut ASR at FSMN VAD
+  # boundaries. FSMN VAD remains available for CAM++ diarization.
+  vad_filter: true
+  vad_parameters:
+    min_silence_duration_ms: 500
+  hallucination_silence_threshold: 2.0
+
+  # Deterministic Vietnamese baseline. Keep prior text disabled to avoid a
+  # mistaken phrase propagating into later speech regions.
+  beam_size: 5
+  temperature: 0.0
+  condition_on_previous_text: false
+  compression_ratio_threshold: 2.4
+  log_prob_threshold: -1.0
+  no_speech_threshold: 0.6
+
+vad:
+  model: fsmn-vad
+  hub: ms
+  device: cpu
+  max_single_segment_time: 30000
+  min_segment_ms: 300
+
+# Whisper already returns punctuation. Establish an ASR baseline before adding
+# an external punctuation model.
+
+spk:
+  model: cam++
+  hub: ms
+  device: cpu

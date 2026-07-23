@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 name = "meetasr"
 version = "0.1.0"
 description = "Meeting Speech Recognition + LLM Summarization — rebuilt from FunASR"
-readme = "README_meetasr.md"
+readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [{ name = "MeetASR Contributors" }]
@@ -41,6 +41,8 @@ dependencies = [
     "openai>=1.0",
     # FunASR (for model weight reuse)
     "funasr",
+    # Production multilingual ASR backend
+    "faster-whisper>=1.2,<2",
     # Vietnamese ASR backend
     "sherpa-onnx",
     # Speaker clustering (3D-Speaker port)
