@@ -16,8 +16,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from meetasr import __version__
 from meetasr.auto.auto_pipeline import AutoPipeline
 from meetasr.api.dependencies import set_pipeline, CONFIG_PATH
-from meetasr.api.routes import health, transcribe, summarize, db_routes
+from meetasr.api.routes import health, transcribe, summarize, db_routes, realtime
 from meetasr.db.connection import init_db
+
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -43,6 +44,8 @@ async def lifespan(app: FastAPI):
         logger.info(f"Loading pipeline from {CONFIG_PATH}...")
         pipeline = AutoPipeline.from_yaml(CONFIG_PATH)
         set_pipeline(pipeline)
+
+        app.state.pipeline = pipeline
         logger.info("Pipeline ready.")
     else:
         logger.warning(
@@ -56,6 +59,11 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down... Cleaning up ML models and freeing VRAM.")
     set_pipeline(None)  # release reference so GC can free RAM/VRAM
 
+
+# Set log cho api realtime
+
+root = logging.getLogger()
+root.setLevel(logging.INFO)
 
 # ------------------------------------------------------------------
 # App Initialization
@@ -83,6 +91,7 @@ app.include_router(health.router)
 app.include_router(transcribe.router)
 app.include_router(summarize.router)
 app.include_router(db_routes.router)
+app.include_router(realtime.router)
 
 
 # ------------------------------------------------------------------
