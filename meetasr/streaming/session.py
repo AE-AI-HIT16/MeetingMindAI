@@ -20,7 +20,7 @@ class StreamSession:
         websocket,
         *,
         ring_buffer_size: int = 300,
-        queue_size: int = 20,
+        queue_size: int = 1000,
     ):
         self.websocket = websocket
 
@@ -33,7 +33,7 @@ class StreamSession:
 
         # Queue chứa window audio chờ ASR
         self.asr_queue = asyncio.Queue(
-            maxsize=5
+            maxsize=50
         )
 
         # ==========================================================

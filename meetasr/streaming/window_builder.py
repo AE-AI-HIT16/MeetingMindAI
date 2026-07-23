@@ -1,3 +1,5 @@
+import logging
+
 import numpy as np
 
 
@@ -5,6 +7,8 @@ SAMPLE_RATE = 16000
 
 MIN_WINDOW_SECONDS = 4
 MAX_WINDOW_SECONDS = 30
+
+logger = logging.getLogger(__name__)
 
 
 
@@ -47,8 +51,6 @@ class SegmentWindowBuilder:
         remaining = segment
 
         while len(remaining) > 0:
-            current_duration = (self.duration)
-
             max_samples = int(MAX_WINDOW_SECONDS * SAMPLE_RATE)
 
             current_samples = sum(len(x) for x in self.buffer)
@@ -94,6 +96,12 @@ class SegmentWindowBuilder:
 
         if duration < MIN_WINDOW_SECONDS:
             return
+
+        print(
+            f"Window: enqueue asr window=%.2fs asr_q=%d",
+            duration,
+            self.session.asr_queue.qsize(),
+        )
 
         await self.session.asr_queue.put(audio)
 

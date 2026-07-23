@@ -20,8 +20,7 @@ from meetasr.utils.diarization import (
     map_chars_to_speakers,
     split_at_speaker_turns,
 )
-from meetasr.utils.download import download_model
-from meetasr.utils.misc import deep_update
+
 from meetasr.utils.timestamp import (
     build_sentence_info,
     clip_sentence_to_range,

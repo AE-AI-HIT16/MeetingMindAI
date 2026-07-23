@@ -1,9 +1,13 @@
+import logging
+
 import numpy as np
 
 from meetasr.schemas import Segment
 
 
 SAMPLE_RATE = 16000
+
+logger = logging.getLogger(__name__)
 
 
 class StreamingProcessor:
@@ -41,7 +45,35 @@ class StreamingProcessor:
         if self.pipeline.vad is None:
             return
 
-        segments = self.pipeline.vad.detect(self.session.pending_audio)
+        if self.session.vad_state is None:
+            self.session.vad_state = {}
+
+        pending_s = self.session.pending_audio.size / SAMPLE_RATE
+
+        segments = self.pipeline.vad.detect(
+            self.session.pending_audio,
+            cache=self.session.vad_state,
+            is_final=True,
+        )
+
+        print("=" * 50)
+        print(f"pending audio duration: {pending_s:.2f}s")
+        print(f"VAD returned {len(segments)} segments")
+
+        for i, seg in enumerate(segments):
+            print(
+                f"  Segment {i}: "
+                f"{seg.start_ms / 1000:.3f}s -> "
+                f"{seg.end_ms / 1000:.3f}s "
+                f"(duration={(seg.end_ms - seg.start_ms) / 1000:.3f}s)"
+            )
+
+        print("=" * 50)
+
+        log_key = (len(segments), int(pending_s))
+        if getattr(self, "_last_vad_log", None) != log_key:
+            print(f"VAD: {len(segments)} segment(s), pending={pending_s:.2f}s")
+            self._last_vad_log = log_key
 
         if len(segments) < 2:
             return
@@ -55,10 +87,20 @@ class StreamingProcessor:
 
         self.session.ready_segments.append(audio)
 
+        print(
+            f"VAD: emitted ready segment "
+            f"{first_segment.start_ms / 1000.0:.2f}s - "
+            f"{first_segment.end_ms / 1000.0:.2f}s "
+            f"(ready_segments={len(self.session.ready_segments)})"
+        )
+
         self._remove_processed_audio(
                 first_segment,
                 segments[1]
             )
+
+        # Timeline of pending_audio shifted — invalidate streaming cache
+        self.session.vad_state = None
 
     # ----------------------------------------------------------
 

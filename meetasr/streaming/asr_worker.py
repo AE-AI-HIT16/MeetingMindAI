@@ -35,11 +35,21 @@ class ASRWorker:
                 audio = await (self.session.asr_queue.get())
 
                 try:
+                    duration_s = len(audio) / 16000.0
+                    print(
+                        f"ASR: start transcribe window=%.2fs asr_q=%d",
+                        duration_s,
+                        self.session.asr_queue.qsize(),
+                    )
+
                     result = (await self._transcribe(audio))
 
-                    await self._send_result(
-                        result
+                    print(
+                        f"ASR: done text_len=%d",
+                        len(result.text) if result and result.text else 0,
                     )
+
+                    await self._send_result(result)
 
                 finally:
                     self.session.asr_queue.task_done()
@@ -48,9 +58,7 @@ class ASRWorker:
             raise
 
         except Exception:
-            logger.exception(
-                "ASR worker crashed"
-            )
+            print("ASR worker crashed")
             raise
 
 
@@ -79,6 +87,10 @@ class ASRWorker:
         """
         Stream transcript lên FE.
         """
+        print("====================================================================================================")
+        print (result)
+        print("====================================================================================================")
+
         await self.session.websocket.send_json(
             {
                 "type": "transcript_delta",

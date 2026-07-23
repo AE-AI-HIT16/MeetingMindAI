@@ -1,6 +1,7 @@
+import asyncio
+
 import numpy as np
 
-from meetasr.pipeline import MeetPipeline
 from meetasr.streaming.streaming_processor import StreamingProcessor
 
 
@@ -22,6 +23,8 @@ class AudioWorker:
         )
 
     async def run(self):
+
+        loop = asyncio.get_running_loop()
 
         while True:
 
@@ -48,8 +51,8 @@ class AudioWorker:
                     )
                 )
 
-            # Chạy Streaming VAD
-            self.processor.process()
+            # Chạy Streaming VAD off event loop (CPU-bound)
+            await loop.run_in_executor(None, self.processor.process)
 
             await self.window_builder.process()
 

@@ -10,12 +10,15 @@ class AudioQueue:
         self.queue = asyncio.Queue(maxsize=maxsize)
 
     async def put(self, audio):
+        """Enqueue audio; drop newest chunk if full (do not steal consumer items)."""
 
         if self.queue.full():
-            logger.warning("Queue full")
-
-            prev = await self.queue.get()
-            audio = prev + audio
+            logger.warning(
+                "Queue full (qsize=%d); dropping incoming chunk (%d bytes)",
+                self.queue.qsize(),
+                len(audio) if audio is not None else 0,
+            )
+            return
 
         await self.queue.put(audio)
 
