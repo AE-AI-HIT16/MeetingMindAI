@@ -41,14 +41,13 @@ def load_prompts(language: str = "vi", prompt_type: str = "meeting") -> dict[str
 
 
 def load_generic_prompts(language: str = "vi") -> dict[str, str]:
-    """Load domain-agnostic prompts for DocumentPlanner.
+    """Load the two domain-agnostic prompts used by DocumentPlanner.
 
     Args:
         language: Language code ("vi", "en").
 
     Returns:
-        Dict with keys: "single_pass", "structured_extract",
-        "aggregate_plan", "reduce_section".
+        Dict with keys: "plan", "multi_write", and "reduce_section".
     """
     def _read(name: str) -> str:
         path = os.path.join(_PROMPT_DIR, f"{name}_{language}.txt")
@@ -58,8 +57,7 @@ def load_generic_prompts(language: str = "vi") -> dict[str, str]:
             return f.read()
 
     return {
-        "single_pass": _read("single_pass"),
-        "structured_extract": _read("structured_extract"),
-        "aggregate_plan": _read("aggregate_plan"),
+        "plan": _read("plan"),
+        "multi_write": _read("multi_write"),
         "reduce_section": _read("reduce_section"),
     }
