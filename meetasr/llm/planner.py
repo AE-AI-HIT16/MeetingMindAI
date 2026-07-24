@@ -1,91 +1,49 @@
-"""DocumentPlanner — content-agnostic summarization via Structured Extraction.
-
-Replaces MeetingSummarizer for Phase 2. MeetingSummarizer is kept untouched
-for Phase 1 API compatibility.
-
-Architecture (optimized from doc 14 original Plan→Write):
-- Transcript that fits the configured context budget: 1 LLM call
-- Longer transcript: N structured extraction + 1 aggregate + K reduce
-  Total: N + 1 + K calls (vs N + K*N + K in original design)
-
-Chunking strategy: overlap 5 lines between chunks to preserve pronoun
-reference context (see docs/chunking_analysis.md §4). Monster lines
-(> max_chars) are sub-split via planner_chunk module.
-"""
+"""Phase 2 content-agnostic DocumentPlanner using Plan → Write."""
 
 from __future__ import annotations
 
-import json
 import logging
 import time
-from dataclasses import dataclass, field
+from typing import Any
 
 from meetasr.llm.abs_llm import AbsLLMClient
-from meetasr.llm.planner_chunk import OVERLAP_LINES, chunk_with_overlap
+from meetasr.llm.planner_chunk import (
+    chunk_on_lines,
+    format_time_range,
+    representative_sample,
+)
 from meetasr.llm.planner_validation import (
-    join_text_parts,
-    normalize_extraction,
+    DRAFT_SEPARATOR,
+    bounded_join,
+    build_plan_retry_prompt,
+    fallback_outline,
     normalize_outline,
-    normalize_written_sections,
+    normalize_report_outline,
+    normalize_title,
     parse_json_object as _parse_json_object,
+    PLAN_RESPONSE_FORMAT,
+    safe_text,
+    validate_plan_payload,
 )
 from meetasr.schemas import TranscriptResult
 from meetasr.schemas_doc import DocSection, DocumentReport
 
 logger = logging.getLogger(__name__)
 
+MAX_LLM_INPUT_CHARS = 8000
 MAX_CHARS_PER_CHUNK = 6000
-SHORT_TRANSCRIPT_CHARS = 6400
-MAX_AGGREGATE_DATA_CHARS = 6200
-MAX_REDUCE_DATA_CHARS = 7000
-
-
-@dataclass
-class PlannerRunMetrics:
-    """Metrics collected by one :meth:`DocumentPlanner.plan_and_write` run.
-
-    Counts are owned by the planner rather than inferred from optional client
-    attributes. A call is counted when attempted, including failed LLM calls.
-    """
-
-    path: str = "empty"
-    input_chars: int = 0
-    chunk_count: int = 0
-    section_count: int = 0
-    llm_calls: int = 0
-    llm_failures: int = 0
-    calls_by_stage: dict[str, int] = field(default_factory=dict)
-    failures_by_stage: dict[str, int] = field(default_factory=dict)
-    llm_seconds_by_stage: dict[str, float] = field(default_factory=dict)
-    total_seconds: float = 0.0
-
-    def to_dict(self) -> dict[str, object]:
-        """Return a logging/serialization-safe snapshot."""
-        return {
-            "path": self.path,
-            "input_chars": self.input_chars,
-            "chunk_count": self.chunk_count,
-            "section_count": self.section_count,
-            "llm_calls": self.llm_calls,
-            "llm_failures": self.llm_failures,
-            "calls_by_stage": dict(self.calls_by_stage),
-            "failures_by_stage": dict(self.failures_by_stage),
-            "llm_seconds_by_stage": {
-                stage: round(seconds, 4)
-                for stage, seconds in self.llm_seconds_by_stage.items()
-            },
-            "total_seconds": round(self.total_seconds, 4),
-        }
+SAMPLE_CHARS_FOR_PLAN = 4000
+MAX_LABEL_CHARS = 200
+MAX_MAP_TOKENS = 1200
+MAX_PLAN_TOKENS = 2048
+VI_SYSTEM_PROMPT = (
+    "Mọi nội dung bạn tạo phải bằng tiếng Việt, có căn cứ từ nguồn và "
+    "không được biến lỗi transcript thành dữ kiện."
+)
 
 
 class DocumentPlanner:
-    """Content-agnostic document planner using structured extraction.
-
-    Args:
-        client: Any AbsLLMClient implementation.
-        temperature: LLM sampling temperature.
-        max_tokens: Max tokens per LLM call.
-    """
+    """Build a generic structured document from a transcript."""
 
     def __init__(
         self,
@@ -98,317 +56,264 @@ class DocumentPlanner:
         self.language = language.strip() or "vi"
         self.temperature = temperature
         self.max_tokens = max_tokens
-        self.last_run_metrics: PlannerRunMetrics | None = None
+        self._system_prompt = VI_SYSTEM_PROMPT if self.language == "vi" else None
+
         from meetasr.llm.llm_utils.prompts import load_generic_prompts
+
         self._prompts = load_generic_prompts(language=self.language)
 
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
-
     def plan_and_write(self, transcript: TranscriptResult) -> DocumentReport:
-        """Full pipeline: structured extract → aggregate plan → reduce."""
-        t0 = time.perf_counter()
+        """Plan an outline, then map-reduce every proposed section.
+
+        Empty transcripts return an empty document without calling the LLM.
+        Invalid LLM responses degrade to the documented summary-only fallback.
+        """
+        started = time.perf_counter()
         full_text = self._format_transcript(transcript)
-        metrics = PlannerRunMetrics(input_chars=len(full_text))
 
         if not full_text.strip():
             logger.warning("DocumentPlanner received an empty transcript.")
             report = DocumentReport(content_kind="Tài liệu")
-        elif len(full_text) < SHORT_TRANSCRIPT_CHARS:
-            metrics.path = "short"
-            report = self._short_path(full_text, metrics)
         else:
-            metrics.path = "long"
-            report = self._long_path(full_text, metrics)
+            content_kind, outline = self._plan(full_text)
+            budget = self._write_data_budget(outline[0] if outline else {}, content_kind)
+            chunks = self._chunk(full_text, budget)
+
+            section_drafts: dict[str, list[str]] = {section["id"]: [] for section in outline}
+            for chunk in chunks:
+                if not chunk.strip():
+                    continue
+                extracted = self._call_multi_write(outline, content_kind, chunk)
+                for section in outline:
+                    sec_id = section["id"]
+                    draft = extracted.get(sec_id)
+                    if draft and isinstance(draft, str) and draft.strip():
+                        section_drafts[sec_id].append(draft.strip())
+
+            sections = []
+            for section in outline:
+                drafts = section_drafts[section["id"]]
+                if not drafts:
+                    continue
+                if len(drafts) == 1:
+                    markdown = drafts[0]
+                else:
+                    markdown = self._reduce(section, content_kind, drafts)
+                
+                if markdown.strip():
+                    sections.append(
+                        DocSection(
+                            id=section["id"],
+                            heading=section["heading"],
+                            kind=section["kind"],
+                            markdown=markdown,
+                        )
+                    )
+            
+            report = DocumentReport(
+                content_kind=content_kind,
+                sections=sections,
+            )
 
         report.language = self.language
-        report.llm_model = getattr(self.client, "model", "")
-        metrics.section_count = len(report.sections)
-        metrics.total_seconds = time.perf_counter() - t0
-        report.processing_time = round(metrics.total_seconds, 2)
-        self.last_run_metrics = metrics
-        logger.info("DocumentPlanner metrics: %s", metrics.to_dict())
+        report.llm_model = safe_text(getattr(self.client, "model", ""), "")
+        report.processing_time = round(time.perf_counter() - started, 2)
         return report
 
-    # ------------------------------------------------------------------
-    # Short path — one call within the 8,000-character input budget
-    # ------------------------------------------------------------------
-
-    def _short_path(
-        self,
-        full_text: str,
-        metrics: PlannerRunMetrics | None = None,
-    ) -> DocumentReport:
-        """Single LLM call for short transcripts using single_pass prompt.
-
-        Uses single_pass_vi.txt which returns complete JSON with
-        content_kind + sections (each with markdown already written).
-        This is a TRUE single call — no separate plan then reduce.
-        """
-        prompt = self._prompts["single_pass"].format(transcript=full_text)
-        try:
-            raw = self._call_llm(
-                "single_pass",
-                prompt,
-                max_tokens=self.max_tokens,
-                metrics=metrics,
-            )
-            data = _parse_json_object(raw)
-            content_kind = _safe_text(data.get("content_kind"), "Tài liệu")
-            sections = normalize_written_sections(data.get("sections"))
-        except Exception as e:
-            logger.warning("Short-path single_pass failed (%s), fallback.", e)
-            content_kind = "Tài liệu"
-            sections = []
-        return DocumentReport(content_kind=content_kind, sections=sections)
-
-    # ------------------------------------------------------------------
-    # Long path — structured extraction + aggregate + reduce
-    # ------------------------------------------------------------------
-
-    def _long_path(
-        self,
-        full_text: str,
-        metrics: PlannerRunMetrics | None = None,
-    ) -> DocumentReport:
-        """Structured extraction pipeline for long transcripts."""
-        chunks = chunk_with_overlap(
-            full_text,
-            max_chars=MAX_CHARS_PER_CHUNK,
-            overlap_lines=OVERLAP_LINES,
+    def plan_only(self, transcript_sample: str) -> tuple[str, list[dict[str, str]]]:
+        """Run only the plan step for the realtime document stream."""
+        safe_sample = (
+            transcript_sample if isinstance(transcript_sample, str) else ""
         )
-        if metrics is not None:
-            metrics.chunk_count = len(chunks)
-        logger.info(
-            "Long path: %d chunks (overlap=%d lines), running extraction.",
-            len(chunks), OVERLAP_LINES,
-        )
+        return self._plan(safe_sample)
 
-        # Step 1: Structured extraction (sequential — parallel is future optimization)
-        extractions = self._run_extractions(chunks, metrics)
-
-        # Step 2: Aggregate plan
-        content_kind, outline = self._aggregate_plan(extractions, metrics)
-
-        # Step 3: Reduce each section from extraction results
-        sections = []
-        for sec in outline:
-            raw_data = self._gather_for_section(sec, extractions)
-            if not raw_data.strip():
-                continue
-            md = self._call_reduce(sec, content_kind, raw_data, metrics)
-            found = bool(md.strip())
-            sections.append(DocSection(
-                id=sec.get("id", "s"),
-                heading=sec.get("heading", ""),
-                kind=sec.get("kind", "summary"),
-                markdown=md,
-                found=found,
-            ))
-
-        sections = [s for s in sections if s.found]
-        return DocumentReport(content_kind=content_kind, sections=sections)
-
-    def _run_extractions(
+    def write_one_section(
         self,
-        chunks: list[str],
-        metrics: PlannerRunMetrics | None = None,
-    ) -> list[dict]:
-        """Run structured extraction on all chunks (sequential with logging)."""
-        results = []
-        for i, chunk in enumerate(chunks):
-            logger.info("Extracting chunk %d/%d", i + 1, len(chunks))
-            prompt = self._prompts["structured_extract"].format(chunk=chunk)
-            try:
-                raw = self._call_llm(
-                    "extraction",
-                    prompt,
-                    max_tokens=2048,
-                    metrics=metrics,
-                )
-                data = normalize_extraction(_parse_json_object(raw), i)
-                results.append(data)
-            except Exception as e:
-                logger.warning("Extraction failed for chunk %d: %s", i, e)
-                results.append({"chunk_index": i, "summary": ""})
-        return results
-
-    def _aggregate_plan(
-        self,
-        extractions: list[dict],
-        metrics: PlannerRunMetrics | None = None,
-    ) -> tuple[str, list[dict]]:
-        """Aggregate structured results into content_kind + outline.
-
-        Dynamically scans ALL keys from extraction dicts so the
-        aggregate LLM sees every label (including new/unexpected ones).
-        The LLM then declares source_keys per outline section to tell
-        _gather_for_section exactly which keys to collect.
-        """
-        summaries = []
-        skip_keys = {"chunk_index", "summary"}
-        for ext in extractions:
-            idx = ext.get("chunk_index", "?")
-            s = ext.get("summary", "")
-            # Dynamic: report ALL non-empty fields so LLM sees every label
-            extras = []
-            for key, val in ext.items():
-                if key in skip_keys:
-                    continue
-                if isinstance(val, list) and val:
-                    extras.append(f"  {key}: {len(val)} items")
-                elif isinstance(val, dict) and val:
-                    extras.append(f"  {key}: present")
-                elif isinstance(val, str) and val.strip():
-                    extras.append(f"  {key}: present")
-                elif isinstance(val, (int, float, bool)):
-                    extras.append(f"  {key}: present")
-            line = f"[{idx}] {s}"
-            if extras:
-                line += "\n" + "\n".join(extras)
-            summaries.append(line)
-
-        combined = join_text_parts(summaries, MAX_AGGREGATE_DATA_CHARS)
-        prompt = self._prompts["aggregate_plan"].format(
-            structured_summaries=combined
-        )
-        try:
-            raw = self._call_llm(
-                "aggregate",
-                prompt,
-                max_tokens=1024,
-                metrics=metrics,
-            )
-            data = _parse_json_object(raw)
-            content_kind = _safe_text(data.get("content_kind"), "Tài liệu")
-            outline = normalize_outline(data.get("outline"))
-            if not outline:
-                raise ValueError("empty outline")
-            return content_kind, outline
-        except Exception as e:
-            logger.warning("Aggregate plan failed (%s), fallback.", e)
-            return "Tài liệu", [
-                {"id": "s1", "heading": "Tóm tắt", "kind": "summary",
-                 "source_keys": ["summary"]},
-            ]
-
-    def _gather_for_section(self, section: dict, extractions: list[dict]) -> str:
-        """Gather data using source_keys declared by aggregate LLM.
-
-        The aggregate step returns source_keys per outline section,
-        resolving label aliases (e.g. 'doanh_thu', 'revenue' → same
-        section). This method mechanically collects matching keys.
-        """
-        kind = _safe_text(section.get("kind"), "summary")
-        source_keys = section.get("source_keys", [kind])
-        if isinstance(source_keys, str):
-            source_keys = [source_keys]
-        elif not isinstance(source_keys, list):
-            source_keys = [kind]
-        parts: list[str] = []
-        seen: set[tuple[str, str]] = set()
-
-        for ext in extractions:
-            for key in source_keys:
-                if not isinstance(key, str):
-                    continue
-                val = ext.get(key)
-                if not val:
-                    continue
-                if isinstance(val, (list, dict)):
-                    rendered = json.dumps(val, ensure_ascii=False)
-                else:
-                    rendered = str(val)
-                marker = (key, rendered)
-                if marker not in seen:
-                    parts.append(f"{key}: {rendered}")
-                    seen.add(marker)
-
-        # Only the summary section may fall back to chunk summaries. Other
-        # sections without evidence must be omitted instead of fabricated.
-        if not parts and kind == "summary" and "summary" in source_keys:
-            for ext in extractions:
-                s = ext.get("summary", "")
-                if s:
-                    parts.append(s)
-
-        return join_text_parts(parts, MAX_REDUCE_DATA_CHARS)
-
-    def _call_reduce(
-        self,
-        section: dict,
+        section: dict[str, Any],
         content_kind: str,
-        raw_data: str,
-        metrics: PlannerRunMetrics | None = None,
-    ) -> str:
-        """Reduce gathered data into final markdown for one section."""
-        prompt = self._prompts["reduce_section"].format(
-            heading=section.get("heading", ""),
-            kind=section.get("kind", "summary"),
+        text: str,
+    ) -> DocSection:
+        """Write one planned section from new realtime transcript text."""
+        normalized = normalize_outline([section])
+        safe_section = normalized[0] if normalized else fallback_outline()[0]
+        safe_content_kind = normalize_title(content_kind)
+        safe_text_chunk = text if isinstance(text, str) else ""
+        chunks = self._chunk(
+            safe_text_chunk,
+            self._write_data_budget(safe_section, safe_content_kind),
+        )
+
+        section_drafts = []
+        for chunk in chunks:
+            if not chunk.strip():
+                continue
+            extracted = self._call_multi_write([safe_section], safe_content_kind, chunk)
+            draft = extracted.get(safe_section["id"])
+            if draft and isinstance(draft, str) and draft.strip():
+                section_drafts.append(draft.strip())
+        
+        if not section_drafts:
+            markdown = ""
+        elif len(section_drafts) == 1:
+            markdown = section_drafts[0]
+        else:
+            markdown = self._reduce(safe_section, safe_content_kind, section_drafts)
+
+        return DocSection(
+            id=safe_section["id"],
+            heading=safe_section["heading"],
+            kind=safe_section["kind"],
+            markdown=markdown,
+        )
+
+    def _plan(self, full_text: str) -> tuple[str, list[dict[str, str]]]:
+        """Ask the LLM to identify content kind and propose an outline."""
+        if not full_text.strip():
+            return "Tài liệu", fallback_outline()
+        sample = self._representative_sample(
+            full_text, min(SAMPLE_CHARS_FOR_PLAN, self._plan_data_budget())
+        )
+        prompt = self._prompts["plan"].format(transcript_sample=sample)
+        try:
+            raw = self.client.chat(
+                prompt,
+                system=self._system_prompt,
+                temperature=0.0,
+                max_tokens=MAX_PLAN_TOKENS,
+                response_format=PLAN_RESPONSE_FORMAT,
+            )
+            try:
+                data = validate_plan_payload(_parse_json_object(raw))
+            except (TypeError, ValueError) as parse_error:
+                logger.warning(
+                    "Plan response is empty or invalid (%s); retrying in JSON mode.",
+                    parse_error,
+                )
+                retried = self.client.chat(
+                    build_plan_retry_prompt(raw, parse_error, sample),
+                    system=self._system_prompt,
+                    temperature=0.0,
+                    max_tokens=MAX_PLAN_TOKENS,
+                    response_format=PLAN_RESPONSE_FORMAT,
+                )
+                data = validate_plan_payload(_parse_json_object(retried))
+            content_kind = normalize_title(data.get("content_kind"))
+            outline = normalize_report_outline(data.get("outline"))
+            return content_kind, outline
+        except Exception as exc:
+            logger.warning(
+                "Plan step failed (%s); using the required fallback outline.",
+                exc,
+            )
+            return "Tài liệu", fallback_outline()
+
+    def _call_multi_write(
+        self,
+        outline: list[dict[str, str]],
+        content_kind: str,
+        chunk: str,
+    ) -> dict[str, str]:
+        """Extract data for multiple sections from a single chunk."""
+        sections_list = "\n".join([
+            f"- {s['id']}: {s['heading']} (kind: {s['kind']})"
+            for s in outline
+        ])
+        prompt = self._prompts["multi_write"].format(
             content_kind=content_kind,
-            raw_data=raw_data,
+            sections_list=sections_list,
+            chunk=chunk,
         )
         try:
-            return self._call_llm(
-                "reduce",
+            # We explicitly ask for JSON in the prompt, so we can parse it even 
+            # if response_format=json_object is not strictly supported by the LLM.
+            response = self.client.chat(
                 prompt,
-                max_tokens=self.max_tokens,
-                metrics=metrics,
-            ).strip()
-        except Exception as e:
-            logger.warning("Reduce failed for '%s': %s", section.get("heading"), e)
-            return ""
-
-    def _call_llm(
-        self,
-        stage: str,
-        prompt: str,
-        *,
-        max_tokens: int,
-        metrics: PlannerRunMetrics | None,
-    ) -> str:
-        """Call the LLM and record planner-owned attempt/failure/timing metrics."""
-        if metrics is not None:
-            metrics.llm_calls += 1
-            metrics.calls_by_stage[stage] = metrics.calls_by_stage.get(stage, 0) + 1
-
-        started = time.perf_counter()
-        try:
-            return self.client.chat(
-                prompt,
+                system=self._system_prompt,
                 temperature=self.temperature,
-                max_tokens=max_tokens,
+                max_tokens=self.max_tokens,
             )
-        except Exception:
-            if metrics is not None:
-                metrics.llm_failures += 1
-                metrics.failures_by_stage[stage] = (
-                    metrics.failures_by_stage.get(stage, 0) + 1
-                )
-            raise
-        finally:
-            if metrics is not None:
-                elapsed = time.perf_counter() - started
-                metrics.llm_seconds_by_stage[stage] = (
-                    metrics.llm_seconds_by_stage.get(stage, 0.0) + elapsed
-                )
+            return _parse_json_object(response)
+        except Exception as exc:
+            logger.warning(
+                "Multi-write step failed (chunk length %d): %s",
+                len(chunk),
+                exc,
+            )
+            return {}
 
-    # ------------------------------------------------------------------
-    # Helpers
-    # ------------------------------------------------------------------
+    def _reduce(
+        self,
+        section: dict[str, str],
+        content_kind: str,
+        drafts: list[str],
+    ) -> str:
+        """Merge chunk drafts into one coherent section."""
+        joined = DRAFT_SEPARATOR.join(drafts)
+        merge_note = (
+            "Dưới đây là các bản nháp rời rạc cho cùng một mục, hãy gộp "
+            "và viết lại thành một bản hoàn chỉnh, mạch lạc, không lặp ý:"
+        )
+        data_budget = self._write_data_budget(section, content_kind)
+        reduce_data = (
+            f"{merge_note}\n\n"
+            f"{bounded_join(drafts, data_budget - len(merge_note) - 2)}"
+        )
+        prompt = self._prompts["reduce_section"].format(
+            content_kind=content_kind,
+            heading=section["heading"],
+            kind=section["kind"],
+            chunk=reduce_data,
+        )
+        try:
+            response = self.client.chat(
+                prompt,
+                system=self._system_prompt,
+                temperature=self.temperature,
+                max_tokens=self.max_tokens,
+            )
+            return response.strip() if isinstance(response, str) else joined
+        except Exception as exc:
+            logger.warning(
+                "Reduce step failed for section '%s': %s",
+                section["heading"],
+                exc,
+            )
+            return joined
+
+    def _representative_sample(self, text: str, max_chars: int) -> str:
+        return representative_sample(text, max_chars)
 
     def _format_transcript(self, result: TranscriptResult) -> str:
-        """Convert TranscriptResult to text for LLM."""
+        """Format sentence timestamps and speakers for grounding."""
         if result.sentence_info:
             lines = []
-            for s in result.sentence_info:
-                spk = f"Speaker {s.speaker}: " if s.speaker is not None else ""
-                lines.append(f"[{s.start:.1f}s] {spk}{s.text}")
+            for sentence in result.sentence_info:
+                speaker = "" if sentence.speaker is None else (
+                    f"Speaker {sentence.speaker}: "
+                )
+                timestamp = format_time_range(sentence.start, sentence.end)
+                lines.append(f"{timestamp} {speaker}{sentence.text}")
             return "\n".join(lines)
-        return result.text
+        return result.text if isinstance(result.text, str) else ""
 
+    def _chunk(self, text: str, max_chars: int) -> list[str]:
+        return chunk_on_lines(text, max_chars)
 
-def _safe_text(value: object, default: str) -> str:
-    """Return a non-empty stripped string or a default value."""
-    return value.strip() if isinstance(value, str) and value.strip() else default
+    def _plan_data_budget(self) -> int:
+        empty_prompt = self._prompts["plan"].format(transcript_sample="")
+        return max(1, MAX_LLM_INPUT_CHARS - len(empty_prompt))
+
+    def _write_data_budget(
+        self,
+        section: dict[str, Any],
+        content_kind: str,
+    ) -> int:
+        empty_prompt = self._prompts["multi_write"].format(
+            content_kind=safe_text(content_kind, "Tài liệu")[:MAX_LABEL_CHARS],
+            sections_list="",
+            chunk="",
+        )
+        return max(
+            1,
+            min(MAX_CHARS_PER_CHUNK, MAX_LLM_INPUT_CHARS - len(empty_prompt)),
+        )

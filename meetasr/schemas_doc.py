@@ -10,19 +10,6 @@ from dataclasses import asdict, dataclass, field
 
 
 @dataclass
-class StructuredChunkResult:
-    """Output of structured extraction for one chunk."""
-
-    chunk_index: int
-    summary: str = ""
-    action_items: list[dict] = field(default_factory=list)
-    decisions: list[dict] = field(default_factory=list)
-    key_points: list[str] = field(default_factory=list)
-    quotes: list[str] = field(default_factory=list)
-    extra: dict = field(default_factory=dict)
-
-
-@dataclass
 class DocSection:
     """One section of a generated document.
 
@@ -33,7 +20,6 @@ class DocSection:
     heading: str
     kind: str
     markdown: str = ""
-    found: bool = True
 
 
 @dataclass
@@ -58,6 +44,5 @@ class DocumentReport:
         """Format as a human-readable Markdown document."""
         lines = [f"# {self.content_kind}", ""]
         for sec in self.sections:
-            if sec.found and sec.markdown.strip():
-                lines += [f"## {sec.heading}", "", sec.markdown, ""]
+            lines += [f"## {sec.heading}", "", sec.markdown, ""]
         return "\n".join(lines).strip()

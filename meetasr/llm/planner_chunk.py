@@ -1,9 +1,4 @@
-"""Chunking utilities for DocumentPlanner.
-
-Handles overlap for pronoun/coreference resolution and oversized ASR lines.
-
-See docs/chunking_analysis.md for design rationale.
-"""
+"""Chunking and representative-sampling helpers for DocumentPlanner."""
 
 from __future__ import annotations
 
@@ -12,8 +7,99 @@ import re
 
 logger = logging.getLogger(__name__)
 
-MAX_CHARS_PER_CHUNK = 6000
-OVERLAP_LINES = 5
+def representative_sample(text: str, max_chars: int) -> str:
+    """Return head, middle, and tail excerpts within ``max_chars``.
+
+    Args:
+        text: Full transcript text.
+        max_chars: Strict output character budget.
+
+    Returns:
+        Original text when it fits, otherwise a representative excerpt.
+
+    Raises:
+        ValueError: If max_chars is not positive.
+    """
+    if max_chars <= 0:
+        raise ValueError("max_chars must be greater than zero")
+    if len(text) <= max_chars:
+        return text
+
+    separator = "\n...\n"
+    if max_chars <= 2 * len(separator):
+        return text[:max_chars]
+    content_budget = max_chars - 2 * len(separator)
+    head_size = content_budget // 3
+    middle_size = content_budget // 3
+    tail_size = content_budget - head_size - middle_size
+    middle_start = max(0, len(text) // 2 - middle_size // 2)
+    return (
+        text[:head_size]
+        + separator
+        + text[middle_start : middle_start + middle_size]
+        + separator
+        + text[-tail_size:]
+    )
+
+
+def format_time_range(start: float, end: float) -> str:
+    """Format a transcript range consistently as MM:SS or HH:MM:SS."""
+    include_hours = max(start, end) >= 3600
+
+    def _format(seconds: float) -> str:
+        total = max(0, int(seconds))
+        hours, remainder = divmod(total, 3600)
+        minutes, secs = divmod(remainder, 60)
+        if include_hours:
+            return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+        return f"{minutes:02d}:{secs:02d}"
+
+    return f"[{_format(start)}–{_format(end)}]"
+
+
+def chunk_on_lines(text: str, max_chars: int) -> list[str]:
+    """Split transcript text on line boundaries within a strict budget.
+
+    Oversized malformed ASR lines are sub-split as a last resort so no LLM
+    input can exceed the configured technical limit.
+
+    Args:
+        text: Transcript text with one sentence per line.
+        max_chars: Maximum characters in each returned chunk.
+
+    Returns:
+        Ordered transcript chunks.
+
+    Raises:
+        ValueError: If max_chars is not positive.
+    """
+    if max_chars <= 0:
+        raise ValueError("max_chars must be greater than zero")
+    if not text:
+        return [text]
+
+    lines: list[str] = []
+    for line in text.split("\n"):
+        if len(line) <= max_chars:
+            lines.append(line)
+        else:
+            logger.warning(
+                "Transcript line exceeds the LLM budget; splitting it safely."
+            )
+            lines.extend(_split_monster_line(line, max_chars))
+
+    chunks: list[str] = []
+    current: list[str] = []
+    for line in lines:
+        candidate = "\n".join([*current, line])
+        if current and len(candidate) > max_chars:
+            chunks.append("\n".join(current))
+            current = [line]
+        else:
+            current.append(line)
+    if current:
+        chunks.append("\n".join(current))
+    return chunks or [text]
 
 
 def _split_monster_line(line: str, max_chars: int) -> list[str]:
@@ -66,70 +152,3 @@ def _split_monster_line(line: str, max_chars: int) -> list[str]:
         merged.append(current)
 
     return merged
-
-
-def chunk_with_overlap(
-    text: str,
-    max_chars: int = MAX_CHARS_PER_CHUNK,
-    overlap_lines: int = OVERLAP_LINES,
-) -> list[str]:
-    """Split text on line boundaries with overlap between chunks.
-
-    Handles monster lines by sub-splitting before chunking.
-
-    Args:
-        text: Full transcript text (one sentence per line).
-        max_chars: Maximum characters per chunk.
-        overlap_lines: Lines from previous chunk to prepend for context.
-
-    Returns:
-        List of text chunks with overlap for pronoun resolution.
-
-    Raises:
-        ValueError: If max_chars or overlap_lines is invalid.
-    """
-    if max_chars <= 0:
-        raise ValueError("max_chars must be greater than zero")
-    if overlap_lines < 0:
-        raise ValueError("overlap_lines must be non-negative")
-    if not text:
-        return [text]
-
-    # Pre-process: split monster lines.
-    raw_lines = text.split("\n")
-    lines: list[str] = []
-    for line in raw_lines:
-        if len(line) > max_chars:
-            logger.warning("Monster line detected (%d chars), sub-splitting.", len(line))
-            lines.extend(_split_monster_line(line, max_chars))
-        else:
-            lines.append(line)
-
-    chunks: list[str] = []
-    current: list[str] = []
-
-    for line in lines:
-        candidate = "\n".join([*current, line])
-        if len(candidate) > max_chars and current:
-            chunks.append("\n".join(current))
-
-            # Carry only the newest lines that fit together with the next
-            # original line. This guarantees progress and prevents overlap
-            # from making the new chunk larger than max_chars.
-            overlap: list[str] = []
-            if overlap_lines:
-                for previous in reversed(current[-overlap_lines:]):
-                    with_previous = "\n".join([previous, *overlap, line])
-                    if len(with_previous) > max_chars:
-                        break
-                    overlap.insert(0, previous)
-            current = [*overlap, line]
-        else:
-            current.append(line)
-
-    if current:
-        chunks.append("\n".join(current))
-
-    if any(len(chunk) > max_chars for chunk in chunks):
-        raise AssertionError("chunk_with_overlap produced an oversized chunk")
-    return chunks or [text]
