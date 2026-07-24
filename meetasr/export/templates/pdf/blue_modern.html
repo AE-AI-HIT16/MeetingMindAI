@@ -97,14 +97,14 @@
     .report-title {
       color: var(--accent);
       font-family: "Poppins", sans-serif;
-      font-size: 36pt;
+      font-size: 30pt;
       font-weight: 700;
       letter-spacing: -0.045em;
-      line-height: 0.98;
-      margin: 17mm 0 5mm;
+      line-height: 1.05;
+      margin: 14mm 0 5mm;
+      overflow-wrap: anywhere;
       text-align: center;
       text-transform: uppercase;
-      white-space: nowrap;
       width: 100%;
     }
 
@@ -115,15 +115,16 @@
     }
 
     .section-grid {
-      align-items: start;
-      display: grid;
-      gap: 10mm 10mm;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
+      column-count: 2;
+      column-gap: 10mm;
+      column-fill: balance;
       margin-top: 16mm;
     }
 
     .section-card {
-      break-inside: avoid;
+      break-inside: auto;
+      display: block;
+      margin: 0 0 10mm;
       min-width: 0;
     }
 
@@ -141,6 +142,7 @@
       max-width: 100%;
       padding: 2.4mm 5.5mm 2.2mm;
       text-transform: uppercase;
+      break-after: avoid;
     }
 
     .section-body {
@@ -183,6 +185,7 @@
     }
 
     .section-body li {
+      break-inside: avoid;
       margin-bottom: 1.2mm;
       padding-left: 1mm;
     }
@@ -235,11 +238,6 @@
       color: var(--accent);
     }
 
-    @media print {
-      .section-card {
-        break-inside: avoid;
-      }
-    }
   </style>
 </head>
 <body>
