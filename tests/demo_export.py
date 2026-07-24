@@ -1,46 +1,50 @@
+import argparse
 from pathlib import Path
+from typing import cast
 
 from meetasr.export import create_export_service
+from meetasr.export.docx_exporter import DocxTemplateName, export_docx
+from meetasr.export.pdf_exporter import PdfTemplateName, export_pdf
 
 
-markdown = """
-# Báo cáo cuộc họp
-
-## Tổng quan
-
-Cuộc họp thảo luận về **tiến độ dự án** và kế hoạch triển khai.
-
-## Công việc cần làm
-
-- Anh Tú hoàn thiện phần export
-- Nam kiểm tra frontend
-- Minh triển khai API
-
-## Phân công
-
-| Thành viên | Công việc | Trạng thái |
-|---|---|---|
-| Anh Tú | Export DOCX/PDF | Đang làm |
-| Nam | Frontend | Chờ API |
-| Minh | API route | Chưa bắt đầu |
-
-> Đây là tài liệu được sinh tự động từ Markdown.
-
-Xem thêm tại [OpenAI](https://openai.com).
-"""
+markdown = (
+    Path(__file__).resolve().parent
+    / "data"
+    / "pdf_blue_modern_demo.md"
+).read_text(encoding="utf-8")
 
 
-def main() -> None:
+def main(
+    *,
+    docx_template: DocxTemplateName,
+    pdf_template: PdfTemplateName,
+    author: str,
+) -> None:
     service = create_export_service()
     output_directory = Path("outputs")
     output_directory.mkdir(exist_ok=True)
 
     for export_format in ("docx", "pdf"):
-        artifact = service.export(
-            markdown=markdown,
-            format=export_format,
-            title="Báo cáo cuộc họp",
-        )
+        if export_format == "docx":
+            artifact = export_docx(
+                markdown=markdown,
+                title="Báo cáo cuộc họp",
+                template=docx_template,
+                context={"author": author} if author else None,
+            )
+        elif export_format == "pdf":
+            artifact = export_pdf(
+                markdown=markdown,
+                title="Báo cáo cuộc họp",
+                template=pdf_template,
+                context={"author": author} if author else None,
+            )
+        else:
+            artifact = service.export(
+                markdown=markdown,
+                format=export_format,
+                title="Báo cáo cuộc họp",
+            )
 
         output_path = output_directory / artifact.filename
         output_path.write_bytes(artifact.content)
@@ -49,4 +53,27 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Tạo DOCX/PDF mẫu.")
+    parser.add_argument(
+        "--template",
+        choices=("minimal", "modern"),
+        default="minimal",
+        help="Template chỉ áp dụng cho DOCX (mặc định: minimal).",
+    )
+    parser.add_argument(
+        "--author",
+        default="",
+        help="Điền {{ author }} nếu template DOCX có sử dụng.",
+    )
+    parser.add_argument(
+        "--pdf-template",
+        choices=("minimal", "blue_modern"),
+        default="minimal",
+        help="Template áp dụng cho PDF (mặc định: minimal).",
+    )
+    args = parser.parse_args()
+    main(
+        docx_template=cast(DocxTemplateName, args.template),
+        pdf_template=cast(PdfTemplateName, args.pdf_template),
+        author=args.author,
+    )

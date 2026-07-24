@@ -11,6 +11,7 @@ import pytest
 from meetasr.export import create_export_service
 from meetasr.export.docx_exporter import (
     _load_docx_template_class,
+    _markdown_body,
     export_docx,
 )
 from meetasr.export.service import MissingExportDependency
@@ -21,7 +22,9 @@ pytest.importorskip("docxtpl")
 pytest.importorskip("docxcompose")
 
 
-MARKDOWN = """# Tổng quan
+MARKDOWN = """# Báo cáo thử nghiệm
+
+## Tổng quan
 
 Nội dung **tiếng Việt đậm**, *in nghiêng*, ~~đã bỏ~~ và [OpenAI](https://openai.com).
 
@@ -63,12 +66,17 @@ def test_docx_uses_template_and_preserves_vietnamese_content():
 
     paragraphs = {paragraph.text: paragraph for paragraph in document.paragraphs}
     assert paragraphs["Tổng quan"].style.name == "Heading 1"
-    assert paragraphs["• Việc thứ nhất"].paragraph_format.left_indent is not None
-    assert paragraphs["• Việc con"].paragraph_format.left_indent > paragraphs[
-        "• Việc thứ nhất"
+    assert sum(
+        paragraph.text == "Báo cáo thử nghiệm"
+        for paragraph in document.paragraphs
+    ) == 1
+    assert paragraphs["Việc thứ nhất"].style.name == "List Bullet"
+    assert paragraphs["Việc thứ nhất"].paragraph_format.left_indent is not None
+    assert paragraphs["Việc con"].paragraph_format.left_indent > paragraphs[
+        "Việc thứ nhất"
     ].paragraph_format.left_indent
-    assert "3. Bước ba" in paragraphs
-    assert "4. Bước bốn" in paragraphs
+    assert paragraphs["Bước ba"].style.name == "List Number"
+    assert paragraphs["Bước bốn"].style.name == "List Number"
     assert paragraphs["Ghi chú quan trọng."].style.name == "Quote"
 
 
@@ -94,6 +102,84 @@ def test_docx_renders_inline_formatting_and_table():
         ["Anh Tú", "Kiểm thử DOCX"],
     ]
     assert all(run.bold for run in document.tables[0].rows[0].cells[0].paragraphs[0].runs)
+
+
+def test_markdown_body_keeps_h2_and_removes_only_leading_h1():
+    markdown = "\n# Tiêu đề\n\n## Tổng quan\n\nNội dung"
+
+    assert _markdown_body(markdown) == "## Tổng quan\n\nNội dung"
+    assert _markdown_body("## Tổng quan") == "## Tổng quan"
+
+
+def test_docx_promotes_body_headings_after_template_title():
+    artifact = export_docx(
+        "## Đề mục lớn\n\n### Đề mục con",
+        "Tiêu đề",
+        generated_at="23/07/2026",
+    )
+    document = docx.Document(BytesIO(artifact.content))
+    paragraphs = {paragraph.text: paragraph for paragraph in document.paragraphs}
+
+    assert paragraphs["Đề mục lớn"].style.name == "Heading 1"
+    assert paragraphs["Đề mục con"].style.name == "Heading 2"
+
+
+def test_modern_template_renders_optional_context():
+    artifact = export_docx(
+        MARKDOWN,
+        "Báo cáo hiện đại",
+        template="modern",
+        generated_at="23/07/2026",
+        context={"author": "Anh Tú", "department": "AI Team"},
+    )
+    document = docx.Document(BytesIO(artifact.content))
+    with ZipFile(BytesIO(artifact.content)) as archive:
+        document_xml = archive.read("word/document.xml").decode("utf-8")
+
+    assert "Báo cáo hiện đại" in document_xml
+    assert "23/07/2026" in document_xml
+    assert "Anh Tú" in document_xml
+    assert "{{" not in document_xml
+    assert any(
+        paragraph.text == "Tổng quan"
+        and paragraph.style.name == "Heading 1"
+        for paragraph in document.paragraphs
+    )
+
+
+def test_modern_template_requires_author_context():
+    with pytest.raises(
+        ValueError,
+        match="modern.*requires context fields: author",
+    ):
+        export_docx(
+            "## Tổng quan",
+            "Báo cáo hiện đại",
+            template="modern",
+        )
+
+
+def test_template_context_cannot_replace_system_fields():
+    artifact = export_docx(
+        "## Tổng quan\n\nNội dung thật",
+        "Tiêu đề thật",
+        generated_at="23/07/2026",
+        context={
+            "title": "Tiêu đề giả",
+            "generated_at": "01/01/1970",
+            "time": "00:00",
+            "body": "Nội dung giả",
+        },
+    )
+    document = docx.Document(BytesIO(artifact.content))
+    text = "\n".join(paragraph.text for paragraph in document.paragraphs)
+
+    assert "Tiêu đề thật" in text
+    assert "Tiêu đề giả" not in text
+    assert "23/07/2026" in text
+    assert "01/01/1970" not in text
+    assert "Nội dung thật" in text
+    assert "Nội dung giả" not in text
 
 
 def test_docx_does_not_fetch_or_embed_unsafe_resources():
