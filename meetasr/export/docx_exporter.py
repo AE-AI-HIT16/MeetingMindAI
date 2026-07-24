@@ -9,7 +9,10 @@ from pathlib import Path
 from typing import Any, Literal
 
 from meetasr.export.docx_markdown import render_markdown
-from meetasr.export.markdown_parser import strip_leading_document_heading
+from meetasr.export.markdown_parser import (
+    resolve_document_title,
+    strip_leading_document_heading,
+)
 from meetasr.export.service import ExportArtifact, MissingExportDependency
 
 
@@ -96,11 +99,12 @@ def export_docx(
     can be supplied through ``context``. Extra fields are harmless when the
     selected template does not reference them.
 
-    A leading Markdown H1 is omitted because the template renders the document
-    title.
+    A leading Markdown H1 becomes the uppercase display title and is omitted
+    from the body. The ``title`` argument remains the output filename fallback.
     """
     DocxTemplate = _load_docx_template_class()
     template_path = _resolve_template(template)
+    document_title = resolve_document_title(markdown, title)
 
     document = DocxTemplate(str(template_path))
     missing_fields = _missing_context_fields(document, context)
@@ -133,7 +137,7 @@ def export_docx(
     }
     template_context.update(
         {
-            "title": title,
+            "title": document_title,
             "generated_at": generated_at or now.strftime("%d/%m/%Y"),
             "time": now.strftime("%H:%M"),
             "body": body,

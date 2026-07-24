@@ -21,7 +21,7 @@ _ALLOWED_HTML_TAGS = {
 }
 _ALLOWED_ATTRIBUTES: dict[str, list[str]] = {}
 _LEADING_H1 = re.compile(
-    r"\A(?:\ufeff)?(?:[ \t]*\r?\n)*[ \t]{0,3}#(?!#)[ \t]+[^\r\n]*"
+    r"\A(?:\ufeff)?(?:[ \t]*\r?\n)*[ \t]{0,3}#(?!#)[ \t]+(?P<title>[^\r\n]*)"
     r"(?:\r?\n|\Z)"
 )
 
@@ -33,6 +33,22 @@ def create_markdown_parser() -> MarkdownIt:
 
 def parse_markdown(markdown: str) -> list[Token]:
     return create_markdown_parser().parse(markdown)
+
+
+def extract_leading_document_heading(markdown: str) -> str | None:
+    """Return the initial ATX H1 text used as the document title."""
+    match = _LEADING_H1.match(markdown)
+    if match is None:
+        return None
+
+    title = re.sub(r"[ \t]+#+[ \t]*$", "", match.group("title")).strip()
+    return title or None
+
+
+def resolve_document_title(markdown: str, fallback: str) -> str:
+    """Resolve an uppercase export title from H1, then a source-name fallback."""
+    title = extract_leading_document_heading(markdown) or fallback.strip()
+    return (title or "document").upper()
 
 
 def strip_leading_document_heading(markdown: str) -> str:

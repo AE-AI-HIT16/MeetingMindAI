@@ -60,14 +60,14 @@ def test_docx_uses_template_and_preserves_vietnamese_content():
 
     assert artifact.filename == "Báo cáo thử nghiệm.docx"
     assert artifact.media_type.endswith("wordprocessingml.document")
-    assert document.paragraphs[0].text == "Báo cáo thử nghiệm"
+    assert document.paragraphs[0].text == "BÁO CÁO THỬ NGHIỆM"
     assert document.paragraphs[0].style.name == "Title"
     assert document.paragraphs[1].text == "Ngày tạo: 22/07/2026"
 
     paragraphs = {paragraph.text: paragraph for paragraph in document.paragraphs}
     assert paragraphs["Tổng quan"].style.name == "Heading 1"
     assert sum(
-        paragraph.text == "Báo cáo thử nghiệm"
+        paragraph.text == "BÁO CÁO THỬ NGHIỆM"
         for paragraph in document.paragraphs
     ) == 1
     assert paragraphs["Việc thứ nhất"].style.name == "List Bullet"
@@ -136,7 +136,9 @@ def test_modern_template_renders_optional_context():
     with ZipFile(BytesIO(artifact.content)) as archive:
         document_xml = archive.read("word/document.xml").decode("utf-8")
 
-    assert "Báo cáo hiện đại" in document_xml
+    assert artifact.filename == "Báo cáo hiện đại.docx"
+    assert "BÁO CÁO THỬ NGHIỆM" in document_xml
+    assert "Báo cáo hiện đại" not in document_xml
     assert "23/07/2026" in document_xml
     assert "Anh Tú" in document_xml
     assert "{{" not in document_xml
@@ -174,7 +176,7 @@ def test_template_context_cannot_replace_system_fields():
     document = docx.Document(BytesIO(artifact.content))
     text = "\n".join(paragraph.text for paragraph in document.paragraphs)
 
-    assert "Tiêu đề thật" in text
+    assert "TIÊU ĐỀ THẬT" in text
     assert "Tiêu đề giả" not in text
     assert "23/07/2026" in text
     assert "01/01/1970" not in text
@@ -207,7 +209,7 @@ def test_export_service_sanitizes_unicode_filename():
 
     assert artifact.filename == "Biên bản Nhóm A2026.docx"
     assert docx.Document(BytesIO(artifact.content)).paragraphs[0].text == (
-        "Biên bản Nhóm A2026"
+        "BIÊN BẢN NHÓM A2026"
     )
 
 

@@ -16,6 +16,7 @@ from markdown_it.token import Token
 from meetasr.export.markdown_parser import (
     parse_markdown,
     render_safe_html_tokens,
+    resolve_document_title,
     strip_leading_document_heading,
 )
 from meetasr.export.service import (
@@ -207,7 +208,11 @@ def export_pdf(
     generated_at: str | None = None,
     context: Mapping[str, Any] | None = None,
 ) -> ExportArtifact:
-    """Export Markdown through a trusted HTML/CSS template."""
+    """Export Markdown through a trusted HTML/CSS template.
+
+    A leading Markdown H1 becomes the uppercase display title and is omitted
+    from the body. The ``title`` argument remains the output filename fallback.
+    """
     (
         HTML,
         URLFetcher,
@@ -217,6 +222,7 @@ def export_pdf(
         select_autoescape,
     ) = _load_pdf_dependencies()
     template_path = _resolve_template(template)
+    document_title = resolve_document_title(markdown, title)
     template_source = template_path.read_text(encoding="utf-8")
     environment = Environment(
         autoescape=select_autoescape(("html", "xml")),
@@ -239,7 +245,7 @@ def export_pdf(
     }
     template_context.update(
         {
-            "title": title,
+            "title": document_title,
             "generated_at": generated_at or now.strftime("%d/%m/%Y"),
             "time": now.strftime("%H:%M"),
             "brand_name": "MeetingMind AI",
