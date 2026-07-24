@@ -28,7 +28,7 @@ llm:
   provider: groq
   model: openai/gpt-oss-20b
   api_key: ${oc.env:GROQ_API_KEY}
-  language: vi
+  language: vi                  # requires matching generic prompt files
   temperature: 0.3
   max_tokens: 4096
   timeout: 120

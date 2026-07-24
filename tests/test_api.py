@@ -5,14 +5,19 @@ All tests run without downloading ML models (pipeline is mocked).
 """
 from __future__ import annotations
 
+from collections.abc import Generator
 from io import BytesIO
 from unittest.mock import MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.pool import StaticPool
+from sqlmodel import Session, SQLModel, create_engine
 
 from meetasr.api.app import app
 from meetasr.api.dependencies import get_pipeline
+from meetasr.api.routes import summarize
+from meetasr.db.connection import get_db
 
 # ---------------------------------------------------------
 # HELPERS & MOCK SETUP
@@ -79,10 +84,45 @@ def _dummy_audio(filename: str = "test.wav") -> tuple[str, BytesIO, str]:
     return (filename, BytesIO(b"fake audio data"), "audio/wav")
 
 
-# Inject default mock pipeline (with LLM) for the entire test module
-app.dependency_overrides[get_pipeline] = _override_get_pipeline
-
 client = TestClient(app)
+
+
+@pytest.fixture(scope="module", autouse=True)
+def isolated_test_app() -> Generator[None, None, None]:
+    """Run API tests against an isolated in-memory SQLite database."""
+    test_engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    SQLModel.metadata.create_all(test_engine)
+
+    def override_get_db() -> Generator[Session, None, None]:
+        with Session(test_engine) as session:
+            yield session
+
+    previous_db_override = app.dependency_overrides.get(get_db)
+    previous_pipeline_override = app.dependency_overrides.get(get_pipeline)
+    previous_background_engine = summarize.engine
+
+    app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_pipeline] = _override_get_pipeline
+    summarize.engine = test_engine
+    try:
+        yield
+    finally:
+        if previous_db_override is None:
+            app.dependency_overrides.pop(get_db, None)
+        else:
+            app.dependency_overrides[get_db] = previous_db_override
+
+        if previous_pipeline_override is None:
+            app.dependency_overrides.pop(get_pipeline, None)
+        else:
+            app.dependency_overrides[get_pipeline] = previous_pipeline_override
+
+        summarize.engine = previous_background_engine
+        test_engine.dispose()
 
 
 # ---------------------------------------------------------
@@ -206,4 +246,3 @@ def test_summarize_no_llm_returns_503():
     finally:
         # Always restore the default override to prevent test pollution
         app.dependency_overrides[get_pipeline] = _override_get_pipeline
-

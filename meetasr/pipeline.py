@@ -56,6 +56,7 @@ class MeetPipeline:
         punc_model=None,
         spk_model=None,
         llm_summarizer=None,
+        doc_planner=None,
         device: str = "cpu",
         enable_gap_rescue: bool = False,
     ):
@@ -67,6 +68,7 @@ class MeetPipeline:
             punc_model: AbsPunc instance. If None, skips punctuation step.
             spk_model: AbsSpk instance. If None, skips speaker diarization.
             llm_summarizer: MeetingSummarizer instance. If None, skips LLM step.
+            doc_planner: DocumentPlanner instance for Phase 2 structured documents.
             device: Torch device string.
             enable_gap_rescue: Re-decode VAD-confirmed speech gaps for ASR
                 models with native long-form timestamps. Disabled by default.
@@ -76,6 +78,7 @@ class MeetPipeline:
         self.punc = punc_model
         self.spk = spk_model
         self.summarizer = llm_summarizer
+        self.doc_planner = doc_planner
         self.device = device
         self.enable_gap_rescue = enable_gap_rescue
 

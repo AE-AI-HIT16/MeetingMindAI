@@ -61,8 +61,10 @@ class AutoPipeline:
 
         # Build LLM summarizer
         summarizer = None
+        doc_planner = None
         if "llm" in config and config["llm"]:
             summarizer = cls._build_llm(config["llm"])
+            doc_planner = cls._build_doc_planner(config["llm"])
 
         pipeline_cfg = config.get("pipeline") or {}
         gap_rescue_cfg = pipeline_cfg.get("gap_rescue") or {}
@@ -73,6 +75,7 @@ class AutoPipeline:
             punc_model=punc_model,
             spk_model=spk_model,
             llm_summarizer=summarizer,
+            doc_planner=doc_planner,
             device=device,
             enable_gap_rescue=gap_rescue_cfg.get("enabled", False),
         )
@@ -111,6 +114,34 @@ class AutoPipeline:
         return AutoModel(**cfg)
 
     @staticmethod
+    def _build_doc_planner(llm_cfg: dict) -> Any:
+        """Build a DocumentPlanner from LLM config."""
+        from meetasr.llm.planner import DocumentPlanner
+        from meetasr.register import tables
+
+        provider = llm_cfg.get("provider", "openai")
+        llm_class = tables.llm_classes.get(provider)
+        if llm_class is None:
+            return None
+
+        client_kwargs = {
+            k: v for k, v in llm_cfg.items()
+            if k not in ("provider", "language", "temperature", "max_tokens", "use_planner")
+        }
+        if "api_key" in client_kwargs:
+            key_val = client_kwargs["api_key"]
+            if isinstance(key_val, str) and key_val.startswith("${"):
+                client_kwargs["api_key"] = os.environ.get(key_val[2:-1], "")
+
+        client = llm_class(**client_kwargs)
+        return DocumentPlanner(
+            client=client,
+            language=llm_cfg.get("language", "vi"),
+            temperature=llm_cfg.get("temperature", 0.3),
+            max_tokens=llm_cfg.get("max_tokens", 4096),
+        )
+
+    @staticmethod
     def _build_llm(llm_cfg: dict) -> Any:
         """Build a MeetingSummarizer from LLM config."""
         from meetasr.llm.summarizer import MeetingSummarizer
@@ -128,7 +159,9 @@ class AutoPipeline:
         # Build client kwargs — strip non-client keys
         client_kwargs = {
             k: v for k, v in llm_cfg.items()
-            if k not in ("provider", "language", "temperature", "max_tokens")
+            if k not in (
+                "provider", "language", "temperature", "max_tokens", "use_planner"
+            )
         }
         # Resolve env vars in api_key
         if "api_key" in client_kwargs:
