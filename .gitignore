@@ -57,3 +57,12 @@ output/
 reports/
 
 FunASR/
+
+__pycache__/
+*.pyc
+
+debug_audio/
+test_fe.html
+frontend-next/.pnpm-store/
+
+.pnpm-store/

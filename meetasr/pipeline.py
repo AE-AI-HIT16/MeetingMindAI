@@ -6,20 +6,34 @@ import logging
 import os
 import time
 from typing import Optional
-import torch
 
 import numpy as np
+import torch
 
-from meetasr.schemas import TranscriptResult, MeetingReport, SentenceInfo, Segment
+from meetasr.schemas import MeetingReport, Segment, SentenceInfo, TranscriptResult
 from meetasr.utils.audio import load_audio
-from meetasr.utils.timestamp import merge_vad_segments, build_sentence_info
-from meetasr.utils.download import download_model
-from meetasr.utils.misc import deep_update
-from meetasr.utils.diarization import chunk_segment, circle_pad, assign_speakers_by_overlap, compressed_seg, map_chars_to_speakers
-from meetasr.utils.diarization import (chunk_segment, circle_pad, assign_speakers_by_overlap, compressed_seg,map_chars_to_speakers, split_at_speaker_turns,)
+from meetasr.utils.diarization import (
+    assign_speakers_by_overlap,
+    chunk_segment,
+    circle_pad,
+    compressed_seg,
+    map_chars_to_speakers,
+    split_at_speaker_turns,
+)
+
+from meetasr.utils.timestamp import (
+    build_sentence_info,
+    clip_sentence_to_range,
+    find_speech_gaps,
+    merge_rescued_sentences,
+    merge_vad_segments,
+    split_punctuated_sentence_info,
+)
 
 VAD_PADDING_MS = 100
 SAMPLE_RATE = 16000
+GAP_RESCUE_MIN_GAP_MS = 2000
+GAP_RESCUE_RIGHT_CONTEXT_MS = 1000
 
 
 class MeetPipeline:
@@ -44,6 +58,7 @@ class MeetPipeline:
         llm_summarizer=None,
         doc_planner=None,
         device: str = "cpu",
+        enable_gap_rescue: bool = False,
     ):
         """Initialize MeetPipeline with pre-built model instances.
 
@@ -55,6 +70,8 @@ class MeetPipeline:
             llm_summarizer: MeetingSummarizer instance. If None, skips LLM step.
             doc_planner: DocumentPlanner instance for Phase 2 structured documents.
             device: Torch device string.
+            enable_gap_rescue: Re-decode VAD-confirmed speech gaps for ASR
+                models with native long-form timestamps. Disabled by default.
         """
         self.asr = asr_model
         self.vad = vad_model
@@ -63,6 +80,7 @@ class MeetPipeline:
         self.summarizer = llm_summarizer
         self.doc_planner = doc_planner
         self.device = device
+        self.enable_gap_rescue = enable_gap_rescue
 
     # ------------------------------------------------------------------
     # Public API
@@ -96,10 +114,30 @@ class MeetPipeline:
         segments = self._run_vad(audio)
 
         # Step 2: ASR per segment
-        asr_results = self._run_asr(audio, segments, language=language, **kwargs)
+        asr_results, asr_segments, timestamp_offsets_ms = self._run_asr(
+            audio, segments, language=language, **kwargs
+        )
 
         # Step 3: Build sentence_info
-        sentence_info = build_sentence_info(asr_results, segments)
+        sentence_info = build_sentence_info(
+            asr_results,
+            asr_segments,
+            timestamp_offsets_ms=timestamp_offsets_ms,
+        )
+
+        if (
+            self.enable_gap_rescue
+            and self.vad is not None
+            and getattr(self.asr, "uses_internal_vad", False)
+        ):
+            sentence_info = self._rescue_speech_gaps(
+                audio,
+                sentence_info,
+                segments,
+                duration_ms=int(duration * 1000),
+                language=language,
+                **kwargs,
+            )
 
         # Step 4: Speaker diarization
         # Must run BEFORE punctuation because punctuation changes text length,
@@ -107,9 +145,16 @@ class MeetPipeline:
         if self.spk is not None:
             sentence_info = self._run_spk(audio, sentence_info, segments)
 
-        # Step 5: Punctuation
-        if self.punc is not None:
+        # Step 5: Punctuation. Whisper already emits punctuation, so applying a
+        # second punctuation model would alter its native transcript and timing.
+        if (
+            self.punc is not None
+            and not getattr(self.asr, "has_native_punctuation", False)
+        ):
             sentence_info = self._run_punc(sentence_info)
+            sentence_info = split_punctuated_sentence_info(sentence_info)
+        elif self.punc is not None:
+            logging.info("Punc: skipped because ASR provides native punctuation")
 
         full_text = " ".join(s.text for s in sentence_info)
 
@@ -161,7 +206,14 @@ class MeetPipeline:
 
         t0 = time.perf_counter()
         segments = self.vad.detect(audio)
-        segments = merge_vad_segments(segments)
+        max_segment_ms = getattr(self.vad, "max_segment_ms", 60000)
+        segments = merge_vad_segments(segments, max_segment_ms=max_segment_ms)
+        min_segment_ms = getattr(self.vad, "min_segment_ms", 200)
+        segments = _limit_segment_duration(
+            segments,
+            max_segment_ms=max_segment_ms,
+            min_segment_ms=min_segment_ms,
+        )
         logging.info(
             f"VAD: {len(segments)} segments detected "
             f"({time.perf_counter() - t0:.2f}s)"
@@ -175,14 +227,31 @@ class MeetPipeline:
         audio: np.ndarray,
         segments: list[Segment],
         **kwargs,
-    ) -> list[dict]:
-        """Run ASR on each VAD segment."""
+    ) -> tuple[list[dict], list[Segment], list[int]]:
+        """Run ASR on its preferred input shape and retain global offsets."""
+        if getattr(self.asr, "uses_internal_vad", False):
+            t0 = time.perf_counter()
+            results = self.asr.recognize_long_form(audio, **kwargs)
+            duration_ms = int(len(audio) / SAMPLE_RATE * 1000)
+            logging.info(
+                "ASR long-form: %s result(s) (%0.2fs)",
+                len(results),
+                time.perf_counter() - t0,
+            )
+            return (
+                results,
+                [Segment(0, duration_ms)] * len(results),
+                [0] * len(results),
+            )
+
         if not segments:
-            return []
+            return [], [], []
 
         t0 = time.perf_counter()
         # Slice audio for each segment
         chunks = []
+        chunk_segments = []
+        timestamp_offsets_ms = []
         total_ms = int(len(audio) / SAMPLE_RATE * 1000)
         for seg in segments:
             start_ms = max(0, seg.start_ms - VAD_PADDING_MS)
@@ -192,13 +261,85 @@ class MeetPipeline:
             chunk = audio[start:end]
             if len(chunk) > 0:
                 chunks.append(chunk)
+                chunk_segments.append(seg)
+                timestamp_offsets_ms.append(start_ms)
 
         results = self.asr.recognize(chunks, **kwargs)
+        if len(results) != len(chunk_segments):
+            logging.warning(
+                "ASR returned %s results for %s chunks; truncating timestamp "
+                "alignment to the available pairs.",
+                len(results),
+                len(chunk_segments),
+            )
+        pair_count = min(len(results), len(chunk_segments))
         logging.info(
             f"ASR: {len(results)} results "
             f"({time.perf_counter() - t0:.2f}s)"
         )
-        return results
+        return (
+            results[:pair_count],
+            chunk_segments[:pair_count],
+            timestamp_offsets_ms[:pair_count],
+        )
+
+    def _rescue_speech_gaps(
+        self,
+        audio: np.ndarray,
+        sentences: list[SentenceInfo],
+        vad_segments: list[Segment],
+        duration_ms: int,
+        language: str,
+        **kwargs,
+    ) -> list[SentenceInfo]:
+        """Re-decode only VAD-confirmed gaps in a long-form ASR timeline."""
+        gaps = find_speech_gaps(
+            sentences,
+            vad_segments,
+            duration_ms=duration_ms,
+            min_gap_ms=GAP_RESCUE_MIN_GAP_MS,
+        )
+        rescued_sentences = []
+        for index, gap in enumerate(gaps):
+            input_end_ms = min(
+                duration_ms,
+                gap.end_ms + GAP_RESCUE_RIGHT_CONTEXT_MS,
+            )
+            audio_chunk = audio[
+                int(gap.start_ms / 1000 * SAMPLE_RATE):
+                int(input_end_ms / 1000 * SAMPLE_RATE)
+            ]
+            rescue_results = self.asr.recognize_long_form(
+                audio_chunk,
+                language=language,
+                key=f"gap_rescue_{index}",
+                **kwargs,
+            )
+            rescue_segments = [
+                Segment(gap.start_ms, input_end_ms)
+                for _ in rescue_results
+            ]
+            rescue_sentences = build_sentence_info(
+                rescue_results,
+                rescue_segments,
+                timestamp_offsets_ms=[gap.start_ms] * len(rescue_results),
+            )
+            for sentence in rescue_sentences:
+                clipped = clip_sentence_to_range(
+                    sentence,
+                    gap.start_ms,
+                    gap.end_ms,
+                )
+                if clipped is not None:
+                    rescued_sentences.append(clipped)
+
+        if rescued_sentences:
+            logging.info(
+                "Gap rescue: inserted %s sentence(s) from %s candidate gap(s)",
+                len(rescued_sentences),
+                len(gaps),
+            )
+        return merge_rescued_sentences(sentences, rescued_sentences)
 
     def _run_punc(self, sentence_info: list[SentenceInfo]) -> list[SentenceInfo]:
         """Restore punctuation for each sentence and align timestamps."""
@@ -301,6 +442,31 @@ class MeetPipeline:
 # ------------------------------------------------------------------
 # Helpers
 # ------------------------------------------------------------------
+
+def _limit_segment_duration(
+    segments: list[Segment],
+    max_segment_ms: int,
+    min_segment_ms: int,
+) -> list[Segment]:
+    """Split VAD output so ASR never receives an unexpectedly long chunk."""
+    if max_segment_ms <= 0:
+        return segments
+
+    limited = []
+    for segment in segments:
+        start_ms = segment.start_ms
+        while segment.end_ms - start_ms > max_segment_ms:
+            limited.append(Segment(start_ms, start_ms + max_segment_ms))
+            start_ms += max_segment_ms
+
+        if segment.end_ms - start_ms < min_segment_ms and limited:
+            previous = limited[-1]
+            if previous.end_ms == start_ms:
+                limited[-1] = Segment(previous.start_ms, segment.end_ms)
+                continue
+        limited.append(Segment(start_ms, segment.end_ms))
+    return limited
+
 
 def _derive_key(source) -> str:
     """Derive a human-readable key from the audio source."""

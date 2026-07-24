@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+<meta charset="UTF-8">
+
+<style>
+
+body{
+    font-family: Arial, sans-serif;
+    margin:40px;
+}
+
+button{
+    padding:10px 20px;
+    font-size:16px;
+}
+
+#status{
+    margin-top:20px;
+    font-size:18px;
+    font-weight:bold;
+}
+
+#result{
+    margin-top:20px;
+    padding:15px;
+    border:1px solid #ccc;
+    background:#f5f5f5;
+    white-space:pre-wrap;
+    font-family:Consolas, monospace;
+}
+
+</style>
+
+</head>
+
+<body>
+
+<button id="startBtn" onclick="start()">
+    Start
+</button>
+
+<div id="status">
+    Chưa ghi âm
+</div>
+
+<h3>Kết quả từ WebSocket</h3>
+
+<pre id="result">
+Chưa có dữ liệu...
+</pre>
+
+<script>
+
+let ws;
+
+async function start(){
+
+    document.getElementById("startBtn").disabled = true;
+
+    document.getElementById("status").innerText =
+        "Đang kết nối...";
+
+    ws = new WebSocket(
+        "ws://localhost:8000/v1/realtime/stream"
+    );
+
+    ws.binaryType = "arraybuffer";
+
+    ws.onopen = () => {
+
+        document.getElementById("status").innerText =
+            "Đang ghi âm";
+
+    };
+
+    ws.onmessage = e => {
+
+        console.log("ASR:", e.data);
+
+        let text;
+
+        try{
+
+            text = JSON.stringify(
+                JSON.parse(e.data),
+                null,
+                2
+            );
+
+        }catch{
+
+            text = e.data;
+
+        }
+
+        document.getElementById("result").textContent =
+            text;
+
+    };
+
+    ws.onerror = () => {
+
+        document.getElementById("status").innerText =
+            "Lỗi kết nối";
+
+    };
+
+    ws.onclose = () => {
+
+        document.getElementById("status").innerText =
+            "Đã ngắt kết nối";
+
+    };
+
+    const stream =
+        await navigator.mediaDevices.getUserMedia({
+            audio:true
+        });
+
+    const context =
+        new AudioContext({
+            sampleRate:16000
+        });
+
+    const source =
+        context.createMediaStreamSource(stream);
+
+    const processor =
+        context.createScriptProcessor(
+            4096,
+            1,
+            1
+        );
+
+    source.connect(processor);
+    processor.connect(context.destination);
+
+    processor.onaudioprocess = e => {
+
+        let input =
+            e.inputBuffer.getChannelData(0);
+
+        let pcm16 =
+            new Int16Array(input.length);
+
+        for(let i=0;i<input.length;i++){
+
+            pcm16[i] =
+                Math.max(-1,
+                    Math.min(1,input[i])
+                ) * 32767;
+
+        }
+
+        if(ws.readyState === WebSocket.OPEN){
+
+            ws.send(
+                pcm16.buffer
+            );
+
+        }
+
+    };
+
+}
+
+</script>
+
+</body>
+</html>

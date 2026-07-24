@@ -41,6 +41,8 @@ dependencies = [
     "openai>=1.0",
     # FunASR (for model weight reuse)
     "funasr",
+    # Production multilingual ASR backend
+    "faster-whisper>=1.2,<2",
     # Vietnamese ASR backend
     "sherpa-onnx",
     # Speaker clustering (3D-Speaker port)
