@@ -1,453 +1,509 @@
-"""Tests for DocumentPlanner with mock LLM client."""
+"""Unit tests for the Phase 2 Plan → Write DocumentPlanner."""
+
+from __future__ import annotations
 
 import json
+from collections.abc import Callable
 
 import pytest
 
+import meetasr.llm.planner as planner_module
 from meetasr.llm.abs_llm import AbsLLMClient
 from meetasr.llm.planner import (
-    MAX_AGGREGATE_DATA_CHARS,
-    MAX_REDUCE_DATA_CHARS,
-    SHORT_TRANSCRIPT_CHARS,
+    MAX_LLM_INPUT_CHARS,
     DocumentPlanner,
     _parse_json_object,
 )
-from meetasr.llm.planner_chunk import OVERLAP_LINES, chunk_with_overlap
-from meetasr.llm.planner_validation import normalize_extraction, normalize_outline
-from meetasr.schemas import TranscriptResult, SentenceInfo
+from meetasr.schemas import SentenceInfo, TranscriptResult
 from meetasr.schemas_doc import DocumentReport
 
 
-# ------------------------------------------------------------------
-# Mock LLM
-# ------------------------------------------------------------------
+class StubLLMClient(AbsLLMClient):
+    """Record calls and return deterministic responses from a handler."""
 
-class MockLLMClient(AbsLLMClient):
-    """Mock LLM that returns preset responses based on prompt keywords."""
+    model = "stub-model"
 
-    def __init__(self, responses: dict[str, str]) -> None:
-        """Args:
-            responses: Map of keyword → response string.
-                If prompt contains keyword, return that response.
-        """
-        self.responses = responses
+    def __init__(self, handler: Callable[[str], str]) -> None:
+        self.handler = handler
         self.calls: list[str] = []
+        self.call_kwargs: list[dict] = []
 
     def chat(self, prompt: str, **kwargs) -> str:
         self.calls.append(prompt)
-        for keyword, response in self.responses.items():
-            if keyword in prompt:
-                return response
-        return ""
+        self.call_kwargs.append(kwargs)
+        return self.handler(prompt)
 
 
-class CountingLLMClient(AbsLLMClient):
-    """Mock LLM that records prompts without exposing a call counter."""
-
-    def __init__(self, responses: dict[str, str]) -> None:
-        self.responses = responses
-        self.calls: list[str] = []
-
-    def chat(self, prompt: str, **kwargs) -> str:
-        self.calls.append(prompt)
-        for keyword, response in self.responses.items():
-            if keyword in prompt:
-                return response
-        return ""
-
-
-# ------------------------------------------------------------------
-# Fixtures
-# ------------------------------------------------------------------
-
-def _short_transcript() -> TranscriptResult:
-    """Transcript below the character threshold triggers the short path."""
-    return TranscriptResult(
-        key="short_meeting",
-        text="Chúng ta sẽ làm tính năng A. Nam sẽ thiết kế UI.",
-        duration=120.0,
-        sentence_info=[
-            SentenceInfo(text="Chúng ta sẽ làm tính năng A.", start=0.5, end=5.0, speaker=0),
-            SentenceInfo(text="Nam sẽ thiết kế UI.", start=5.5, end=10.0, speaker=1),
-        ],
+def _outline_response(
+    content_kind: str = "Cuộc họp công việc",
+    outline: list[dict[str, str]] | None = None,
+) -> str:
+    return json.dumps(
+        {
+            "content_kind": content_kind,
+            "outline": outline
+            or [
+                {"id": "s1", "heading": "Tổng quan", "kind": "summary"},
+                {"id": "s2", "heading": "Điểm yếu hàng thủ Pháp", "kind": "topic"},
+                {
+                    "id": "s3",
+                    "heading": "Khả năng pressing của Tây Ban Nha",
+                    "kind": "topic",
+                },
+                {
+                    "id": "s4",
+                    "heading": "Điều chỉnh nhân sự hiệp hai",
+                    "kind": "topic",
+                },
+            ],
+        },
+        ensure_ascii=False,
     )
 
 
-def _long_transcript(n_lines: int = 400) -> TranscriptResult:
-    """Transcript above the character threshold triggers the long path."""
-    lines = [f"[{i * 5.0:.1f}s] Speaker {i % 3}: Đây là câu số {i} với nội dung khá dài để đảm bảo chunk." for i in range(n_lines)]
-    text = "\n".join(lines)
+def _transcript(lines: int = 2) -> TranscriptResult:
     sentences = [
         SentenceInfo(
-            text=f"Đây là câu số {i} với nội dung khá dài để đảm bảo chunk.",
-            start=i * 5.0,
-            end=(i + 1) * 5.0,
-            speaker=i % 3,
+            text=f"Nội dung có căn cứ số {index}.",
+            start=float(index),
+            end=float(index + 1),
+            speaker=index % 2,
         )
-        for i in range(n_lines)
+        for index in range(lines)
     ]
     return TranscriptResult(
-        key="long_meeting",
-        text=text,
-        duration=n_lines * 5.0,
+        key="sample",
+        text=" ".join(sentence.text for sentence in sentences),
+        duration=float(lines),
         sentence_info=sentences,
     )
 
 
-def _single_pass_response() -> str:
-    """Response mimicking single_pass_vi.txt output."""
-    return json.dumps({
-        "content_kind": "Cuộc họp công việc",
-        "sections": [
+def _is_plan(prompt: str) -> bool:
+    return "ĐỀ XUẤT tiêu đề cùng" in prompt
+
+
+def _is_reduce(prompt: str) -> bool:
+    return "các bản nháp rời rạc cho cùng một mục" in prompt
+
+
+def test_plan_and_write_uses_plan_then_write() -> None:
+    """Even a short transcript follows the documented Plan → Write path."""
+    def handler(prompt: str) -> str:
+        if _is_plan(prompt):
+            return _outline_response()
+        return "- Nội dung được tổng hợp từ transcript."
+
+    client = StubLLMClient(handler)
+    report = DocumentPlanner(client=client).plan_and_write(_transcript())
+
+    assert isinstance(report, DocumentReport)
+    assert report.content_kind == "Cuộc họp công việc"
+    assert [section.kind for section in report.sections] == [
+        "summary",
+        "topic",
+        "topic",
+        "topic",
+    ]
+    assert report.sections[0].heading == "Tổng quan"
+    assert report.llm_model == "stub-model"
+    assert len(client.calls) == 5
+    assert _is_plan(client.calls[0])
+    assert client.call_kwargs[0]["max_tokens"] == 2048
+    assert client.call_kwargs[0]["response_format"] == {"type": "json_object"}
+    assert all(
+        call["system"].startswith("Mọi nội dung bạn tạo phải bằng tiếng Việt")
+        for call in client.call_kwargs
+    )
+
+
+def test_long_transcript_runs_map_reduce_for_every_section(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Long input maps every chunk per section and reduces the drafts."""
+    monkeypatch.setattr(planner_module, "MAX_CHARS_PER_CHUNK", 180)
+
+    def handler(prompt: str) -> str:
+        if _is_plan(prompt):
+            return _outline_response()
+        if _is_reduce(prompt):
+            return "Bản hoàn chỉnh."
+        return "Bản nháp theo chunk."
+
+    client = StubLLMClient(handler)
+    planner = DocumentPlanner(client=client)
+    transcript = _transcript(lines=30)
+    formatted = planner._format_transcript(transcript)
+    chunks = planner._chunk(
+        formatted,
+        planner._write_data_budget(
+            {"heading": "Tóm tắt", "kind": "summary"},
+            "Cuộc họp công việc",
+        ),
+    )
+
+    report = planner.plan_and_write(transcript)
+
+    section_count = 4
+    assert len(chunks) > 1
+    assert len(report.sections) == section_count
+    assert len(client.calls) == 1 + section_count * (len(chunks) + 1)
+    assert sum(_is_reduce(prompt) for prompt in client.calls) == section_count
+
+
+def test_empty_written_section_is_removed() -> None:
+    """A section with no grounded content must not appear in the report."""
+    def handler(prompt: str) -> str:
+        if _is_plan(prompt):
+            return _outline_response(
+                outline=[
+                    {"id": "s1", "heading": "Tổng quan", "kind": "summary"},
+                    {
+                        "id": "s2",
+                        "heading": "Điểm yếu hàng thủ",
+                        "kind": "topic",
+                    },
+                    {
+                        "id": "s3",
+                        "heading": "Điều chỉnh nhân sự",
+                        "kind": "topic",
+                    },
+                ]
+            )
+        if 'MỤC ĐANG VIẾT: "Điều chỉnh nhân sự"' in prompt:
+            return ""
+        return "Tóm tắt có căn cứ."
+
+    report = DocumentPlanner(client=StubLLMClient(handler)).plan_and_write(
+        _transcript()
+    )
+
+    assert "Điều chỉnh nhân sự" not in [
+        section.heading for section in report.sections
+    ]
+    assert len(report.sections) == 2
+
+
+def test_invalid_plan_falls_back_without_crashing() -> None:
+    """Malformed plan JSON degrades to the required report outline."""
+    client = StubLLMClient(
+        lambda prompt: "not-json" if _is_plan(prompt) else "Tóm tắt fallback."
+    )
+    report = DocumentPlanner(client=client).plan_and_write(_transcript())
+
+    assert report.content_kind == "Tài liệu"
+    assert [section.kind for section in report.sections] == [
+        "summary",
+        "topic",
+    ]
+
+
+@pytest.mark.parametrize("first_response", ["", "{}"])
+def test_unusable_plan_is_regenerated_from_transcript(first_response: str) -> None:
+    """Empty or incomplete completions trigger fresh planning from the source."""
+    def handler(prompt: str) -> str:
+        if _is_plan(prompt):
+            return first_response
+        if "Lần tạo kế hoạch trước không trả về nội dung" in prompt:
+            return _outline_response("Pháp đối đầu Tây Ban Nha")
+        return "Nội dung có căn cứ."
+
+    client = StubLLMClient(handler)
+    report = DocumentPlanner(client=client).plan_and_write(_transcript())
+
+    assert report.content_kind == "Pháp đối đầu Tây Ban Nha"
+    assert len(report.sections) == 4
+    assert "TRANSCRIPT:" in client.calls[1]
+    assert "JSON cần sửa:" not in client.calls[1]
+    assert client.call_kwargs[1]["response_format"] == {"type": "json_object"}
+
+
+def test_generic_sections_are_replaced_by_concrete_topics() -> None:
+    """Generic headings are omitted while transcript-specific topics survive."""
+    plan = _outline_response(
+        outline=[
+            {"id": "s1", "heading": "Tóm tắt", "kind": "summary"},
+            {"id": "s2", "heading": "Các điểm chính", "kind": "key_points"},
+            {"id": "s3", "heading": "Kết luận", "kind": "conclusion"},
             {
-                "id": "s1",
-                "heading": "Tóm tắt",
-                "kind": "summary",
-                "markdown": "Cuộc họp bàn về tính năng A, Nam phụ trách UI.",
+                "id": "s4",
+                "heading": "Khoảng trống ở cánh trái của Pháp",
+                "kind": "analysis",
             },
-            {
-                "id": "s2",
-                "heading": "Action Items",
-                "kind": "action_items",
-                "markdown": "- Nam: Thiết kế UI",
-            },
-        ],
-    }, ensure_ascii=False)
-
-
-def _structured_extract_response() -> str:
-    """Response for structured_extract_vi.txt."""
-    return json.dumps({
-        "summary": "Thảo luận về tiến độ dự án.",
-        "action_items": [{"task": "Review code", "who": "Khương", "deadline": "Thứ 6"}],
-        "decisions": [{"content": "Dời deadline", "made_by": "Team"}],
-        "key_points": ["Tiến độ đúng hạn"],
-        "quotes": [],
-    }, ensure_ascii=False)
-
-
-def _aggregate_plan_response() -> str:
-    """Response for aggregate_plan_vi.txt."""
-    return json.dumps({
-        "content_kind": "Cuộc họp công việc",
-        "outline": [
-            {"id": "s1", "heading": "Tóm tắt", "kind": "summary", "source_keys": ["summary"]},
-            {"id": "s2", "heading": "Action Items", "kind": "action_items", "source_keys": ["action_items"]},
-            {"id": "s3", "heading": "Quyết định", "kind": "decisions", "source_keys": ["decisions"]},
-        ],
-    }, ensure_ascii=False)
-
-
-# ------------------------------------------------------------------
-# Test: Short transcript → 1 LLM call
-# ------------------------------------------------------------------
-
-class TestShortTranscript:
-
-    def test_short_transcript_single_call(self):
-        """A short transcript uses one single-pass LLM call."""
-        mock = MockLLMClient({
-            # single_pass prompt contains the full transcript
-            "Chúng ta sẽ làm": _single_pass_response(),
-        })
-        planner = DocumentPlanner(client=mock)
-        report = planner.plan_and_write(_short_transcript())
-
-        assert isinstance(report, DocumentReport)
-        assert report.content_kind == "Cuộc họp công việc"
-        assert len(report.sections) == 2
-        assert report.sections[0].heading == "Tóm tắt"
-        assert report.sections[0].found is True
-        assert "tính năng A" in report.sections[0].markdown
-        assert report.language == "vi"
-        # Only 1 LLM call for short path
-        assert len(mock.calls) == 1
-        assert planner.last_run_metrics is not None
-        assert planner.last_run_metrics.path == "short"
-        assert planner.last_run_metrics.llm_calls == 1
-        assert planner.last_run_metrics.calls_by_stage == {"single_pass": 1}
-
-    def test_short_path_fallback_on_error(self):
-        """If LLM returns invalid JSON, short path falls back gracefully."""
-        mock = MockLLMClient({
-            "any": "this is not json at all {{{{",
-        })
-        planner = DocumentPlanner(client=mock)
-        report = planner.plan_and_write(_short_transcript())
-
-        assert isinstance(report, DocumentReport)
-        assert report.content_kind == "Tài liệu"
-        assert report.sections == []
-
-    def test_client_failure_is_counted_by_planner(self):
-        """Planner metrics count attempted and failed calls without client counters."""
-        class FailingLLMClient(AbsLLMClient):
-            def chat(self, prompt: str, **kwargs) -> str:
-                raise RuntimeError("LLM unavailable")
-
-        planner = DocumentPlanner(client=FailingLLMClient())
-        report = planner.plan_and_write(_short_transcript())
-
-        assert report.content_kind == "Tài liệu"
-        assert planner.last_run_metrics is not None
-        assert planner.last_run_metrics.llm_calls == 1
-        assert planner.last_run_metrics.llm_failures == 1
-        assert planner.last_run_metrics.failures_by_stage == {"single_pass": 1}
-
-    def test_empty_transcript_does_not_call_llm(self):
-        """An empty transcript returns an empty report without inviting hallucination."""
-        mock = MockLLMClient({})
-        planner = DocumentPlanner(client=mock)
-        report = planner.plan_and_write(
-            TranscriptResult(key="empty", text="", duration=0.0)
-        )
-
-        assert report.content_kind == "Tài liệu"
-        assert report.sections == []
-        assert mock.calls == []
-        assert planner.last_run_metrics is not None
-        assert planner.last_run_metrics.path == "empty"
-        assert planner.last_run_metrics.llm_calls == 0
-
-    def test_malformed_sections_are_ignored_and_duplicate_ids_are_fixed(self):
-        """Single-pass output is normalized before building the report."""
-        response = json.dumps({
-            "content_kind": "Podcast",
-            "sections": [
-                "invalid",
-                {"id": "s1", "heading": "A", "kind": "summary", "markdown": "One"},
-                {"id": "s1", "heading": "B", "kind": "quotes", "markdown": "Two"},
-                {"id": "s4", "heading": "Empty", "kind": "notes", "markdown": ""},
-            ],
-        })
-        mock = MockLLMClient({"Chúng ta sẽ làm": response})
-        report = DocumentPlanner(client=mock).plan_and_write(_short_transcript())
-
-        assert [section.id for section in report.sections] == ["s1", "s3"]
-        assert [section.heading for section in report.sections] == ["A", "B"]
-
-    def test_short_path_prompt_stays_within_context_budget(self):
-        """The largest single-pass input must stay below 8,000 characters."""
-        mock = MockLLMClient({"a": _single_pass_response()})
-        transcript = TranscriptResult(
-            key="context-limit",
-            text="a" * (SHORT_TRANSCRIPT_CHARS - 1),
-            duration=1.0,
-        )
-        DocumentPlanner(client=mock).plan_and_write(transcript)
-        assert len(mock.calls) == 1
-        assert len(mock.calls[0]) <= 8000
-
-
-# ------------------------------------------------------------------
-# Test: Long transcript → N extraction + 1 aggregate + K reduce
-# ------------------------------------------------------------------
-
-class TestLongTranscript:
-
-    def test_long_transcript_structured_extraction(self):
-        """A long transcript uses extract, aggregate, and reduce calls."""
-        mock = MockLLMClient({
-            # Structured extract prompt contains "chunk"
-            "Đây là câu số": _structured_extract_response(),
-            # Aggregate plan prompt contains "structured_summaries"
-            "tóm tắt cấu trúc": _aggregate_plan_response(),
-            # Reduce prompt contains "raw_data"
-            "dữ liệu thô": "Nội dung markdown cho section.",
-        })
-        planner = DocumentPlanner(client=mock)
-        report = planner.plan_and_write(_long_transcript())
-
-        assert isinstance(report, DocumentReport)
-        assert report.content_kind == "Cuộc họp công việc"
-        assert len(report.sections) >= 1
-        for sec in report.sections:
-            assert sec.found is True
-            assert sec.markdown.strip()
-
-    def test_call_count_long(self):
-        """For long transcript: total calls = N(extract) + 1(aggregate) + K(reduce)."""
-        counting = CountingLLMClient({
-            "Đây là câu số": _structured_extract_response(),
-            "tóm tắt cấu trúc": _aggregate_plan_response(),
-            "dữ liệu thô": "Section markdown content.",
-        })
-        planner = DocumentPlanner(client=counting)
-        report = planner.plan_and_write(_long_transcript())
-
-        formatted = planner._format_transcript(_long_transcript())
-        n_chunks = len(chunk_with_overlap(formatted, overlap_lines=OVERLAP_LINES))
-        assert len(report.sections) == 3
-        assert planner.last_run_metrics is not None
-        assert planner.last_run_metrics.path == "long"
-        assert planner.last_run_metrics.chunk_count == n_chunks
-        assert planner.last_run_metrics.calls_by_stage == {
-            "extraction": n_chunks,
-            "aggregate": 1,
-            "reduce": len(report.sections),
-        }
-        assert planner.last_run_metrics.llm_calls == n_chunks + 1 + len(report.sections)
-        assert len(counting.calls) == planner.last_run_metrics.llm_calls
-
-    def test_all_long_path_prompts_stay_within_context_budget(self):
-        """Every long-path prompt must remain below the 8,000-character limit."""
-        counting = CountingLLMClient({
-            "Đây là câu số": _structured_extract_response(),
-            "tóm tắt cấu trúc": _aggregate_plan_response(),
-            "dữ liệu thô": "Section markdown content.",
-        })
-        DocumentPlanner(client=counting).plan_and_write(_long_transcript(1000))
-        assert all(len(prompt) <= 8000 for prompt in counting.calls)
-
-
-# ------------------------------------------------------------------
-# Test: No hallucination — empty sections filtered
-# ------------------------------------------------------------------
-
-class TestNoHallucination:
-
-    def test_no_hallucination_empty_section(self):
-        """Extraction returns empty → section should be excluded, not fabricated."""
-        empty_extract = json.dumps({
-            "summary": "",
-            "action_items": [],
-            "decisions": [],
-            "key_points": [],
-            "quotes": [],
-        }, ensure_ascii=False)
-
-        mock = MockLLMClient({
-            "Đây là câu số": empty_extract,
-            "tóm tắt cấu trúc": _aggregate_plan_response(),
-            "dữ liệu thô": "",  # reduce returns empty
-        })
-        planner = DocumentPlanner(client=mock)
-        report = planner.plan_and_write(_long_transcript())
-
-        # This must not be a vacuous loop: no source data means no sections.
-        assert report.sections == []
-
-    def test_non_summary_section_does_not_fallback_to_summaries(self):
-        """Missing action evidence must not be replaced with general summaries."""
-        planner = DocumentPlanner(client=MockLLMClient({}))
-        raw_data = planner._gather_for_section(
-            {
-                "id": "s2",
-                "heading": "Công việc",
-                "kind": "action_items",
-                "source_keys": ["action_items"],
-            },
-            [{"chunk_index": 0, "summary": "Có thảo luận chung."}],
-        )
-        assert raw_data == ""
-
-    def test_nested_extra_fields_are_available_to_sections(self):
-        """Open-ended fields under extra are flattened for planning and reducing."""
-        extraction = normalize_extraction(
-            {"summary": "Bàn ngân sách.", "extra": {"ngan_sach": "500 triệu"}},
-            chunk_index=0,
-        )
-        planner = DocumentPlanner(client=MockLLMClient({}))
-        raw_data = planner._gather_for_section(
-            {
-                "id": "s2",
-                "heading": "Ngân sách",
-                "kind": "finance",
-                "source_keys": ["ngan_sach"],
-            },
-            [extraction],
-        )
-        assert raw_data == "ngan_sach: 500 triệu"
-
-    def test_non_summary_outline_cannot_use_summary_as_evidence(self):
-        """Malformed source keys must not route summaries into factual sections."""
-        outline = normalize_outline([
-            {
-                "id": "s2",
-                "heading": "Công việc",
-                "kind": "action_items",
-                "source_keys": ["summary", "action_items"],
-            }
-        ])
-        assert outline[0]["source_keys"] == ["action_items"]
-
-    def test_aggregate_and_reduce_data_are_bounded(self):
-        """Internal context passed to final LLM calls must stay bounded."""
-        planner = DocumentPlanner(client=MockLLMClient({}))
-        extractions = [
-            {"chunk_index": index, "summary": "x" * 1000, "facts": ["y" * 1000]}
-            for index in range(20)
         ]
-        raw_data = planner._gather_for_section(
-            {"kind": "facts", "source_keys": ["facts"]}, extractions
+    )
+    client = StubLLMClient(
+        lambda prompt: plan if _is_plan(prompt) else "Nội dung có căn cứ."
+    )
+
+    report = DocumentPlanner(client=client).plan_and_write(_transcript())
+
+    assert [section.heading for section in report.sections] == [
+        "Tổng quan",
+        "Khoảng trống ở cánh trái của Pháp",
+    ]
+    assert [section.kind for section in report.sections] == ["summary", "topic"]
+
+
+def test_invalid_plan_json_is_repaired_before_fallback() -> None:
+    """A syntax-only JSON failure gets one deterministic repair attempt."""
+    def handler(prompt: str) -> str:
+        if _is_plan(prompt):
+            return (
+                '{"content_kind": "Phân tích bán kết và chung kết" '
+                '"outline": []}'
+            )
+        if "JSON kế hoạch dưới đây bị lỗi cú pháp" in prompt:
+            return _outline_response("Phân tích bán kết và chung kết")
+        return "Nội dung có căn cứ."
+
+    client = StubLLMClient(handler)
+    report = DocumentPlanner(client=client).plan_and_write(_transcript())
+
+    assert report.content_kind == "Phân tích bán kết và chung kết"
+    assert len(report.sections) == 4
+    assert sum(
+        "JSON kế hoạch dưới đây bị lỗi cú pháp" in prompt
+        for prompt in client.calls
+    ) == 1
+    assert client.call_kwargs[0]["temperature"] == 0.0
+    assert client.call_kwargs[1]["temperature"] == 0.0
+    assert client.call_kwargs[0]["response_format"] == {"type": "json_object"}
+    assert client.call_kwargs[1]["response_format"] == {"type": "json_object"}
+
+
+def test_write_failures_return_partial_document() -> None:
+    """A failed write call omits only that section."""
+    class FailingWriteClient(StubLLMClient):
+        def chat(self, prompt: str, **kwargs) -> str:
+            self.calls.append(prompt)
+            if _is_plan(prompt):
+                return _outline_response(
+                    outline=[
+                        {"id": "s1", "heading": "Tổng quan", "kind": "summary"},
+                        {
+                            "id": "s2",
+                            "heading": "Điểm yếu hàng thủ",
+                            "kind": "topic",
+                        },
+                        {
+                            "id": "s3",
+                            "heading": "Điều chỉnh nhân sự",
+                            "kind": "topic",
+                        },
+                    ]
+                )
+            if 'MỤC ĐANG VIẾT: "Điều chỉnh nhân sự"' in prompt:
+                raise RuntimeError("LLM unavailable")
+            return "Tóm tắt còn dùng được."
+
+    report = DocumentPlanner(
+        client=FailingWriteClient(lambda prompt: "")
+    ).plan_and_write(_transcript())
+
+    assert "Điều chỉnh nhân sự" not in [
+        section.heading for section in report.sections
+    ]
+    assert len(report.sections) == 2
+
+
+def test_reduce_failure_preserves_chunk_drafts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed reduce call returns concatenated successful map drafts."""
+    monkeypatch.setattr(planner_module, "MAX_CHARS_PER_CHUNK", 120)
+
+    class FailingReduceClient(StubLLMClient):
+        def chat(self, prompt: str, **kwargs) -> str:
+            self.calls.append(prompt)
+            if _is_plan(prompt):
+                return _outline_response(
+                    outline=[
+                        {"id": "s1", "heading": "Tóm tắt", "kind": "summary"}
+                    ]
+                )
+            if _is_reduce(prompt):
+                raise RuntimeError("reduce unavailable")
+            return "Bản nháp có căn cứ."
+
+    report = DocumentPlanner(
+        client=FailingReduceClient(lambda prompt: "")
+    ).plan_and_write(_transcript(lines=20))
+
+    assert len(report.sections) == 2
+    assert report.sections[0].markdown.count("Bản nháp có căn cứ.") > 1
+
+
+def test_empty_transcript_skips_llm() -> None:
+    """Empty input cannot invite hallucinated output."""
+    client = StubLLMClient(lambda prompt: "unexpected")
+    report = DocumentPlanner(client=client).plan_and_write(
+        TranscriptResult(key="empty", text="", duration=0.0)
+    )
+
+    assert report.content_kind == "Tài liệu"
+    assert report.sections == []
+    assert client.calls == []
+
+
+def test_plan_only_and_write_one_section_support_realtime() -> None:
+    """Realtime code can plan once and write one section incrementally."""
+    def handler(prompt: str) -> str:
+        if _is_plan(prompt):
+            return _outline_response("Bài giảng")
+        return "Nội dung realtime."
+
+    planner = DocumentPlanner(client=StubLLMClient(handler))
+    content_kind, outline = planner.plan_only("Nội dung bài giảng.")
+    section = planner.write_one_section(
+        outline[0],
+        content_kind,
+        "Khái niệm quan trọng.",
+    )
+
+    assert content_kind == "Bài giảng"
+    assert section.id == "s1"
+    assert section.markdown == "Nội dung realtime."
+
+
+def test_representative_sample_contains_head_middle_tail() -> None:
+    """A long planning sample covers the overall transcript shape."""
+    planner = DocumentPlanner(client=StubLLMClient(lambda prompt: ""))
+    text = "A" * 3000 + "B" * 3000 + "C" * 3000
+    sample = planner._representative_sample(text, 900)
+
+    assert len(sample) <= 900
+    assert "A" in sample
+    assert "B" in sample
+    assert "C" in sample
+
+
+def test_chunk_preserves_normal_lines() -> None:
+    """Normal transcript sentences are never cut between chunks."""
+    planner = DocumentPlanner(client=StubLLMClient(lambda prompt: ""))
+    lines = [f"line-{index}-" + "x" * 30 for index in range(20)]
+    chunks = planner._chunk("\n".join(lines), max_chars=120)
+    output_lines = [line for chunk in chunks for line in chunk.split("\n")]
+
+    assert output_lines == lines
+    assert all(len(chunk) <= 120 for chunk in chunks)
+
+
+def test_transcript_formatter_uses_consistent_time_ranges() -> None:
+    """Planner input gives the LLM one canonical timestamp format."""
+    planner = DocumentPlanner(client=StubLLMClient(lambda prompt: ""))
+    formatted = planner._format_transcript(
+        TranscriptResult(
+            key="timestamps",
+            text="",
+            duration=3700,
+            sentence_info=[
+                SentenceInfo(
+                    text="Ý kiến thứ nhất.",
+                    start=206,
+                    end=321,
+                    speaker=2,
+                ),
+                SentenceInfo(
+                    text="Ý kiến sau một giờ.",
+                    start=3600,
+                    end=3670,
+                    speaker=1,
+                ),
+            ],
         )
-        assert len(raw_data) <= MAX_REDUCE_DATA_CHARS
+    )
 
-        # The aggregate prompt is captured even when its response is invalid.
-        planner._aggregate_plan(extractions)
-        aggregate_prompt = planner.client.calls[-1]
-        assert len(aggregate_prompt) <= MAX_AGGREGATE_DATA_CHARS + 1800
-
-
-# ------------------------------------------------------------------
-# Test: Different content types → different outlines
-# ------------------------------------------------------------------
-
-class TestDifferentContentTypes:
-
-    def test_different_content_types(self):
-        """Three different content kinds produce reports with correct content_kind."""
-        for kind_name in ["Cuộc họp công việc", "Bài giảng", "Podcast"]:
-            aggregate = json.dumps({
-                "content_kind": kind_name,
-                "outline": [
-                    {"id": "s1", "heading": "Tóm tắt", "kind": "summary",
-                     "source_keys": ["summary"]},
-                ],
-            }, ensure_ascii=False)
-
-            mock = MockLLMClient({
-                "Đây là câu số": _structured_extract_response(),
-                "tóm tắt cấu trúc": aggregate,
-                "dữ liệu thô": "Content here.",
-            })
-            planner = DocumentPlanner(client=mock)
-            report = planner.plan_and_write(_long_transcript())
-            assert report.content_kind == kind_name
+    assert "[03:26–05:21] Speaker 2: Ý kiến thứ nhất." in formatted
+    assert "[01:00:00–01:01:10] Speaker 1: Ý kiến sau một giờ." in formatted
+    assert "s]" not in formatted
 
 
-# ------------------------------------------------------------------
-# Test: Helper — _parse_json_object
-# ------------------------------------------------------------------
+def test_vietnamese_prompts_define_required_report_contract() -> None:
+    """Prompt contract requires an overview and concrete transcript topics."""
+    planner = DocumentPlanner(client=StubLLMClient(lambda prompt: ""))
+    plan_prompt = planner._prompts["plan"]
+    write_prompt = planner._prompts["write_section"]
 
-class TestParseJson:
-
-    def test_parse_plain_json(self):
-        raw = '{"content_kind": "Test", "sections": []}'
-        result = _parse_json_object(raw)
-        assert result["content_kind"] == "Test"
-
-    def test_parse_json_in_code_block(self):
-        raw = '```json\n{"content_kind": "Test"}\n```'
-        result = _parse_json_object(raw)
-        assert result["content_kind"] == "Test"
-
-    def test_parse_json_with_surrounding_text(self):
-        raw = 'Here is the result: {"key": "value"} end.'
-        result = _parse_json_object(raw)
-        assert result["key"] == "value"
-
-    def test_parse_invalid_json_raises(self):
-        with pytest.raises(Exception):
-            _parse_json_object("not json at all")
-
-    def test_parse_json_array_raises(self):
-        with pytest.raises(ValueError, match="JSON object"):
-            _parse_json_object("[]")
+    assert 'Mục đầu tiên bắt buộc là "Tổng quan"' in plan_prompt
+    assert "Phân tích theo chủ đề" in plan_prompt
+    assert '"kind": "topic"' in plan_prompt
+    assert "Chọn 2-6 chủ đề" in plan_prompt
+    assert "TIẾNG VIỆT" in write_prompt
+    assert "NẾU kind LÀ `summary`" in write_prompt
+    assert "NẾU kind LÀ `topic`" in write_prompt
+    assert "**Nhận định chính cụ thể**" in write_prompt
+    assert "Quan điểm khác nhau" in write_prompt
+    assert "[HH:MM:SS–HH:MM:SS]" in write_prompt
 
 
-def test_configured_language_is_used_to_load_prompts(monkeypatch):
-    """DocumentPlanner must load the configured prompt language."""
+def test_report_title_is_not_overlong() -> None:
+    """LLM titles are bounded to fourteen words."""
+    long_title = " ".join(f"từ{index}" for index in range(20))
+    client = StubLLMClient(
+        lambda prompt: _outline_response(long_title)
+        if _is_plan(prompt)
+        else "Nội dung."
+    )
+    report = DocumentPlanner(client=client).plan_and_write(_transcript())
+
+    assert len(report.content_kind.split()) == 14
+
+
+def test_all_llm_prompts_respect_character_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Plan, map, and reduce prompts stay within the 8,000-char constraint."""
+    monkeypatch.setattr(planner_module, "MAX_CHARS_PER_CHUNK", 6000)
+
+    def handler(prompt: str) -> str:
+        if _is_plan(prompt):
+            return _outline_response(
+                outline=[
+                    {"id": "s1", "heading": "Tóm tắt", "kind": "summary"}
+                ]
+            )
+        if _is_reduce(prompt):
+            return "Bản hoàn chỉnh."
+        return "x" * 7000
+
+    client = StubLLMClient(handler)
+    DocumentPlanner(client=client).plan_and_write(_transcript(lines=500))
+
+    assert all(len(prompt) <= MAX_LLM_INPUT_CHARS for prompt in client.calls)
+
+
+@pytest.mark.parametrize(
+    ("kind", "topic_heading"),
+    [
+        ("Cuộc họp", "Tiến độ giao diện"),
+        ("Bài giảng", "Khái niệm động lượng"),
+        ("Podcast", "Chiến thuật pressing"),
+    ],
+)
+def test_open_outline_varies_by_content(kind: str, topic_heading: str) -> None:
+    """The planner preserves content-specific topic headings."""
+    response = _outline_response(
+        kind,
+        [
+            {"id": "s1", "heading": "Tổng quan", "kind": "summary"},
+            {"id": "s2", "heading": topic_heading, "kind": "custom_kind"},
+        ],
+    )
+    client = StubLLMClient(
+        lambda prompt: response if _is_plan(prompt) else "Có nội dung."
+    )
+    report = DocumentPlanner(client=client).plan_and_write(_transcript())
+
+    assert report.content_kind == kind
+    assert report.sections[1].heading == topic_heading
+    assert report.sections[1].kind == "topic"
+
+
+def test_configured_language_is_used_to_load_prompts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Prompt loading follows the planner language configuration."""
     from meetasr.llm.llm_utils import prompts
 
     captured: dict[str, str] = {}
@@ -455,43 +511,40 @@ def test_configured_language_is_used_to_load_prompts(monkeypatch):
     def fake_loader(language: str) -> dict[str, str]:
         captured["language"] = language
         return {
-            "single_pass": "{transcript}",
-            "structured_extract": "{chunk}",
-            "aggregate_plan": "{structured_summaries}",
-            "reduce_section": "{heading}{kind}{content_kind}{raw_data}",
+            "plan": "{transcript_sample}",
+            "write_section": "{content_kind}{heading}{kind}{chunk}",
         }
 
     monkeypatch.setattr(prompts, "load_generic_prompts", fake_loader)
-    planner = DocumentPlanner(client=MockLLMClient({}), language="en")
+    planner = DocumentPlanner(
+        client=StubLLMClient(lambda prompt: ""),
+        language="en",
+    )
+
     assert planner.language == "en"
     assert captured["language"] == "en"
 
 
-# ------------------------------------------------------------------
-# Test: DocumentReport serialization
-# ------------------------------------------------------------------
+def test_parse_json_object_variants() -> None:
+    assert _parse_json_object('{"key": "value"}')["key"] == "value"
+    assert _parse_json_object('```json\n{"key": "value"}\n```')["key"] == "value"
+    assert _parse_json_object('Result: {"key": "value"} done')["key"] == "value"
+    with pytest.raises(ValueError, match="empty response"):
+        _parse_json_object(" \n ")
+    with pytest.raises(ValueError, match="JSON object"):
+        _parse_json_object("[]")
 
-class TestDocumentReport:
 
-    def test_to_markdown(self):
-        """DocumentReport.to_markdown() produces valid markdown."""
-        mock = MockLLMClient({
-            "Chúng ta sẽ làm": _single_pass_response(),
-        })
-        planner = DocumentPlanner(client=mock)
-        report = planner.plan_and_write(_short_transcript())
-        md = report.to_markdown()
-        assert "# Cuộc họp công việc" in md
-        assert "## Tóm tắt" in md
+def test_document_report_serialization() -> None:
+    """The generic schema emits JSON and Markdown without Phase 1 fields."""
+    client = StubLLMClient(
+        lambda prompt: _outline_response() if _is_plan(prompt) else "Nội dung."
+    )
+    report = DocumentPlanner(client=client).plan_and_write(_transcript())
 
-    def test_to_json(self):
-        """DocumentReport.to_json() returns valid JSON."""
-        mock = MockLLMClient({
-            "Chúng ta sẽ làm": _single_pass_response(),
-        })
-        planner = DocumentPlanner(client=mock)
-        report = planner.plan_and_write(_short_transcript())
-        j = report.to_json()
-        parsed = json.loads(j)
-        assert "content_kind" in parsed
-        assert "sections" in parsed
+    payload = json.loads(report.to_json())
+    markdown = report.to_markdown()
+    assert payload["sections"][0]["kind"] == "summary"
+    assert "found" not in payload["sections"][0]
+    assert "# Cuộc họp công việc" in markdown
+    assert "## Tổng quan" in markdown

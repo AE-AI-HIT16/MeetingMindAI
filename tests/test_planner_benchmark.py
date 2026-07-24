@@ -1,9 +1,4 @@
-"""Deterministic call-count benchmark for long DocumentPlanner workloads.
-
-The benchmark models 30, 60, and 90 minutes of timestamped speech without a
-real LLM. It verifies how work scales with transcript length and guards the
-planner's N extraction + 1 aggregate + K reduce call budget.
-"""
+"""Deterministic call-count benchmark for Plan → Write workloads."""
 
 from __future__ import annotations
 
@@ -12,82 +7,60 @@ import json
 import pytest
 
 from meetasr.llm.abs_llm import AbsLLMClient
-from meetasr.llm.planner import MAX_CHARS_PER_CHUNK, DocumentPlanner
-from meetasr.llm.planner_chunk import OVERLAP_LINES, chunk_with_overlap
+from meetasr.llm.planner import DocumentPlanner
 from meetasr.schemas import SentenceInfo, TranscriptResult
 
 
 class BenchmarkLLMClient(AbsLLMClient):
-    """Return valid stage-specific responses without exposing call_count."""
+    """Return deterministic plan, map, and reduce responses."""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
 
     def chat(self, prompt: str, **kwargs) -> str:
-        if "Từ đoạn transcript sau" in prompt:
-            return json.dumps(
-                {
-                    "summary": (
-                        "Nhóm cập nhật tiến độ và thống nhất công việc tiếp theo."
-                    ),
-                    "action_items": [
-                        {
-                            "task": "Hoàn thiện hạng mục",
-                            "who": "Nhóm",
-                            "deadline": "Thứ Sáu",
-                        }
-                    ],
-                    "decisions": [
-                        {"content": "Giữ kế hoạch hiện tại", "made_by": "Nhóm"}
-                    ],
-                    "key_points": ["Tiến độ đang đúng kế hoạch"],
-                    "quotes": [],
-                },
-                ensure_ascii=False,
-            )
-        if "Dưới đây là tóm tắt cấu trúc" in prompt:
+        self.calls.append(prompt)
+        if "ĐỀ XUẤT tiêu đề cùng" in prompt:
             return json.dumps(
                 {
                     "content_kind": "Cuộc họp dự án",
                     "outline": [
-                        {
-                            "id": "s1",
-                            "heading": "Tóm tắt",
-                            "kind": "summary",
-                            "source_keys": ["summary"],
-                        },
+                        {"id": "s1", "heading": "Tổng quan", "kind": "summary"},
                         {
                             "id": "s2",
-                            "heading": "Công việc",
-                            "kind": "action_items",
-                            "source_keys": ["action_items"],
+                            "heading": "Tiến độ triển khai",
+                            "kind": "topic",
                         },
                         {
                             "id": "s3",
-                            "heading": "Quyết định",
-                            "kind": "decisions",
-                            "source_keys": ["decisions"],
+                            "heading": "Dữ liệu kiểm thử",
+                            "kind": "topic",
+                        },
+                        {
+                            "id": "s4",
+                            "heading": "Phân công trước thứ Sáu",
+                            "kind": "topic",
                         },
                     ],
                 },
                 ensure_ascii=False,
             )
-        if "chuyên gia tổng hợp tài liệu" in prompt:
-            return "Nội dung được tổng hợp từ dữ liệu có bằng chứng."
-        raise AssertionError("Benchmark received an unknown planner prompt")
+        if "các bản nháp rời rạc cho cùng một mục" in prompt:
+            return "Nội dung cuối đã gộp và loại bỏ ý trùng."
+        return "Bản nháp có căn cứ từ một phần transcript."
 
 
 def _timed_transcript(duration_minutes: int) -> TranscriptResult:
-    """Build one timestamped sentence per 10 seconds for the requested duration."""
-    segment_seconds = 10
-    segment_count = duration_minutes * 60 // segment_seconds
+    """Build one timestamped sentence per ten seconds."""
+    segment_count = duration_minutes * 6
     sentence_text = (
-        "Nhóm cập nhật tiến độ hạng mục, xác nhận dữ liệu kiểm thử "
-        "và phân công "
+        "Nhóm cập nhật tiến độ, xác nhận dữ liệu kiểm thử và phân công "
         "người phụ trách hoàn thành công việc trước thứ Sáu."
     )
     sentences = [
         SentenceInfo(
-            text=f"{sentence_text} Mốc nội dung {index + 1}.",
-            start=float(index * segment_seconds),
-            end=float((index + 1) * segment_seconds),
+            text=f"{sentence_text} Mốc {index + 1}.",
+            start=float(index * 10),
+            end=float((index + 1) * 10),
             speaker=index % 3,
         )
         for index in range(segment_count)
@@ -101,35 +74,25 @@ def _timed_transcript(duration_minutes: int) -> TranscriptResult:
 
 
 @pytest.mark.parametrize("duration_minutes", [30, 60, 90])
-def test_long_transcript_call_budget(duration_minutes: int) -> None:
-    """A 30-90 minute run reports its own exact stage-level call budget."""
-    planner = DocumentPlanner(client=BenchmarkLLMClient())
+def test_long_transcript_uses_real_map_reduce(duration_minutes: int) -> None:
+    """Call count scales with chunks and outline sections, not one giant call."""
+    client = BenchmarkLLMClient()
+    planner = DocumentPlanner(client=client)
     transcript = _timed_transcript(duration_minutes)
-
-    report = planner.plan_and_write(transcript)
-    metrics = planner.last_run_metrics
-
-    assert metrics is not None
     formatted = planner._format_transcript(transcript)
-    expected_chunks = len(
-        chunk_with_overlap(
+    section = {"heading": "Tóm tắt", "kind": "summary"}
+    chunk_count = len(
+        planner._chunk(
             formatted,
-            max_chars=MAX_CHARS_PER_CHUNK,
-            overlap_lines=OVERLAP_LINES,
+            planner._write_data_budget(section, "Cuộc họp dự án"),
         )
     )
-    expected_sections = 3
+    section_count = 4
 
-    assert transcript.duration == duration_minutes * 60
-    assert metrics.path == "long"
-    assert metrics.input_chars == len(formatted)
-    assert metrics.chunk_count == expected_chunks
-    assert metrics.section_count == expected_sections
-    assert metrics.calls_by_stage == {
-        "extraction": expected_chunks,
-        "aggregate": 1,
-        "reduce": expected_sections,
-    }
-    assert metrics.llm_calls == expected_chunks + 1 + expected_sections
-    assert metrics.llm_failures == 0
-    assert len(report.sections) == expected_sections
+    report = planner.plan_and_write(transcript)
+
+    expected_calls = 1 + section_count * (chunk_count + 1)
+    assert chunk_count > 1
+    assert len(client.calls) == expected_calls
+    assert len(report.sections) == section_count
+    assert all(len(prompt) <= 8000 for prompt in client.calls)

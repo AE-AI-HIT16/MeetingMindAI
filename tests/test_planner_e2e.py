@@ -101,7 +101,7 @@ def build_long_path_transcript() -> TranscriptResult:
             ))
             t += duration + 0.5
 
-    # Pad filler lines to ensure > 18000 chars (trigger long path)
+    # Optional filler can be added to exercise more map-reduce chunks.
     filler_topics = []
 
     for i, filler in enumerate(filler_topics):
@@ -183,22 +183,25 @@ def main() -> None:
 
     # Step 3: Build DocumentPlanner
     import meetasr.llm.planner
-    # Force the long path by overriding constants for this test
-    meetasr.llm.planner.SHORT_TRANSCRIPT_CHARS = 10
+    # Force multiple chunks for this manual smoke test.
     meetasr.llm.planner.MAX_CHARS_PER_CHUNK = 800
 
     planner = meetasr.llm.planner.DocumentPlanner(
         client=client, temperature=0.3, max_tokens=4096,
     )
 
-    # Step 4: Check path
+    # Step 4: Check chunk count
     full_text = planner._format_transcript(transcript)
-    path = (
-        "LONG"
-        if len(full_text) >= meetasr.llm.planner.SHORT_TRANSCRIPT_CHARS
-        else "SHORT"
+    chunk_count = len(
+        planner._chunk(
+            full_text,
+            planner._write_data_budget(
+                {"heading": "Tóm tắt", "kind": "summary"},
+                "Tài liệu",
+            ),
+        )
     )
-    logger.info("Text: %d chars → %s path", len(full_text), path)
+    logger.info("Text: %d chars → %d chunks", len(full_text), chunk_count)
 
     # Step 5: Run
     logger.info("Running plan_and_write()...")
@@ -240,7 +243,6 @@ def main() -> None:
         ("Has content_kind", bool(report.content_kind)),
         ("Has sections", len(report.sections) > 0),
         ("All sections have markdown", all(s.markdown.strip() for s in report.sections)),
-        ("All sections found=True", all(s.found for s in report.sections)),
         ("Processing time > 0", report.processing_time > 0),
         ("Has LLM model", bool(report.llm_model)),
     ]
