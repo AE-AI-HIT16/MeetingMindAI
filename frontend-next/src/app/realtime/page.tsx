@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRealtimeStream } from "@/lib/useRealtimeStream";
+import type { AudioSource, SentenceInfo } from "@/lib/useRealtimeStream";
 import { formatDuration } from "@/lib/format";
 import { StatusBadge, Waveform } from "@/components/ui";
 
@@ -22,6 +23,7 @@ export default function RealtimePage() {
   } = useRealtimeStream();
 
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [audioSource, setAudioSource] = useState<AudioSource>("microphone");
 
   // Auto-scroll transcript panel
   useEffect(() => {
@@ -83,7 +85,7 @@ export default function RealtimePage() {
             {/* Big record / stop button */}
             <button
               id="record-btn"
-              onClick={isRecording ? stop : start}
+              onClick={isRecording ? stop : () => start(audioSource)}
               className="group relative flex h-16 w-16 items-center justify-center rounded-full transition-shadow"
               style={{
                 background: isRecording
@@ -132,6 +134,13 @@ export default function RealtimePage() {
           </div>
         </div>
 
+        {!isRecording && (
+          <div className="mt-5 flex flex-wrap gap-2" role="radiogroup" aria-label="Nguồn âm thanh">
+            <SourceOption label="Microphone" selected={audioSource === "microphone"} onClick={() => setAudioSource("microphone")} />
+            <SourceOption label="Âm thanh từ tab" selected={audioSource === "tab"} onClick={() => setAudioSource("tab")} />
+          </div>
+        )}
+
         {/* Connection status bar */}
         {isRecording && (
           <div className="mt-4 flex items-center gap-2 rounded-lg bg-surface-2 px-3 py-2">
@@ -168,6 +177,7 @@ export default function RealtimePage() {
                 <TranscriptBlock
                   key={i}
                   text={t.text}
+                  sentenceInfo={t.sentenceInfo}
                   index={i}
                   isLast={i === transcripts.length - 1}
                   isRecording={isRecording}
@@ -225,14 +235,25 @@ function EmptyState({ isRecording }: { isRecording: boolean }) {
   );
 }
 
+function SourceOption({ label, selected, onClick }: { label: string; selected: boolean; onClick: () => void }) {
+  return (
+    <button type="button" role="radio" aria-checked={selected} onClick={onClick}
+      className={`rounded-lg border px-3 py-2 text-sm font-medium transition ${selected ? "border-brand bg-brand-wash text-brand-ink" : "border-line text-ink-soft hover:border-brand"}`}>
+      {label}
+    </button>
+  );
+}
+
 function TranscriptBlock({
   text,
+  sentenceInfo,
   index,
   isLast,
   isRecording,
   receivedAt,
 }: {
   text: string;
+  sentenceInfo: SentenceInfo[];
   index: number;
   isLast: boolean;
   isRecording: boolean;
@@ -264,14 +285,20 @@ function TranscriptBlock({
             {timeStr}
           </span>
 
-          {/* Text */}
-          <p
-            className={`mt-0.5 text-[15px] leading-relaxed text-ink ${
-              isLast && isRecording ? "caret" : ""
-            }`}
-          >
-            {text}
-          </p>
+          {sentenceInfo.length > 0 ? (
+            <div className="mt-1 space-y-2">
+              {sentenceInfo.map((sentence, sentenceIndex) => (
+                <p key={`${sentence.start}-${sentenceIndex}`} className="text-[15px] leading-relaxed text-ink">
+                  <span className="mr-2 rounded bg-brand-wash px-1.5 py-0.5 text-xs font-semibold text-brand-ink">
+                    {sentence.speaker === null || sentence.speaker === undefined ? "Speaker" : `Speaker ${sentence.speaker}`}
+                  </span>
+                  {sentence.text}
+                </p>
+              ))}
+            </div>
+          ) : (
+            <p className={`mt-0.5 text-[15px] leading-relaxed text-ink ${isLast && isRecording ? "caret" : ""}`}>{text}</p>
+          )}
         </div>
       </div>
 

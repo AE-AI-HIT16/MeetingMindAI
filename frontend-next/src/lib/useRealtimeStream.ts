@@ -7,10 +7,24 @@ import { useCallback, useEffect, useRef, useState } from "react";
 // ----------------------------------------------------------------
 
 export interface TranscriptDelta {
-  /** Cumulative text returned by backend for the current ASR window. */
   text: string;
+  sentenceInfo: SentenceInfo[];
   /** Local timestamp (ms since epoch) when we received this delta. */
   receivedAt: number;
+}
+
+export interface SentenceInfo {
+  text: string;
+  start: number;
+  end: number;
+  speaker: string | number | null;
+}
+
+export type AudioSource = "microphone" | "tab";
+
+interface TranscriptResultPayload {
+  text?: string;
+  sentence_info?: SentenceInfo[];
 }
 
 export interface RealtimeStreamState {
@@ -27,7 +41,7 @@ export interface RealtimeStreamState {
 }
 
 export interface RealtimeStreamActions {
-  start: () => Promise<void>;
+  start: (source: AudioSource) => Promise<void>;
   stop: () => void;
 }
 
@@ -114,21 +128,22 @@ export function useRealtimeStream(): RealtimeStreamState &
   // ------------------------------------------------------------------
   // START
   // ------------------------------------------------------------------
-  const start = useCallback(async () => {
+  const start = useCallback(async (source: AudioSource) => {
     setError(null);
     setTranscripts([]);
     setElapsedMs(0);
 
     try {
-      // 1. Get microphone
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          channelCount: 1,
-          sampleRate: 16000, // hint; browser may ignore
-          echoCancellation: true,
-          noiseSuppression: true,
-        },
-      });
+      const stream = source === "microphone"
+        ? await navigator.mediaDevices.getUserMedia({
+            audio: { channelCount: 1, sampleRate: 16000, echoCancellation: true, noiseSuppression: true },
+          })
+        : await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+
+      if (stream.getAudioTracks().length === 0) {
+        stream.getTracks().forEach((track) => track.stop());
+        throw new Error("Tab duoc chon khong chia se am thanh. Hay bat chia se am thanh khi chon tab.");
+      }
       streamRef.current = stream;
 
       // 2. AudioContext + Worklet
@@ -178,10 +193,11 @@ export function useRealtimeStream(): RealtimeStreamState &
               ? ev.data
               : new TextDecoder().decode(ev.data),
           );
-          if (data.type === "transcript_delta" && data.text) {
+          const result = data.result as TranscriptResultPayload | undefined;
+          if (data.type === "transcript_delta" && result?.text) {
             setTranscripts((prev) => [
               ...prev,
-              { text: data.text, receivedAt: Date.now() },
+              { text: result.text, sentenceInfo: result.sentence_info ?? [], receivedAt: Date.now() },
             ]);
           }
         } catch {
@@ -206,8 +222,8 @@ export function useRealtimeStream(): RealtimeStreamState &
         }
       };
 
-      const source = audioCtx.createMediaStreamSource(stream);
-      source.connect(workletNode);
+      const mediaSource = audioCtx.createMediaStreamSource(stream);
+      mediaSource.connect(workletNode);
 
       // 6. Timer
       startTimeRef.current = Date.now();
