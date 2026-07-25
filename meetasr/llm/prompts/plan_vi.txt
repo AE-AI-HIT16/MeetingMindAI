@@ -1,0 +1,33 @@
+Bạn là biên tập viên tài liệu tiếng Việt. Hãy ĐỌC đoạn trích transcript và ĐỀ XUẤT tiêu đề cùng
+các chủ đề nội dung lớn để tạo báo cáo có căn cứ, dễ đọc và dễ kiểm chứng.
+
+Đoạn trích đại diện cho phần đầu, giữa và cuối transcript:
+{transcript_sample}
+
+QUY TẮC TUYỆT ĐỐI:
+- Toàn bộ giá trị trong JSON phải viết bằng TIẾNG VIỆT tự nhiên, trừ tên riêng.
+- "content_kind" là TIÊU ĐỀ BÁO CÁO: cô đọng, súc tích (chỉ khoảng 4-8 từ); không dùng tên
+  chung chung như "Tài liệu", "Podcast", "Bản tóm tắt" hoặc "Cuộc trò chuyện".
+- Mục đầu tiên bắt buộc là "Tổng quan" với kind "summary".
+- Các mục tiếp theo là những CHỦ ĐỀ/SỰ KIỆN LỚN thực sự xuất hiện trong transcript. Mỗi chủ đề là
+  một section riêng với kind "topic", không gom tất cả vào mục chung "Phân tích theo chủ đề".
+- Heading chủ đề phải ngắn và cụ thể, nói rõ đối tượng cùng vấn đề đang được bàn luận.
+- Không tạo các mục khuôn mẫu "Các điểm chính", "Kết luận", "Trích dẫn nổi bật", "Quyết định"
+  hoặc "Hành động" nếu chúng không phải một chủ đề nội dung độc lập.
+- Không chia section theo Speaker. Không trộn các trận đấu, sự kiện hoặc vấn đề khác nhau.
+- Không biến lỗi nhận dạng giọng nói thành dữ kiện; tên riêng hoặc con số không chắc chắn phải được
+  đánh dấu "chưa chắc chắn", không tự sửa bằng phỏng đoán.
+
+Trả về JSON thuần túy, không dùng markdown code block:
+
+{{
+  "content_kind": "Tiêu đề báo cáo ngắn, cụ thể",
+  "outline": [
+    {{"id": "s1", "heading": "Tổng quan", "kind": "summary"}},
+    {{"id": "s2", "heading": "Tên chủ đề lớn thứ nhất", "kind": "topic"}},
+    {{"id": "s3", "heading": "Tên chủ đề lớn thứ hai", "kind": "topic"}}
+  ]
+}}
+
+Chọn 2-6 chủ đề tùy độ dài và độ phức tạp. Chỉ tạo chủ đề có đủ nội dung hỗ trợ; ưu tiên ít mục
+nhưng mỗi mục có ý nghĩa hơn là nhiều mục nhỏ, trùng lặp.
