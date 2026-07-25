@@ -6,6 +6,7 @@ from meetasr.schemas import Segment
 
 
 SAMPLE_RATE = 16000
+SECOND = 1
 
 logger = logging.getLogger(__name__)
 
@@ -61,31 +62,31 @@ class StreamingProcessor:
 
         segments = split_fixed_segments(
             self.session.pending_audio,
-            segment_ms=3000,
+            segment_ms=SECOND * 1000,
         )
 
         # DEBUG: đếm số lần process được gọi
-        self._debug_chunk_count += 1
-        if (self._debug_chunk_count == 10):
-            print("=" * 50)
-            print(f"pending audio duration: {pending_s:.2f}s")
-            print(f"VAD returned {len(segments)} segments")
-
-            for i, seg in enumerate(segments):
-                print(
-                    f"  Segment {i}: "
-                    f"{seg.start_ms / 1000:.3f}s -> "
-                    f"{seg.end_ms / 1000:.3f}s "
-                    f"(duration={(seg.end_ms - seg.start_ms) / 1000:.3f}s)"
-                )
-
-            print("=" * 50)
-            self._debug_chunk_count = 0
+        # self._debug_chunk_count += 1
+        # if (self._debug_chunk_count == 10):
+        #     print("=" * 50)
+        #     print(f"pending audio duration: {pending_s:.2f}s")
+        #     print(f"VAD returned {len(segments)} segments")
+        #
+        #     for i, seg in enumerate(segments):
+        #         print(
+        #             f"  Segment {i}: "
+        #             f"{seg.start_ms / 1000:.3f}s -> "
+        #             f"{seg.end_ms / 1000:.3f}s "
+        #             f"(duration={(seg.end_ms - seg.start_ms) / 1000:.3f}s)"
+        #         )
+        #
+        #     print("=" * 50)
+        #     self._debug_chunk_count = 0
 
         log_key = (len(segments), int(pending_s))
-        if getattr(self, "_last_vad_log", None) != log_key:
-            print(f"VAD: {len(segments)} segment(s), pending={pending_s:.2f}s")
-            self._last_vad_log = log_key
+        # if getattr(self, "_last_vad_log", None) != log_key:
+        #     print(f"VAD: {len(segments)} segment(s), pending={pending_s:.2f}s")
+        #     self._last_vad_log = log_key
 
         if len(segments) < 2:
             return
@@ -99,12 +100,12 @@ class StreamingProcessor:
 
         self.session.ready_segments.append(audio)
 
-        print(
-            f"VAD: emitted ready segment "
-            f"{first_segment.start_ms / 1000.0:.2f}s - "
-            f"{first_segment.end_ms / 1000.0:.2f}s "
-            f"(ready_segments={len(self.session.ready_segments)})"
-        )
+        # print(
+        #     f"VAD: emitted ready segment "
+        #     f"{first_segment.start_ms / 1000.0:.2f}s - "
+        #     f"{first_segment.end_ms / 1000.0:.2f}s "
+        #     f"(ready_segments={len(self.session.ready_segments)})"
+        # )
 
         self._remove_processed_audio(
                 first_segment,

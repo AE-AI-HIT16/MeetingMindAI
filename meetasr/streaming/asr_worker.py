@@ -95,6 +95,6 @@ class ASRWorker:
         await self.session.websocket.send_json(
             {
                 "type": "transcript_delta",
-                "text": result.text,
+                "result": result.to_dict(),
             }
         )
