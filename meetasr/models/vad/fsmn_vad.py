@@ -2,12 +2,25 @@
 
 from __future__ import annotations
 
+import inspect
 import logging
+
 import numpy as np
 
 from meetasr.register import tables
 from meetasr.schemas import Segment
 from meetasr.models.abs_models import AbsVAD
+
+
+_MODEL_METADATA_OPTIONS = frozenset({
+    "encoder",
+    "encoder_conf",
+    "frontend",
+    "frontend_conf",
+    "hub",
+    "model",
+    "model_conf",
+})
 
 
 @tables.register("model_classes", key="fsmn-vad")
@@ -58,6 +71,7 @@ class FsmnVAD(AbsVAD):
             import funasr.models.fsmn_vad_streaming.encoder  # noqa: F401
             from funasr.models.fsmn_vad_streaming.model import (
                 FsmnVADStreaming as _FsmnVAD,
+                VADXOptions,
             )
 
             config_path = os.path.join(self.model_path, "config.yaml")
@@ -74,6 +88,25 @@ class FsmnVAD(AbsVAD):
                     "encoder_conf": cfg.get("encoder_conf", {}),
                 }
             )
+            supported_options = _supported_vad_options(VADXOptions)
+            unsupported_options = sorted(
+                set(self._kwargs).difference(
+                    supported_options,
+                    _MODEL_METADATA_OPTIONS,
+                )
+            )
+            if unsupported_options:
+                logging.warning(
+                    "Ignoring unsupported FSMN-VAD config option(s): %s",
+                    ", ".join(unsupported_options),
+                )
+            model_conf.update({
+                name: value
+                for name, value in self._kwargs.items()
+                if name in supported_options
+            })
+            model_conf["max_single_segment_time"] = self.max_segment_ms
+
             self._model = _FsmnVAD(**model_conf)
             weight_path = os.path.join(self.model_path, "model.pt")
             state = torch.load(weight_path, map_location="cpu")
@@ -136,6 +169,11 @@ class FsmnVAD(AbsVAD):
             cache = {}
 
         import torch
+
+        runtime_options = getattr(self._model, "vad_opts", None)
+        if runtime_options is not None:
+            runtime_options.max_single_segment_time = max_single_segment_time
+
         with torch.no_grad():
             results = self._model.inference(
                 data_in=[audio],
@@ -162,6 +200,22 @@ class FsmnVAD(AbsVAD):
             raise ValueError(f"audio must be mono 1-D array, got shape {audio.shape}")
         if audio.dtype != np.float32:
             raise ValueError(f"audio must have dtype np.float32, got {audio.dtype}")
+
+
+def _supported_vad_options(vad_options_class) -> set[str]:
+    """Return VADXOptions parameters that are safe to pass by keyword."""
+    return {
+        name
+        for name, parameter in inspect.signature(
+            vad_options_class.__init__
+        ).parameters.items()
+        if name != "self"
+        and parameter.kind
+        in (
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            inspect.Parameter.KEYWORD_ONLY,
+        )
+    }
 
 
 def _normalize_segments(segments_raw, min_segment_ms: int = 200) -> list[Segment]:
