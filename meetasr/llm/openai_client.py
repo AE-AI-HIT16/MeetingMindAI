@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
-from typing import Optional
+from typing import Any, Optional
 
 from meetasr.register import tables
 from meetasr.llm.abs_llm import AbsLLMClient
@@ -57,6 +58,7 @@ class OpenAIClient(AbsLLMClient):
         system: Optional[str] = None,
         temperature: float = 0.3,
         max_tokens: int = 4096,
+        response_format: Optional[dict[str, Any]] = None,
     ) -> str:
         """Send prompt and return response text.
 
@@ -65,6 +67,7 @@ class OpenAIClient(AbsLLMClient):
             system: System prompt / role instruction.
             temperature: Sampling temperature.
             max_tokens: Max response tokens.
+            response_format: Optional OpenAI-compatible structured output mode.
 
         Returns:
             LLM response as string.
@@ -80,22 +83,79 @@ class OpenAIClient(AbsLLMClient):
         last_error: Exception | None = None
         for attempt in range(self.retry_attempts):
             try:
-                resp = self._client.chat.completions.create(
-                    model=self.model,
-                    messages=messages,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                )
-                return resp.choices[0].message.content or ""
+                request: dict[str, Any] = {
+                    "model": self.model,
+                    "messages": messages,
+                    "temperature": temperature,
+                    "max_tokens": max_tokens,
+                }
+                if response_format:
+                    request["response_format"] = response_format
+                resp = self._client.chat.completions.create(**request)
+                choice = resp.choices[0]
+                content = _message_text(choice.message.content)
+                if not content.strip():
+                    logging.warning(
+                        "LLM returned empty content (model=%s, finish_reason=%s, "
+                        "refusal=%s).",
+                        self.model,
+                        getattr(choice, "finish_reason", None),
+                        bool(getattr(choice.message, "refusal", None)),
+                    )
+                return content
             except Exception as e:
                 last_error = e
-                wait = 2 ** attempt
+                wait = _retry_wait_seconds(e, attempt)
                 logging.warning(
                     f"LLM call failed (attempt {attempt + 1}/{self.retry_attempts}): "
                     f"{e}. Retrying in {wait}s..."
                 )
-                time.sleep(wait)
+                if attempt + 1 < self.retry_attempts:
+                    time.sleep(wait)
 
         raise RuntimeError(
             f"LLM call failed after {self.retry_attempts} attempts: {last_error}"
         )
+
+
+def _message_text(content: object) -> str:
+    """Normalize string or multipart OpenAI-compatible message content."""
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return ""
+
+    parts = []
+    for item in content:
+        text = (
+            item.get("text")
+            if isinstance(item, dict)
+            else getattr(item, "text", None)
+        )
+        if isinstance(text, str):
+            parts.append(text)
+    return "".join(parts)
+
+
+def _retry_wait_seconds(error: Exception, attempt: int) -> float:
+    """Honor provider retry hints while retaining exponential backoff."""
+    fallback = float(2 ** attempt)
+    response = getattr(error, "response", None)
+    headers = getattr(response, "headers", {})
+    retry_after = headers.get("retry-after") if headers else None
+    try:
+        if retry_after is not None:
+            return max(fallback, float(retry_after) + 0.5)
+    except (TypeError, ValueError):
+        pass
+
+    match = re.search(
+        r"try again in\s+([\d.]+)\s*(ms|s)",
+        str(error),
+        re.IGNORECASE,
+    )
+    if not match:
+        return fallback
+    value = float(match.group(1))
+    seconds = value / 1000 if match.group(2).lower() == "ms" else value
+    return max(fallback, seconds + 0.5)

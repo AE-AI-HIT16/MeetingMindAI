@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="{{ language }}">
+<head>
+  <meta charset="utf-8">
+  <title>{{ title }}</title>
+  <style>
+    @font-face {
+      font-family: "MeetingMind Body";
+      src: url("{{ body_font_url }}") format("truetype");
+    }
+
+    @font-face {
+      font-family: "MeetingMind Display";
+      src: url("{{ poppins_bold_url }}") format("truetype");
+      font-weight: 700;
+    }
+
+    @page {
+      size: A4;
+      margin: 20mm;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      color: #222;
+      font-family: "MeetingMind Body", sans-serif;
+      font-size: 10.5pt;
+      line-height: 1.55;
+    }
+
+    .document-header {
+      border-bottom: 1px solid #b8c0cc;
+      margin-bottom: 12mm;
+      padding-bottom: 5mm;
+    }
+
+    .document-title,
+    .section-title,
+    .section-body h3,
+    .section-body h4 {
+      font-family: "MeetingMind Display", sans-serif;
+      font-weight: 700;
+    }
+
+    .document-title {
+      font-size: 24pt;
+      margin: 0 0 2mm;
+    }
+
+    .document-meta {
+      color: #667085;
+      margin: 0;
+    }
+
+    .section {
+      break-inside: avoid;
+      margin-bottom: 8mm;
+    }
+
+    .section-title {
+      font-size: 15pt;
+      margin: 0 0 3mm;
+    }
+
+    .section-body > :first-child {
+      margin-top: 0;
+    }
+
+    .section-body > :last-child {
+      margin-bottom: 0;
+    }
+
+    table {
+      border-collapse: collapse;
+      width: 100%;
+    }
+
+    th,
+    td {
+      border: 1px solid #aaa;
+      padding: 2mm;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    pre {
+      overflow-wrap: anywhere;
+      white-space: pre-wrap;
+    }
+  </style>
+</head>
+<body>
+  <header class="document-header">
+    <h1 class="document-title">{{ title }}</h1>
+    <p class="document-meta">{{ generated_at }} · {{ time }}</p>
+  </header>
+
+  <main>
+    {% for section in sections %}
+      <section class="section">
+        {% if section.heading %}
+          <h2 class="section-title">{{ section.heading }}</h2>
+        {% endif %}
+        <div class="section-body">{{ section.html | safe }}</div>
+      </section>
+    {% endfor %}
+  </main>
+</body>
+</html>

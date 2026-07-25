@@ -17,7 +17,17 @@ from meetasr import __version__
 from meetasr.auto.auto_pipeline import AutoPipeline
 from meetasr.api.dependencies import set_pipeline, CONFIG_PATH
 from meetasr.api.routes import health, transcribe, summarize, db_routes, sources
+from meetasr.api.routes import (
+    db_routes,
+    document,
+    health,
+    realtime,
+    summarize,
+    test_model,
+    transcribe,
+)
 from meetasr.db.connection import init_db
+
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -36,13 +46,15 @@ async def lifespan(app: FastAPI):
     Yields:
         Control to the running server between startup and shutdown.
     """
-    init_db()                    
+    init_db()
     logger.info("Database tables initialized.")
     # --- STARTUP ---
     if os.path.exists(CONFIG_PATH):
         logger.info(f"Loading pipeline from {CONFIG_PATH}...")
         pipeline = AutoPipeline.from_yaml(CONFIG_PATH)
         set_pipeline(pipeline)
+
+        app.state.pipeline = pipeline
         logger.info("Pipeline ready.")
     else:
         logger.warning(
@@ -50,12 +62,20 @@ async def lifespan(app: FastAPI):
             "Server starts without pipeline — set MEETASR_CONFIG."
         )
 
+    print(logger.level)
+    print(logger.getEffectiveLevel())
+
     yield  # server is now running and serving requests
 
     # --- SHUTDOWN ---
     logger.info("Shutting down... Cleaning up ML models and freeing VRAM.")
     set_pipeline(None)  # release reference so GC can free RAM/VRAM
 
+
+# Set log cho api realtime
+
+root = logging.getLogger()
+root.setLevel(logging.INFO)
 
 # ------------------------------------------------------------------
 # App Initialization
@@ -84,6 +104,9 @@ app.include_router(transcribe.router)
 app.include_router(summarize.router)
 app.include_router(db_routes.router)
 app.include_router(sources.router)   # Phase 2: /v1/sources — upload, library, media stream
+app.include_router(document.router)
+app.include_router(realtime.router)
+app.include_router(test_model.router)
 
 
 # ------------------------------------------------------------------
