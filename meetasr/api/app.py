@@ -21,6 +21,7 @@ from meetasr.api.routes import (
     document,
     health,
     realtime,
+    sources,
     summarize,
     test_model,
     transcribe,
@@ -45,6 +46,7 @@ async def lifespan(app: FastAPI):
     Yields:
         Control to the running server between startup and shutdown.
     """
+    app.state.pipeline = None
     init_db()
     logger.info("Database tables initialized.")
     # --- STARTUP ---
@@ -69,7 +71,7 @@ async def lifespan(app: FastAPI):
     # --- SHUTDOWN ---
     logger.info("Shutting down... Cleaning up ML models and freeing VRAM.")
     set_pipeline(None)  # release reference so GC can free RAM/VRAM
-
+    app.state.pipeline = None
 
 # Set log cho api realtime
 
@@ -105,6 +107,7 @@ app.include_router(db_routes.router)
 app.include_router(document.router)
 app.include_router(realtime.router)
 app.include_router(test_model.router)
+app.include_router(sources.router)   # Phase 2: /v1/sources — upload, library, media stream
 
 
 # ------------------------------------------------------------------

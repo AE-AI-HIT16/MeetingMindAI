@@ -76,7 +76,7 @@ class DocumentPlanner:
             report = DocumentReport(content_kind="Tài liệu")
         else:
             content_kind, outline = self._plan(full_text)
-            budget = self._write_data_budget(outline[0] if outline else {}, content_kind)
+            budget = self._write_data_budget(outline, content_kind)
             chunks = self._chunk(full_text, budget)
 
             section_drafts: dict[str, list[str]] = {section["id"]: [] for section in outline}
@@ -140,7 +140,7 @@ class DocumentPlanner:
         safe_text_chunk = text if isinstance(text, str) else ""
         chunks = self._chunk(
             safe_text_chunk,
-            self._write_data_budget(safe_section, safe_content_kind),
+            self._write_data_budget([safe_section], safe_content_kind),
         )
 
         section_drafts = []
@@ -214,10 +214,7 @@ class DocumentPlanner:
         chunk: str,
     ) -> dict[str, str]:
         """Extract data for multiple sections from a single chunk."""
-        sections_list = "\n".join([
-            f"- {s['id']}: {s['heading']} (kind: {s['kind']})"
-            for s in outline
-        ])
+        sections_list = self._format_sections_list(outline)
         prompt = self._prompts["multi_write"].format(
             content_kind=content_kind,
             sections_list=sections_list,
@@ -253,7 +250,7 @@ class DocumentPlanner:
             "Dưới đây là các bản nháp rời rạc cho cùng một mục, hãy gộp "
             "và viết lại thành một bản hoàn chỉnh, mạch lạc, không lặp ý:"
         )
-        data_budget = self._write_data_budget(section, content_kind)
+        data_budget = self._reduce_data_budget(section, content_kind)
         reduce_data = (
             f"{merge_note}\n\n"
             f"{bounded_join(drafts, data_budget - len(merge_note) - 2)}"
@@ -305,15 +302,38 @@ class DocumentPlanner:
 
     def _write_data_budget(
         self,
-        section: dict[str, Any],
+        outline: list[dict[str, Any]] | dict[str, Any],
         content_kind: str,
     ) -> int:
+        safe_outline = outline if isinstance(outline, list) else [outline]
         empty_prompt = self._prompts["multi_write"].format(
             content_kind=safe_text(content_kind, "Tài liệu")[:MAX_LABEL_CHARS],
-            sections_list="",
+            sections_list=self._format_sections_list(safe_outline),
             chunk="",
         )
         return max(
             1,
             min(MAX_CHARS_PER_CHUNK, MAX_LLM_INPUT_CHARS - len(empty_prompt)),
+        )
+
+    def _reduce_data_budget(
+        self,
+        section: dict[str, Any],
+        content_kind: str,
+    ) -> int:
+        empty_prompt = self._prompts["reduce_section"].format(
+            content_kind=safe_text(content_kind, "Tài liệu")[:MAX_LABEL_CHARS],
+            heading=safe_text(section.get("heading"), "Tóm tắt")[:MAX_LABEL_CHARS],
+            kind=safe_text(section.get("kind"), "summary")[:MAX_LABEL_CHARS],
+            chunk="",
+        )
+        return max(1, MAX_LLM_INPUT_CHARS - len(empty_prompt))
+
+    @staticmethod
+    def _format_sections_list(outline: list[dict[str, Any]]) -> str:
+        return "\n".join(
+            f"- {safe_text(section.get('id'), '')}: "
+            f"{safe_text(section.get('heading'), 'Tóm tắt')} "
+            f"(kind: {safe_text(section.get('kind'), 'summary')})"
+            for section in outline
         )

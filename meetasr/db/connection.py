@@ -42,11 +42,13 @@ def init_db() -> None:
     Hàm này an toàn khi gọi nhiều lần — nó chỉ tạo ra những bảng chưa tồn tại.
     Nên được gọi một lần duy nhất khi khởi động ứng dụng (ví dụ: trong sự kiện lifespan của FastAPI).
     """
-    # Import file models để SQLModel ghi nhận cấu trúc các bảng trước khi tiến hành create_all.
-    from meetasr.db import models  # noqa: F401
-
+    # Import cả hai file models để SQLModel ghi nhận cấu trúc TẤT CẢ các bảng
+    # trước khi tiến hành create_all.
+    import meetasr.db.models  # noqa: F401
+    import meetasr.db.models_phase2  # noqa: F401
     SQLModel.metadata.create_all(engine)
     logger.info("Đã khởi tạo các bảng trong cơ sở dữ liệu.")
+
 
 
 def get_db() -> Generator[Session, None, None]:

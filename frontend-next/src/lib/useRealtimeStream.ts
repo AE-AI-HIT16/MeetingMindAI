@@ -194,10 +194,15 @@ export function useRealtimeStream(): RealtimeStreamState &
               : new TextDecoder().decode(ev.data),
           );
           const result = data.result as TranscriptResultPayload | undefined;
-          if (data.type === "transcript_delta" && result?.text) {
+          const text = result?.text;
+          if (data.type === "transcript_delta" && text) {
             setTranscripts((prev) => [
               ...prev,
-              { text: result.text, sentenceInfo: result.sentence_info ?? [], receivedAt: Date.now() },
+              {
+                text,
+                sentenceInfo: result?.sentence_info ?? [],
+                receivedAt: Date.now(),
+              },
             ]);
           }
         } catch {
