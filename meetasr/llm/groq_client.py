@@ -1,7 +1,7 @@
 """Groq client via OpenAI-compatible API."""
 
-from meetasr.register import tables
 from meetasr.llm.openai_client import OpenAIClient
+from meetasr.register import tables
 
 
 @tables.register("llm_classes", key="groq")
@@ -24,6 +24,7 @@ class GroqClient(OpenAIClient):
         model: str = "llama-3.3-70b-versatile",
         timeout: int = 60,
         retry_attempts: int = 3,
+        rate_limit_pacing: bool = True,
     ):
         super().__init__(
             api_key=api_key,
@@ -31,4 +32,5 @@ class GroqClient(OpenAIClient):
             base_url="https://api.groq.com/openai/v1",
             timeout=timeout,
             retry_attempts=retry_attempts,
+            rate_limit_pacing=rate_limit_pacing,
         )
