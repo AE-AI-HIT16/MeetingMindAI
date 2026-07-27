@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { mapTranscriptSegment } from "./mappers";
+import type { ApiTranscriptSegment } from "./types";
 
 // ----------------------------------------------------------------
 // Types
@@ -21,11 +23,6 @@ export interface SentenceInfo {
 }
 
 export type AudioSource = "microphone" | "tab";
-
-interface TranscriptResultPayload {
-  text?: string;
-  sentence_info?: SentenceInfo[];
-}
 
 export interface RealtimeStreamState {
   /** Whether the mic is currently recording + streaming. */
@@ -193,14 +190,21 @@ export function useRealtimeStream(): RealtimeStreamState &
               ? ev.data
               : new TextDecoder().decode(ev.data),
           );
-          const result = data.result as TranscriptResultPayload | undefined;
-          const text = result?.text;
-          if (data.type === "transcript_delta" && text) {
+          const segment = data.segment as ApiTranscriptSegment | undefined;
+          if (data.type === "transcript_delta" && segment) {
+            const mapped = mapTranscriptSegment(segment);
             setTranscripts((prev) => [
               ...prev,
               {
-                text,
-                sentenceInfo: result?.sentence_info ?? [],
+                text: mapped.text,
+                sentenceInfo: [
+                  {
+                    text: mapped.text,
+                    start: mapped.startMs / 1000,
+                    end: mapped.endMs / 1000,
+                    speaker: mapped.speaker,
+                  },
+                ],
                 receivedAt: Date.now(),
               },
             ]);

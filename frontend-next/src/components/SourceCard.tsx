@@ -11,9 +11,16 @@ const DOC_LABEL: Record<string, string> = {
 
 export function SourceCard({ source }: { source: Source }) {
   const isVideo = source.mediaType === "video";
+  const finalDocument =
+    source.documents.find((document) => document.mode === "summary") ??
+    source.documents.find((document) => document.mode === "full_text");
+  const href = finalDocument
+    ? `/sources/${source.id}?view=doc&documentId=${finalDocument.id}`
+    : `/sources/${source.id}`;
+
   return (
     <Link
-      href={`/sources/${source.id}`}
+      href={href}
       className="group flex flex-col rounded-[var(--radius-card)] border border-line bg-surface p-5 shadow-[var(--shadow-card)] transition duration-300 hover:-translate-y-1 hover:border-transparent hover:shadow-[var(--shadow-lift)]"
     >
       {/* Media preview strip */}

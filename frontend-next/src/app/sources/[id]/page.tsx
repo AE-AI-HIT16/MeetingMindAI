@@ -1,26 +1,44 @@
 import { notFound } from "next/navigation";
-import { getSource } from "@/lib/mock";
+import { APIError, getDocument, getSource } from "@/lib/api";
 import { ProcessingView } from "@/components/ProcessingView";
 import { DocumentView } from "@/components/DocumentView";
+import type { DocumentData, Source } from "@/lib/types";
 
 export default async function SourcePage({
   params,
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ view?: string }>;
+  searchParams: Promise<{
+    view?: string;
+    jobId?: string;
+    documentId?: string;
+  }>;
 }) {
   const { id } = await params;
-  const { view } = await searchParams;
-  const source = getSource(id);
+  const { view, jobId, documentId } = await searchParams;
+  let source: Source;
 
-  if (!source) notFound();
+  try {
+    source = await getSource(id);
+  } catch (error) {
+    if (error instanceof APIError && error.status === 404) {
+      notFound();
+    }
+    throw error;
+  }
 
-  // Processing → live view; done (or ?view=doc after finalize) → document viewer.
-  const showDoc = source.status === "done" || view === "doc";
-  return showDoc ? (
-    <DocumentView source={source} />
-  ) : (
-    <ProcessingView source={source} />
-  );
+  if (view === "doc" && documentId) {
+    let document: DocumentData;
+    try {
+      document = await getDocument(documentId);
+    } catch (error) {
+      if (error instanceof APIError && error.status === 404) notFound();
+      throw error;
+    }
+    if (document.sourceId !== source.id) notFound();
+    return <DocumentView source={source} document={document} />;
+  }
+
+  return <ProcessingView source={source} jobId={jobId ?? source.jobId} />;
 }
