@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Callable
 from typing import Any
 
 from meetasr.llm.abs_llm import AbsLLMClient
@@ -14,16 +15,18 @@ from meetasr.llm.planner_chunk import (
 )
 from meetasr.llm.planner_validation import (
     DRAFT_SEPARATOR,
+    PLAN_RESPONSE_FORMAT,
     bounded_join,
     build_plan_retry_prompt,
     fallback_outline,
     normalize_outline,
     normalize_report_outline,
     normalize_title,
-    parse_json_object as _parse_json_object,
-    PLAN_RESPONSE_FORMAT,
     safe_text,
     validate_plan_payload,
+)
+from meetasr.llm.planner_validation import (
+    parse_json_object as _parse_json_object,
 )
 from meetasr.schemas import TranscriptResult
 from meetasr.schemas_doc import DocSection, DocumentReport
@@ -62,7 +65,11 @@ class DocumentPlanner:
 
         self._prompts = load_generic_prompts(language=self.language)
 
-    def plan_and_write(self, transcript: TranscriptResult) -> DocumentReport:
+    def plan_and_write(
+        self,
+        transcript: TranscriptResult,
+        progress_callback: Callable[[float], None] | None = None,
+    ) -> DocumentReport:
         """Plan an outline, then map-reduce every proposed section.
 
         Empty transcripts return an empty document without calling the LLM.
@@ -75,12 +82,14 @@ class DocumentPlanner:
             logger.warning("DocumentPlanner received an empty transcript.")
             report = DocumentReport(content_kind="Tài liệu")
         else:
+            self._notify_progress(progress_callback, 0.05)
             content_kind, outline = self._plan(full_text)
+            self._notify_progress(progress_callback, 0.15)
             budget = self._write_data_budget(outline, content_kind)
             chunks = self._chunk(full_text, budget)
 
             section_drafts: dict[str, list[str]] = {section["id"]: [] for section in outline}
-            for chunk in chunks:
+            for chunk_index, chunk in enumerate(chunks, start=1):
                 if not chunk.strip():
                     continue
                 extracted = self._call_multi_write(outline, content_kind, chunk)
@@ -89,9 +98,13 @@ class DocumentPlanner:
                     draft = extracted.get(sec_id)
                     if draft and isinstance(draft, str) and draft.strip():
                         section_drafts[sec_id].append(draft.strip())
+                self._notify_progress(
+                    progress_callback,
+                    0.15 + 0.55 * chunk_index / max(len(chunks), 1),
+                )
 
             sections = []
-            for section in outline:
+            for section_index, section in enumerate(outline, start=1):
                 drafts = section_drafts[section["id"]]
                 if not drafts:
                     continue
@@ -99,7 +112,7 @@ class DocumentPlanner:
                     markdown = drafts[0]
                 else:
                     markdown = self._reduce(section, content_kind, drafts)
-                
+
                 if markdown.strip():
                     sections.append(
                         DocSection(
@@ -109,7 +122,11 @@ class DocumentPlanner:
                             markdown=markdown,
                         )
                     )
-            
+                self._notify_progress(
+                    progress_callback,
+                    0.7 + 0.25 * section_index / max(len(outline), 1),
+                )
+
             report = DocumentReport(
                 content_kind=content_kind,
                 sections=sections,
@@ -119,6 +136,18 @@ class DocumentPlanner:
         report.llm_model = safe_text(getattr(self.client, "model", ""), "")
         report.processing_time = round(time.perf_counter() - started, 2)
         return report
+
+    @staticmethod
+    def _notify_progress(
+        callback: Callable[[float], None] | None,
+        progress: float,
+    ) -> None:
+        if callback is None:
+            return
+        try:
+            callback(max(0.0, min(progress, 0.95)))
+        except Exception:
+            logger.exception("Document progress callback failed.")
 
     def plan_only(self, transcript_sample: str) -> tuple[str, list[dict[str, str]]]:
         """Run only the plan step for the realtime document stream."""
@@ -151,7 +180,7 @@ class DocumentPlanner:
             draft = extracted.get(safe_section["id"])
             if draft and isinstance(draft, str) and draft.strip():
                 section_drafts.append(draft.strip())
-        
+
         if not section_drafts:
             markdown = ""
         elif len(section_drafts) == 1:
@@ -221,7 +250,7 @@ class DocumentPlanner:
             chunk=chunk,
         )
         try:
-            # We explicitly ask for JSON in the prompt, so we can parse it even 
+            # We explicitly ask for JSON in the prompt, so we can parse it even
             # if response_format=json_object is not strictly supported by the LLM.
             response = self.client.chat(
                 prompt,

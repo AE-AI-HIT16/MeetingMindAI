@@ -9,8 +9,8 @@ import uuid
 from datetime import datetime
 from typing import List, Optional
 
+from sqlalchemy import UniqueConstraint
 from sqlmodel import Field, Relationship, SQLModel
-
 
 '''
     Enum class
@@ -39,6 +39,25 @@ class DocumentMode:
     LIVE = "live"           # intermediate — updated incrementally
     SUMMARY = "summary"     # structured summary (topics, decisions, action items)
     FULL_TEXT = "full_text" # lightly edited verbatim transcript
+
+
+class DocumentGenerationStatus:
+    """Các trạng thái của job tạo tài liệu cuối."""
+
+    QUEUED = "queued"
+    PROCESSING = "processing"
+    DONE = "done"
+    FAILED = "failed"
+
+
+class DocumentGenerationStage:
+    """Các bước có thể hiển thị trong giao diện finalize."""
+
+    QUEUED = "queued"
+    GENERATING = "generating"
+    SAVING = "saving"
+    DONE = "done"
+    FAILED = "failed"
 
 
 class MediaType:
@@ -78,6 +97,10 @@ class Source(SQLModel, table=True):
         sa_relationship_kwargs={"uselist": False, "cascade": "all, delete-orphan"},
     )
     documents: List["Document"] = Relationship(
+        back_populates="source",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"},
+    )
+    document_generation_jobs: List["DocumentGenerationJob"] = Relationship(
         back_populates="source",
         sa_relationship_kwargs={"cascade": "all, delete-orphan"},
     )
@@ -142,6 +165,13 @@ class Document(SQLModel, table=True):
     """
 
     __tablename__ = "documents"
+    __table_args__ = (
+        UniqueConstraint(
+            "source_id",
+            "mode",
+            name="uq_documents_source_mode",
+        ),
+    )
 
     id: str = Field(default_factory=_new_uuid, primary_key=True)
     source_id: str = Field(foreign_key="sources.id", index=True)
@@ -153,3 +183,46 @@ class Document(SQLModel, table=True):
 
     # Relationships
     source: Optional[Source] = Relationship(back_populates="documents")
+
+
+class DocumentGenerationJob(SQLModel, table=True):
+    """Trạng thái bền vững của một yêu cầu tạo summary/full_text."""
+
+    __tablename__ = "document_generation_jobs"
+    __table_args__ = (
+        UniqueConstraint(
+            "source_id",
+            "mode",
+            name="uq_document_generation_source_mode",
+        ),
+    )
+
+    id: str = Field(default_factory=_new_uuid, primary_key=True)
+    document_id: str = Field(foreign_key="documents.id", index=True)
+    source_id: str = Field(foreign_key="sources.id", index=True)
+    mode: str
+    status: str = Field(default=DocumentGenerationStatus.QUEUED, index=True)
+    stage: str = Field(default=DocumentGenerationStage.QUEUED)
+    progress: float = Field(default=0.0)
+    error: Optional[str] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+    source: Optional[Source] = Relationship(
+        back_populates="document_generation_jobs"
+    )
+
+
+class DocumentDuplicateArchive(SQLModel, table=True):
+    """Bản lưu an toàn cho Document trùng được dọn trong migration."""
+
+    __tablename__ = "document_duplicates_archive"
+
+    id: str = Field(default_factory=_new_uuid, primary_key=True)
+    original_document_id: str = Field(index=True)
+    source_id: str = Field(index=True)
+    mode: str
+    markdown: str
+    original_created_at: datetime
+    original_updated_at: datetime
+    archived_at: datetime = Field(default_factory=datetime.utcnow)

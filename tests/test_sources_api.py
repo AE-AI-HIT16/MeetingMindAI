@@ -88,18 +88,20 @@ def test_sources_crud_creates_queued_job_and_deletes_storage(
 
     assert create_response.status_code == 201
     created = create_response.json()
-    source_id = created["id"]
-    assert created["title"] == "meeting.wav"
-    assert created["mediaType"] == MediaType.AUDIO
-    assert created["status"] == "processing"
-    assert created["docs"] == []
+    source_id = created["sourceId"]
+    job_id = created["jobId"]
+    assert created == {
+        "sourceId": source_id,
+        "jobId": job_id,
+        "status": JobStatus.QUEUED,
+    }
 
     with Session(test_engine) as session:
         source = session.get(Source, source_id)
         assert source is not None
         assert source.storage_path == "fake/meeting.wav"
         job = session.exec(select(Job).where(Job.source_id == source_id)).one()
-        job_id = job.id
+        assert job.id == job_id
         assert job.status == JobStatus.QUEUED
 
     list_response = client.get("/v1/sources")
@@ -108,7 +110,17 @@ def test_sources_crud_creates_queued_job_and_deletes_storage(
 
     detail_response = client.get(f"/v1/sources/{source_id}")
     assert detail_response.status_code == 200
-    assert detail_response.json() == created
+    assert detail_response.json() == {
+        "id": source_id,
+        "title": "meeting.wav",
+        "mediaType": MediaType.AUDIO,
+        "durationMs": None,
+        "createdAt": detail_response.json()["createdAt"],
+        "status": "processing",
+        "jobId": job_id,
+        "docs": [],
+        "documents": [],
+    }
 
     delete_response = client.delete(f"/v1/sources/{source_id}")
     assert delete_response.status_code == 204
