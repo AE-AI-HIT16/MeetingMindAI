@@ -1,5 +1,6 @@
 """Unit tests for OpenAI-compatible retry timing."""
 
+import sys
 from types import SimpleNamespace
 
 from meetasr.llm.openai_client import OpenAIClient, _retry_wait_seconds
@@ -58,3 +59,22 @@ def test_chat_forwards_json_mode_and_reads_multipart_content() -> None:
 
     assert result == '{"ok": true}'
     assert captured["response_format"] == {"type": "json_object"}
+
+
+def test_openai_sdk_retries_are_disabled(monkeypatch) -> None:
+    """Only OpenAIClient's bounded retry loop should retry provider calls."""
+    captured: dict = {}
+
+    class StubOpenAI:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setitem(
+        sys.modules,
+        "openai",
+        SimpleNamespace(OpenAI=StubOpenAI),
+    )
+
+    OpenAIClient(api_key="test-key", retry_attempts=3)
+
+    assert captured["max_retries"] == 0

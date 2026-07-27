@@ -45,7 +45,14 @@ class OpenAIClient(AbsLLMClient):
         """Create the openai.OpenAI client."""
         try:
             from openai import OpenAI
-            kwargs: dict = {"api_key": api_key, "timeout": self.timeout}
+            # Retry in exactly one place. The OpenAI SDK otherwise retries
+            # internally and then this class retries again, multiplying Groq
+            # requests and making a 429 rate limit worse.
+            kwargs: dict = {
+                "api_key": api_key,
+                "timeout": self.timeout,
+                "max_retries": 0,
+            }
             if base_url:
                 kwargs["base_url"] = base_url
             self._client = OpenAI(**kwargs)
