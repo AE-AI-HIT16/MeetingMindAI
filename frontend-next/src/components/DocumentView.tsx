@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import type { DocumentData, Source } from "@/lib/types";
 import { documentExportUrl, mediaUrl } from "@/lib/api";
@@ -11,6 +11,10 @@ import { SpeakerChip } from "@/components/ui";
 
 type Tab = "doc" | "transcript" | "media";
 
+function segmentKey(id: number | null, startMs: number) {
+  return id === null ? `start-${startMs}` : `id-${id}`;
+}
+
 export function DocumentView({
   source,
   document,
@@ -20,15 +24,59 @@ export function DocumentView({
 }) {
   const [tab, setTab] = useState<Tab>("doc");
   const [exportOpen, setExportOpen] = useState(false);
+  const [playbackMs, setPlaybackMs] = useState<number | null>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const segmentRefs = useRef(new Map<string, HTMLDivElement>());
   const { segments } = useJobEvents(source.jobId);
+
+  const activeSegmentKey = useMemo(() => {
+    if (playbackMs === null) return null;
+
+    const segmentIndex = segments.findLastIndex(
+      (segment) => segment.startMs <= playbackMs,
+    );
+    if (segmentIndex === -1) return null;
+
+    const segment = segments[segmentIndex];
+    const nextSegment = segments[segmentIndex + 1];
+    const activeUntilMs = nextSegment
+      ? Math.max(segment.endMs, nextSegment.startMs)
+      : segment.endMs;
+
+    return playbackMs <= activeUntilMs
+      ? segmentKey(segment.id, segment.startMs)
+      : null;
+  }, [playbackMs, segments]);
+
+  useEffect(() => {
+    if (tab !== "transcript" || activeSegmentKey === null) return;
+
+    const frame = window.requestAnimationFrame(() => {
+      const reduceMotion = window.matchMedia(
+        "(prefers-reduced-motion: reduce)",
+      ).matches;
+      segmentRefs.current.get(activeSegmentKey)?.scrollIntoView({
+        behavior: reduceMotion ? "auto" : "smooth",
+        block: "center",
+      });
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeSegmentKey, tab]);
+
+  function syncPlaybackTime(
+    event: React.SyntheticEvent<HTMLMediaElement>,
+  ) {
+    setPlaybackMs(event.currentTarget.currentTime * 1000);
+  }
 
   function seekTo(startMs: number) {
     const media =
       source.mediaType === "video" ? videoRef.current : audioRef.current;
     if (!media) return;
     media.currentTime = startMs / 1000;
+    setPlaybackMs(startMs);
     void media.play().catch(() => {
       // Browser controls still allow manual playback if autoplay is blocked.
     });
@@ -162,6 +210,10 @@ export function DocumentView({
               ref={videoRef}
               controls
               preload="metadata"
+              onLoadedMetadata={syncPlaybackTime}
+              onPlay={syncPlaybackTime}
+              onSeeked={syncPlaybackTime}
+              onTimeUpdate={syncPlaybackTime}
               className={
                 tab === "media"
                   ? "aspect-video w-full"
@@ -174,6 +226,10 @@ export function DocumentView({
               ref={audioRef}
               controls
               preload="metadata"
+              onLoadedMetadata={syncPlaybackTime}
+              onPlay={syncPlaybackTime}
+              onSeeked={syncPlaybackTime}
+              onTimeUpdate={syncPlaybackTime}
               className="w-full"
               src={mediaUrl(source.id)}
             />
@@ -191,28 +247,71 @@ export function DocumentView({
           )}
 
           {tab === "transcript" && (
-            <div className="space-y-5">
-              {segments.map((seg) => (
-                <div
-                  key={seg.id ?? seg.startMs}
-                  className="flex gap-4"
-                >
-                  <button
-                    type="button"
-                    onClick={() => seekTo(seg.startMs)}
-                    title={`Phát từ ${formatStamp(seg.startMs)}`}
-                    className="w-12 shrink-0 pt-0.5 text-left font-mono text-[11px] text-ink-faint transition hover:text-brand"
+            <div className="space-y-2">
+              {segments.map((seg) => {
+                const key = segmentKey(seg.id, seg.startMs);
+                const isActive = key === activeSegmentKey;
+
+                return (
+                  <div
+                    key={key}
+                    ref={(node) => {
+                      if (node) {
+                        segmentRefs.current.set(key, node);
+                      } else {
+                        segmentRefs.current.delete(key);
+                      }
+                    }}
+                    aria-current={isActive ? "true" : undefined}
+                    className={`relative flex gap-4 rounded-2xl border px-3 py-3 transition-all duration-300 ${
+                      isActive
+                        ? "border-brand/25 bg-brand-wash shadow-[0_12px_32px_-18px_rgb(44_62_224_/_0.55)]"
+                        : activeSegmentKey
+                          ? "border-transparent opacity-55"
+                          : "border-transparent"
+                    }`}
                   >
-                    {formatStamp(seg.startMs)}
-                  </button>
-                  <div>
-                    <SpeakerChip speaker={seg.speaker} />
-                    <p className="mt-1 text-[15px] leading-relaxed text-ink">
-                      {seg.text}
-                    </p>
+                    {isActive && (
+                      <span
+                        aria-hidden="true"
+                        className="absolute inset-y-3 left-0 w-1 rounded-r-full bg-brand"
+                      />
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => seekTo(seg.startMs)}
+                      title={`Phát từ ${formatStamp(seg.startMs)}`}
+                      className={`w-12 shrink-0 pt-0.5 text-left font-mono text-[11px] transition ${
+                        isActive
+                          ? "font-semibold text-brand-ink"
+                          : "text-ink-faint hover:text-brand"
+                      }`}
+                    >
+                      {formatStamp(seg.startMs)}
+                    </button>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <SpeakerChip speaker={seg.speaker} />
+                        {isActive && (
+                          <span className="inline-flex items-center gap-1.5 rounded-full bg-brand px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-white">
+                            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" />
+                            Đang phát
+                          </span>
+                        )}
+                      </div>
+                      <p
+                        className={`mt-1 leading-relaxed text-ink transition-all duration-300 ${
+                          isActive
+                            ? "text-base font-semibold"
+                            : "text-[15px]"
+                        }`}
+                      >
+                        {seg.text}
+                      </p>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
               {segments.length === 0 && (
                 <p className="text-sm text-ink-faint">
                   Đang tải lại transcript từ Job…
