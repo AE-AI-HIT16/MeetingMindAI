@@ -105,9 +105,11 @@ def test_detect_uses_loaded_model_and_normalizes_output(monkeypatch):
     monkeypatch.setattr(
         vad,
         "_run_inference",
-        lambda audio, max_single_segment_time: vad._model.inference(
+        lambda audio, max_single_segment_time, cache, is_final: vad._model.inference(
             audio,
             max_single_segment_time=max_single_segment_time,
+            cache=cache,
+            is_final=is_final,
         ),
     )
     audio = np.zeros(16000, dtype=np.float32)

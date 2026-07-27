@@ -35,6 +35,14 @@ FULL_PAGE_MARKDOWN = (
     / "data"
     / "pdf_blue_modern_demo.md"
 ).read_text(encoding="utf-8")
+MINIMAL_TEMPLATE = (
+    Path(__file__).resolve().parents[1]
+    / "meetasr"
+    / "export"
+    / "templates"
+    / "pdf"
+    / "minimal.html"
+)
 
 
 def test_pdf_sections_come_from_llm_markdown_headings():
@@ -91,6 +99,18 @@ def test_minimal_pdf_remains_the_default_template():
 
     assert artifact.content.startswith(b"%PDF-")
     assert len(artifact.content) > 5_000
+
+
+def test_minimal_template_allows_long_sections_to_fill_remaining_page():
+    """Long sections may split; headings should stay with following content."""
+    template = MINIMAL_TEMPLATE.read_text(encoding="utf-8")
+
+    assert ".section {" in template
+    assert "break-inside: auto;" in template
+    assert ".section-title {" in template
+    assert "break-after: avoid;" in template
+    assert "orphans: 3;" in template
+    assert "widows: 3;" in template
 
 
 def test_unknown_pdf_template_is_rejected():

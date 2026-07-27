@@ -22,10 +22,11 @@ class ASRWorker:
     def __init__(
         self,
         session,
-        pipeline,
+        asr_service,
     ):
         self.session = session
-        self.pipeline = pipeline
+        self.asr_service = asr_service
+        self.offset_ms = 0
 
 
     async def run(self):
@@ -42,9 +43,9 @@ class ASRWorker:
                         f"asr_q={self.session.asr_queue.qsize()}"
                     )
 
-                    result = (await self._transcribe(audio))
+                    result = await self._transcribe(audio)
 
-                    text_len = len(result.text) if result and result.text else 0
+                    text_len = len(result.text)
 
                     print(
                         f"ASR: done text_len={text_len}"
@@ -71,13 +72,11 @@ class ASRWorker:
         Gọi MeetPipeline.
         Nếu model sync thì chạy executor.
         """
-        loop = asyncio.get_running_loop()
-
-        result = await loop.run_in_executor(
-            None,
-            self.pipeline.transcribe,
+        result = await self.asr_service.transcribe(
             audio,
+            offset_ms=self.offset_ms,
         )
+        self.offset_ms += result.duration_ms
         return result
 
 
@@ -89,12 +88,13 @@ class ASRWorker:
         Stream transcript lên FE.
         """
         print("====================================================================================================")
-        print (result)
+        print(result)
         print("====================================================================================================")
 
-        await self.session.websocket.send_json(
-            {
-                "type": "transcript_delta",
-                "result": result.to_dict(),
-            }
-        )
+        for segment in result.segments:
+            await self.session.websocket.send_json(
+                {
+                    "type": "transcript_delta",
+                    "segment": segment.model_dump(mode="json"),
+                }
+            )

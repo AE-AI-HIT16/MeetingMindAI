@@ -1,7 +1,7 @@
 import type { NextConfig } from "next";
 
-// Proxy API + WebSocket calls to the FastAPI backend during dev,
-// so the frontend can call `/v1/...` with no CORS setup.
+// Proxy small API/media calls to FastAPI during dev. Large file uploads go
+// directly to FastAPI because the Next proxy buffers and limits request bodies.
 const API = process.env.MEETASR_API ?? "http://127.0.0.1:8000";
 
 const nextConfig: NextConfig = {

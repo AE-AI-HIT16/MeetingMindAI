@@ -10,23 +10,29 @@ import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from meetasr import __version__
-from meetasr.auto.auto_pipeline import AutoPipeline
-from meetasr.api.dependencies import set_pipeline, CONFIG_PATH
+from meetasr.api.dependencies import CONFIG_PATH, set_pipeline
 from meetasr.api.routes import (
     db_routes,
     document,
+    document_jobs,
+    documents_phase2,
     health,
+    jobs,
     realtime,
+    sources,
     summarize,
     test_model,
     transcribe,
 )
+from meetasr.auto.auto_pipeline import AutoPipeline
 from meetasr.db.connection import init_db
-
+from meetasr.realtime.document_generation import document_generation_queue
+from meetasr.realtime.job_worker import job_queue
+from meetasr.services.asr_service import ASRService
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -45,6 +51,8 @@ async def lifespan(app: FastAPI):
     Yields:
         Control to the running server between startup and shutdown.
     """
+    app.state.pipeline = None
+    app.state.asr_service = None
     init_db()
     logger.info("Database tables initialized.")
     # --- STARTUP ---
@@ -54,12 +62,18 @@ async def lifespan(app: FastAPI):
         set_pipeline(pipeline)
 
         app.state.pipeline = pipeline
+        app.state.asr_service = ASRService(pipeline)
         logger.info("Pipeline ready.")
     else:
         logger.warning(
             f"Config '{CONFIG_PATH}' not found. "
             "Server starts without pipeline — set MEETASR_CONFIG."
         )
+
+    await job_queue.start(app.state.asr_service, sources.get_storage_backend())
+    await document_generation_queue.start(
+        getattr(app.state.pipeline, "doc_planner", None)
+    )
 
     print(logger.level)
     print(logger.getEffectiveLevel())
@@ -68,8 +82,11 @@ async def lifespan(app: FastAPI):
 
     # --- SHUTDOWN ---
     logger.info("Shutting down... Cleaning up ML models and freeing VRAM.")
+    await document_generation_queue.stop()
+    await job_queue.stop()
     set_pipeline(None)  # release reference so GC can free RAM/VRAM
-
+    app.state.asr_service = None
+    app.state.pipeline = None
 
 # Set log cho api realtime
 
@@ -103,8 +120,12 @@ app.include_router(transcribe.router)
 app.include_router(summarize.router)
 app.include_router(db_routes.router)
 app.include_router(document.router)
+app.include_router(documents_phase2.router)
+app.include_router(document_jobs.router)
 app.include_router(realtime.router)
+app.include_router(jobs.router)
 app.include_router(test_model.router)
+app.include_router(sources.router)   # Phase 2: /v1/sources — upload, library, media stream
 
 
 # ------------------------------------------------------------------

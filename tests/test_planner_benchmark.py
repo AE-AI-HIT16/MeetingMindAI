@@ -46,7 +46,15 @@ class BenchmarkLLMClient(AbsLLMClient):
             )
         if "các bản nháp rời rạc cho cùng một mục" in prompt:
             return "Nội dung cuối đã gộp và loại bỏ ý trùng."
-        return "Bản nháp có căn cứ từ một phần transcript."
+        return json.dumps(
+            {
+                "s1": "Bản nháp tổng quan.",
+                "s2": "Bản nháp tiến độ.",
+                "s3": "Bản nháp kiểm thử.",
+                "s4": "Bản nháp phân công.",
+            },
+            ensure_ascii=False,
+        )
 
 
 def _timed_transcript(duration_minutes: int) -> TranscriptResult:
@@ -80,18 +88,23 @@ def test_long_transcript_uses_real_map_reduce(duration_minutes: int) -> None:
     planner = DocumentPlanner(client=client)
     transcript = _timed_transcript(duration_minutes)
     formatted = planner._format_transcript(transcript)
-    section = {"heading": "Tóm tắt", "kind": "summary"}
+    outline = [
+        {"id": "s1", "heading": "Tổng quan", "kind": "summary"},
+        {"id": "s2", "heading": "Tiến độ triển khai", "kind": "topic"},
+        {"id": "s3", "heading": "Dữ liệu kiểm thử", "kind": "topic"},
+        {"id": "s4", "heading": "Phân công trước thứ Sáu", "kind": "topic"},
+    ]
     chunk_count = len(
         planner._chunk(
             formatted,
-            planner._write_data_budget(section, "Cuộc họp dự án"),
+            planner._write_data_budget(outline, "Cuộc họp dự án"),
         )
     )
     section_count = 4
 
     report = planner.plan_and_write(transcript)
 
-    expected_calls = 1 + section_count * (chunk_count + 1)
+    expected_calls = 1 + chunk_count + section_count
     assert chunk_count > 1
     assert len(client.calls) == expected_calls
     assert len(report.sections) == section_count

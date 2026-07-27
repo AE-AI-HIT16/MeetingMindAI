@@ -1,21 +1,13 @@
-import React from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
-// Minimal markdown for the base build: renders **bold** inline.
-// Swap for react-markdown + remark-gfm when wiring the real backend
-// (see meet_docs/docs/12_frontend_nextjs_plan.md §1).
+/** Render persisted/streamed Markdown as safe semantic HTML. */
 export function MarkdownLite({ text }: { text: string }) {
-  const parts = text.split(/(\*\*[^*]+\*\*)/g);
   return (
-    <p className="text-[15px] leading-[1.75] text-ink-soft">
-      {parts.map((p, i) =>
-        p.startsWith("**") && p.endsWith("**") ? (
-          <strong key={i} className="font-semibold text-ink">
-            {p.slice(2, -2)}
-          </strong>
-        ) : (
-          <React.Fragment key={i}>{p}</React.Fragment>
-        )
-      )}
-    </p>
+    <div className="markdown-preview">
+      <ReactMarkdown remarkPlugins={[remarkGfm]} skipHtml>
+        {text}
+      </ReactMarkdown>
+    </div>
   );
 }

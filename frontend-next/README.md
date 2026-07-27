@@ -12,8 +12,17 @@ pnpm install
 pnpm dev            # http://localhost:3000
 ```
 
-`next.config.ts` đã proxy `/v1/*` → `http://127.0.0.1:8000` (FastAPI) nên gọi API không dính CORS.
-Đổi backend bằng biến môi trường `MEETASR_API`.
+`next.config.ts` proxy các API nhỏ `/v1/*` → FastAPI. Upload media lớn và yêu
+cầu finalize đi trực tiếp từ browser tới FastAPI. Finalize trả `202` ngay, sau
+đó giao diện theo dõi job tạo tài liệu bằng WebSocket
+`/v1/document-jobs/{id}/events`.
+
+- `MEETASR_API`: URL backend cho Server Component/rewrite.
+- `NEXT_PUBLIC_MEETASR_API`: URL backend mà browser dùng để upload/finalize.
+- `NEXT_PUBLIC_WS_HOST`: host WebSocket Job/live mic.
+
+Sao chép `.env.example` thành `.env.local` nếu backend không chạy ở host mặc
+định.
 
 ## Ngôn ngữ thiết kế — "Transcription Studio"
 

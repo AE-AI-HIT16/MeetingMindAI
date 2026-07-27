@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 
 from meetasr.pipeline import MeetPipeline
-from meetasr.schemas import Segment, TranscriptResult
+from meetasr.schemas import Segment, SentenceInfo, TranscriptResult
 
 
 class FakeVAD:
@@ -164,6 +164,77 @@ def test_transcribe_offsets_word_timestamps_from_padded_chunk_start():
         [600, 700],
     ]
     assert (result.sentence_info[0].start, result.sentence_info[0].end) == (0.4, 0.7)
+
+
+def test_incremental_segment_keeps_full_file_timestamp_offset():
+    audio = np.zeros(4 * 16000, dtype=np.float32)
+    asr = TimestampedFakeASR()
+    pipeline = MeetPipeline(asr_model=asr, vad_model=FakeVAD())
+    prepared_audio, segments, duration_ms = (
+        pipeline.prepare_incremental_transcription(audio)
+    )
+
+    sentences = pipeline.transcribe_vad_segment(
+        prepared_audio,
+        segments[1],
+        language="vi",
+    )
+
+    assert duration_ms == 4000
+    # VAD starts at 2200 ms; the 100 ms padded chunk starts at 2100 ms.
+    assert sentences[0].char_timestamps == [
+        [2100, 2200],
+        [2200, 2300],
+        [2300, 2400],
+    ]
+    assert (sentences[0].start, sentences[0].end) == (2.1, 2.4)
+    assert len(asr.chunks) == 1
+
+
+def test_incremental_long_form_model_receives_one_vad_chunk_with_global_offset():
+    audio = np.zeros(4 * 16000, dtype=np.float32)
+    asr = LongFormFakeASR()
+    pipeline = MeetPipeline(asr_model=asr, vad_model=FakeVAD())
+    prepared_audio, segments, _ = pipeline.prepare_incremental_transcription(
+        audio
+    )
+
+    sentences = pipeline.transcribe_vad_segment(
+        prepared_audio,
+        segments[1],
+        language="vi",
+    )
+
+    assert len(asr.audio) == int(1.4 * 16000)
+    assert sentences[0].char_timestamps == [[3100, 3200]] * 9
+    assert (sentences[0].start, sentences[0].end) == (3.1, 3.2)
+
+
+def test_incremental_finalize_preserves_sentence_count_and_assigns_speakers():
+    pipeline = MeetPipeline(
+        asr_model=FakeASR(),
+        spk_model=object(),
+    )
+    original = [
+        SentenceInfo(text="câu một", start=0.0, end=2.0),
+        SentenceInfo(text="câu hai", start=2.0, end=4.0),
+    ]
+
+    pipeline._run_spk = lambda audio, sentences, segments: [
+        SentenceInfo(text="câu", start=0.0, end=1.0, speaker=0),
+        SentenceInfo(text="một", start=1.0, end=2.0, speaker=1),
+        SentenceInfo(text="câu hai", start=2.0, end=4.0, speaker=1),
+    ]
+
+    finalized = pipeline.finalize_incremental_transcript(
+        np.zeros(4 * 16000, dtype=np.float32),
+        original,
+        [Segment(0, 4000)],
+    )
+
+    assert len(finalized) == len(original)
+    assert [sentence.speaker for sentence in finalized] == [0, 1]
+    assert [sentence.text for sentence in finalized] == ["câu một", "câu hai"]
 
 
 def test_transcribe_splits_long_punctuated_segments():

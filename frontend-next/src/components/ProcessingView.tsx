@@ -3,40 +3,36 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import type { Source } from "@/lib/types";
-import { MOCK_SECTIONS, MOCK_TRANSCRIPT } from "@/lib/mock";
 import { formatStamp } from "@/lib/format";
+import { useJobEvents } from "@/lib/useJobEvents";
 import { SpeakerChip, StatusBadge, Waveform } from "@/components/ui";
 import { StageProgress } from "@/components/StageProgress";
 import { MarkdownLite } from "@/components/MarkdownLite";
 import { FinalizeDialog } from "@/components/FinalizeDialog";
 
-// Base build: simulate the realtime stream so the team can see the intended UX.
-// Real build: drive this from the `useJobEvents` WebSocket hook (doc 12 §4).
-export function ProcessingView({ source }: { source: Source }) {
-  const [nSeg, setNSeg] = useState(2);
-  const [nSec, setNSec] = useState(2);
-  const [done, setDone] = useState(false);
+export function ProcessingView({
+  source,
+  jobId,
+}: {
+  source: Source;
+  jobId: string | null;
+}) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const transcriptEnd = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (nSeg >= MOCK_TRANSCRIPT.length && nSec >= MOCK_SECTIONS.length) {
-      const t = setTimeout(() => setDone(true), 1200);
-      return () => clearTimeout(t);
-    }
-    const t = setTimeout(() => {
-      setNSeg((n) => Math.min(n + 1, MOCK_TRANSCRIPT.length));
-      if (nSeg % 2 === 0) setNSec((n) => Math.min(n + 1, MOCK_SECTIONS.length));
-    }, 2200);
-    return () => clearTimeout(t);
-  }, [nSeg, nSec]);
+  const {
+    isConnected,
+    stage,
+    progress,
+    segments,
+    sections,
+    done,
+    liveDocumentId,
+    error,
+  } = useJobEvents(jobId);
 
   useEffect(() => {
     transcriptEnd.current?.scrollIntoView({ behavior: "smooth" });
-  }, [nSeg]);
-
-  const segments = MOCK_TRANSCRIPT.slice(0, nSeg);
-  const sections = MOCK_SECTIONS.slice(0, nSec);
+  }, [segments.length]);
 
   return (
     <div className="mx-auto flex h-screen w-full max-w-6xl flex-col px-6 py-8 md:px-10">
@@ -54,7 +50,9 @@ export function ProcessingView({ source }: { source: Source }) {
           </h1>
         </div>
         <div className="flex items-center gap-3">
-          <StatusBadge status={done ? "done" : "processing"} />
+          <StatusBadge
+            status={error ? "failed" : done ? "done" : "processing"}
+          />
           {done ? (
             <button
               onClick={() => setDialogOpen(true)}
@@ -64,7 +62,7 @@ export function ProcessingView({ source }: { source: Source }) {
             </button>
           ) : (
             <span className="hidden font-mono text-sm text-signal-ink sm:inline">
-              đang nghe…
+              {isConnected ? "đang nhận dữ liệu…" : "đang kết nối…"}
             </span>
           )}
         </div>
@@ -73,10 +71,19 @@ export function ProcessingView({ source }: { source: Source }) {
       {/* Stage progress */}
       <div className="mt-6 rounded-2xl border border-line bg-surface p-4">
         <StageProgress
-          current={done ? "done" : "generating_doc"}
-          progress={done ? 1 : Math.min(nSeg / MOCK_TRANSCRIPT.length, 0.95)}
+          current={stage}
+          progress={progress}
         />
       </div>
+
+      {error && (
+        <p
+          role="alert"
+          className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+        >
+          {error}
+        </p>
+      )}
 
       {/* Two columns — voice on the left, document on the right */}
       <div className="mt-5 grid min-h-0 flex-1 grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
@@ -84,13 +91,16 @@ export function ProcessingView({ source }: { source: Source }) {
         <section className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-line bg-surface">
           <header className="flex items-center justify-between border-b border-line-soft px-5 py-3.5">
             <p className="eyebrow">Lời thoại</p>
-            <Waveform live={!done} bars={16} className="h-4 w-24" />
+            <Waveform live={!done && !error} bars={16} className="h-4 w-24" />
           </header>
           <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-5">
             {segments.map((seg, i) => {
               const last = i === segments.length - 1;
               return (
-                <div key={seg.startMs} className="animate-rise">
+                <div
+                  key={seg.id ?? `${seg.startMs}-${i}`}
+                  className="animate-rise"
+                >
                   <div className="mb-1 flex items-center gap-2.5">
                     <SpeakerChip speaker={seg.speaker} />
                     <span className="font-mono text-[11px] text-ink-faint">
@@ -107,6 +117,11 @@ export function ProcessingView({ source }: { source: Source }) {
                 </div>
               );
             })}
+            {segments.length === 0 && !error && (
+              <p className="text-sm text-ink-faint">
+                Transcript sẽ hiện tại đây khi ASR xử lý xong đoạn đầu tiên.
+              </p>
+            )}
             <div ref={transcriptEnd} />
           </div>
         </section>
@@ -141,13 +156,18 @@ export function ProcessingView({ source }: { source: Source }) {
                 </article>
               );
             })}
+            {sections.length === 0 && !error && (
+              <p className="text-sm text-ink-faint">
+                Tài liệu trực tiếp sẽ xuất hiện sau khi nhận dạng lời nói.
+              </p>
+            )}
           </div>
         </section>
       </div>
 
       <FinalizeDialog
         open={dialogOpen}
-        sourceId={source.id}
+        liveDocumentId={liveDocumentId}
         onClose={() => setDialogOpen(false)}
       />
     </div>

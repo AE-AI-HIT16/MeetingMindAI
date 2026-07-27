@@ -17,7 +17,7 @@
 
     @page {
       size: A4;
-      margin: 20mm;
+      margin: 18mm 20mm;
     }
 
     * {
@@ -34,8 +34,9 @@
 
     .document-header {
       border-bottom: 1px solid #b8c0cc;
-      margin-bottom: 12mm;
-      padding-bottom: 5mm;
+      margin-bottom: 9mm;
+      padding-bottom: 4mm;
+      break-inside: avoid;
     }
 
     .document-title,
@@ -57,13 +58,41 @@
     }
 
     .section {
-      break-inside: avoid;
-      margin-bottom: 8mm;
+      /* A whole LLM section can be several pages long. Preventing all page
+         breaks here pushed the next section to a new page and left a large
+         blank area on the previous one. */
+      break-inside: auto;
+      margin-bottom: 6mm;
     }
 
     .section-title {
       font-size: 15pt;
       margin: 0 0 3mm;
+      break-after: avoid;
+      page-break-after: avoid;
+    }
+
+    .section-body h3,
+    .section-body h4 {
+      break-after: avoid;
+      page-break-after: avoid;
+    }
+
+    .section-body p {
+      margin: 0 0 3mm;
+      orphans: 3;
+      widows: 3;
+    }
+
+    .section-body ul,
+    .section-body ol {
+      margin: 2mm 0 3mm;
+      padding-left: 7mm;
+    }
+
+    .section-body li {
+      orphans: 2;
+      widows: 2;
     }
 
     .section-body > :first-child {
@@ -77,6 +106,15 @@
     table {
       border-collapse: collapse;
       width: 100%;
+    }
+
+    thead {
+      display: table-header-group;
+    }
+
+    tr {
+      break-inside: avoid;
+      page-break-inside: avoid;
     }
 
     th,
