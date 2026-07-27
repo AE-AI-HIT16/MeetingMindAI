@@ -190,6 +190,17 @@ class S3Storage(StorageBackend):
             ) from exc
         return url
 
+    def needs_redirect(self) -> bool:
+        """S3/MinIO ho tro presigned URL — endpoint /media nen redirect.
+
+        Khi True, endpoint GET /sources/{id}/media se dung HTTP 307 redirect
+        sang presigned URL cua MinIO thay vi doc toan bo bytes vao RAM va stream.
+
+        Returns:
+            True.
+        """
+        return True
+
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
