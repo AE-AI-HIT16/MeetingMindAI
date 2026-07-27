@@ -1,10 +1,18 @@
 import Link from "next/link";
-import { MOCK_SOURCES } from "@/lib/mock";
 import { SourceCard } from "@/components/SourceCard";
 import { PageHeader } from "@/components/ui";
+import { APIError, listSources } from "@/lib/api";
 
-export default function LibraryPage() {
-  const sources = MOCK_SOURCES;
+export default async function LibraryPage() {
+  const { sources, loadError } = await listSources()
+    .then((items) => ({ sources: items, loadError: null }))
+    .catch((error: unknown) => ({
+      sources: [],
+      loadError:
+        error instanceof APIError
+          ? error.message
+          : "Không thể kết nối tới máy chủ.",
+    }));
   const processing = sources.filter((s) => s.status === "processing").length;
 
   return (
@@ -32,6 +40,15 @@ export default function LibraryPage() {
           </>
         )}
       </p>
+
+      {loadError && (
+        <div
+          role="alert"
+          className="mt-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+        >
+          Không thể tải thư viện: {loadError}
+        </div>
+      )}
 
       <div className="mt-8 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
         <Link

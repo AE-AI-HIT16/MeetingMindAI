@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import logging
 import mimetypes
-import os
 from typing import Annotated, List, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
@@ -22,8 +21,10 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
+from meetasr.api.schemas_phase2 import CreateSourceResponse
 from meetasr.db.connection import get_db
-from meetasr.db.models_phase2 import Document, DocumentMode, Job, JobStatus, MediaType, Source
+from meetasr.db.models_phase2 import DocumentMode, Job, JobStatus, MediaType, Source
+from meetasr.realtime.job_worker import job_queue
 from meetasr.storage import get_storage
 from meetasr.storage.backend import StorageBackend
 
@@ -50,6 +51,13 @@ def get_storage_backend() -> StorageBackend:
 # Pydantic response schemas (mirror types.ts của frontend)
 # ---------------------------------------------------------------------------
 
+class SourceDocumentRef(BaseModel):
+    """Document ID + mode để Library có thể mở lại tài liệu đã lưu."""
+
+    id: str
+    mode: str
+
+
 class SourceResponse(BaseModel):
     """Schema trả về cho một Source — khớp với interface Source trong types.ts."""
 
@@ -59,7 +67,9 @@ class SourceResponse(BaseModel):
     durationMs: Optional[int]   # duration * 1000; None nếu chưa trích xuất
     createdAt: str              # ISO 8601 string
     status: str                 # "processing" | "done" | "failed"
+    jobId: Optional[str]        # Job để frontend kết nối WebSocket
     docs: List[str]             # ["live", "summary", "full_text"]
+    documents: List[SourceDocumentRef]
 
     @classmethod
     def from_orm(cls, source: Source) -> "SourceResponse":
@@ -74,16 +84,35 @@ class SourceResponse(BaseModel):
         else:
             job_status = "processing"
 
-        docs = [doc.mode for doc in source.documents if doc.mode != DocumentMode.LIVE]
+        visible_documents = [
+            doc
+            for doc in source.documents
+            if doc.mode == DocumentMode.LIVE or doc.markdown.strip()
+        ]
+        docs = [
+            doc.mode
+            for doc in visible_documents
+            if doc.mode != DocumentMode.LIVE
+        ]
+        documents = [
+            SourceDocumentRef(id=doc.id, mode=doc.mode)
+            for doc in visible_documents
+        ]
 
         return cls(
             id=source.id,
             title=source.filename,
             mediaType=source.media_type,
-            durationMs=int(source.duration * 1000) if source.duration else None,
+            durationMs=(
+                int(source.duration * 1000)
+                if source.duration is not None
+                else None
+            ),
             createdAt=source.created_at.isoformat(),
             status=job_status,
+            jobId=job.id if job is not None else None,
             docs=docs,
+            documents=documents,
         )
 
 
@@ -105,12 +134,12 @@ def list_sources(db: Annotated[Session, Depends(get_db)]) -> List[SourceResponse
 # POST /v1/sources — upload file, tạo Source + Job
 # ---------------------------------------------------------------------------
 
-@router.post("", response_model=SourceResponse, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=CreateSourceResponse, status_code=status.HTTP_201_CREATED)
 async def create_source(
     file: Annotated[UploadFile, File(description="File audio hoặc video cần xử lý.")],
     db: Annotated[Session, Depends(get_db)],
     storage: Annotated[StorageBackend, Depends(get_storage_backend)],
-) -> SourceResponse:
+) -> CreateSourceResponse:
     """Upload file media, lưu vào Storage, tạo Source và Job trong DB.
 
     Sau khi trả về, frontend chuyển hướng tới ``/sources/{id}`` để xem
@@ -122,7 +151,7 @@ async def create_source(
         storage: Storage backend — local hoặc MinIO (từ biến môi trường).
 
     Returns:
-        SourceResponse với ``status="processing"``.
+        ``sourceId`` để mở Source và ``jobId`` để theo dõi tiến trình xử lý.
 
     Raises:
         HTTPException 400: Nếu không có file hoặc tên file trống.
@@ -167,9 +196,14 @@ async def create_source(
     db.add(job)
     db.commit()
     db.refresh(source)
+    await job_queue.enqueue(job.id)
 
     logger.info("Đã tạo Source '%s' (id=%s) và Job (id=%s).", file.filename, source.id, job.id)
-    return SourceResponse.from_orm(source)
+    return CreateSourceResponse(
+        sourceId=source.id,
+        jobId=job.id,
+        status=JobStatus.QUEUED,
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -66,7 +66,15 @@ export function StatusBadge({ status }: { status: SourceStatus }) {
 }
 
 /* ---------- Speaker chip ---------- */
-export function SpeakerChip({ speaker }: { speaker: number }) {
+export function SpeakerChip({ speaker }: { speaker: number | null }) {
+  if (speaker === null) {
+    return (
+      <span className="font-mono text-xs text-ink-faint">
+        Chưa xác định
+      </span>
+    );
+  }
+
   const color = speakerColor(speaker);
   return (
     <span

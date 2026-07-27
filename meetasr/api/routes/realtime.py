@@ -3,7 +3,6 @@ from meetasr.streaming.worker import AudioWorker
 from meetasr.streaming.audio_receiver import AudioReceiver
 from meetasr.streaming.asr_worker import ASRWorker
 from meetasr.streaming.window_builder import SegmentWindowBuilder
-
 import asyncio
 import logging
 import uuid
@@ -39,21 +38,23 @@ async def realtime_stream(websocket: WebSocket):
     receiver = AudioReceiver(session)
 
     # Lấy pipeline ASR đã khởi tạo khi server start
-    pipeline = websocket.app.state.pipeline
-    print (type(pipeline.vad))
+    pipeline = getattr(websocket.app.state, "pipeline", None)
+    asr_service = getattr(websocket.app.state, "asr_service", None)
 
     # Nếu pipeline chưa load thì đóng kết nối
-    if pipeline is None:
+    if pipeline is None or asr_service is None:
         print("Pipeline not loaded", session_id)
         await websocket.close(code=1013)
         return
+
+    logger.info("Realtime VAD: %s", type(pipeline.vad).__name__)
 
     # Ghép các chunk audio thành từng cửa sổ (window)
     # để đưa sang ASR
     window_builder = SegmentWindowBuilder(session)
 
     # Worker xử lý nhận kết quả ASR
-    asr_worker = ASRWorker(session, pipeline)
+    asr_worker = ASRWorker(session, asr_service)
 
     # Chạy ASR worker ở background
     session.asr_task = asyncio.create_task(

@@ -1,6 +1,7 @@
 // Small formatting helpers shared across the UI.
 
-export function formatDuration(ms: number): string {
+export function formatDuration(ms: number | null): string {
+  if (ms === null) return "--:--";
   const total = Math.floor(ms / 1000);
   const h = Math.floor(total / 3600);
   const m = Math.floor((total % 3600) / 60);

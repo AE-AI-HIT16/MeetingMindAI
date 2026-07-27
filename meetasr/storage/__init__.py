@@ -17,7 +17,6 @@ Usage::
 
 from meetasr.storage.backend import StorageBackend
 from meetasr.storage.local import LocalStorage
-from meetasr.storage.s3 import S3Storage
 
 
 def get_storage() -> StorageBackend:
@@ -44,6 +43,12 @@ def get_storage() -> StorageBackend:
         return LocalStorage(root_dir=root)
 
     if backend == "s3":
+        try:
+            from meetasr.storage.s3 import S3Storage
+        except ImportError as exc:
+            raise RuntimeError(
+                "S3 storage requires the 'boto3' dependency."
+            ) from exc
         return S3Storage(
             endpoint_url=os.environ.get("MINIO_ENDPOINT", "http://localhost:9000"),
             access_key=os.environ.get("MINIO_ROOT_USER", "admin"),
@@ -60,6 +65,5 @@ def get_storage() -> StorageBackend:
 __all__ = [
     "StorageBackend",
     "LocalStorage",
-    "S3Storage",
     "get_storage",
 ]

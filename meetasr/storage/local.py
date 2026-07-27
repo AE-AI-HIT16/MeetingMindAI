@@ -1,7 +1,7 @@
 """Local filesystem storage backend.
 
-Lưu trữ các tệp media được tải lên vào một thư mục gốc (root directory) 
-trên ổ cứng vật lý của máy chủ. Phù hợp cho môi trường phát triển (development) 
+Lưu trữ các tệp media được tải lên vào một thư mục gốc (root directory)
+trên ổ cứng vật lý của máy chủ. Phù hợp cho môi trường phát triển (development)
 hoặc triển khai trên một máy chủ đơn lẻ.
 
 Khóa lưu trữ (storage key) là một đường dẫn tương đối, ví dụ: ``"abc123/meeting.mp4"``.
@@ -74,9 +74,9 @@ class LocalStorage(StorageBackend):
             if isinstance(file_data, (bytes, bytearray)):
                 dest_path.write_bytes(file_data)
                 return len(file_data)
-            
+
             # Đọc và ghi theo chunk 8 MB để không tràn RAM
-            chunk_size = 8 * 1024 * 1024  
+            chunk_size = 8 * 1024 * 1024
             total_size = 0
             with dest_path.open("wb") as fout:
                 while chunk := file_data.read(chunk_size):
@@ -86,7 +86,7 @@ class LocalStorage(StorageBackend):
 
         # Chạy tác vụ ghi đĩa ở một luồng khác để không treo Server
         size = await asyncio.to_thread(_write_file)
-        
+
         key = f"{prefix}/{filename}"
         logger.info("LocalStorage: Đã lưu %d bytes -> %s", size, key)
         return key
@@ -106,7 +106,7 @@ class LocalStorage(StorageBackend):
         path = self._root / key
         if not path.exists():
             raise FileNotFoundError(f"LocalStorage: Không tìm thấy khóa: {key!r}")
-        
+
         # Đọc file trên luồng ngầm
         return await asyncio.to_thread(path.read_bytes)
 
@@ -117,7 +117,7 @@ class LocalStorage(StorageBackend):
             key: Khóa lưu trữ được trả về từ phương thức :meth:`save`.
         """
         path = self._root / key
-        
+
         def _delete_file():
             if path.exists():
                 path.unlink()
@@ -134,7 +134,7 @@ class LocalStorage(StorageBackend):
         """Trả về đường dẫn API proxy để frontend có thể tải/stream tệp.
 
         Dữ liệu thực tế sẽ được stream bởi endpoint ``GET /v1/sources/{source_id}/media``.
-        Phương thức này chỉ trả về *đường dẫn tương đối* (path) để frontend tự động 
+        Phương thức này chỉ trả về *đường dẫn tương đối* (path) để frontend tự động
         nối với domain gốc của trang web.
 
         Args:
@@ -149,7 +149,7 @@ class LocalStorage(StorageBackend):
     def abs_path(self, key: str) -> Path:
         """Trả về đường dẫn tuyệt đối trên hệ thống tập tin cho một khóa.
 
-        Hữu ích khi bạn cần truyền trực tiếp đường dẫn file cho các công cụ 
+        Hữu ích khi bạn cần truyền trực tiếp đường dẫn file cho các công cụ
         bên ngoài (ví dụ: ffmpeg) thay vì đọc toàn bộ bytes vào RAM.
         """
         path = self._root / key

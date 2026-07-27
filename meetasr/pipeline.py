@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import logging
 import os
 import time
@@ -164,6 +165,105 @@ class MeetPipeline:
             duration=duration,
             sentence_info=sentence_info,
         )
+
+    def prepare_incremental_transcription(
+        self,
+        audio_source,
+    ) -> tuple[np.ndarray, list[Segment], int]:
+        """Decode audio once and find the VAD segments used by an upload Job."""
+        audio = load_audio(audio_source)
+        duration_ms = int(len(audio) / SAMPLE_RATE * 1000)
+        return audio, self._run_vad(audio), duration_ms
+
+    def transcribe_vad_segment(
+        self,
+        audio: np.ndarray,
+        segment: Segment,
+        language: str = "auto",
+        **kwargs,
+    ) -> list[SentenceInfo]:
+        """Transcribe one VAD segment and return timestamps on the full timeline.
+
+        Models with native long-form VAD receive only this padded VAD chunk.
+        Other wrappers use the normal batched ``recognize`` API with one chunk.
+        Speaker diarization and external punctuation are intentionally deferred
+        until all chunks have been transcribed.
+        """
+        if getattr(self.asr, "uses_internal_vad", False):
+            total_ms = int(len(audio) / SAMPLE_RATE * 1000)
+            start_ms = max(0, segment.start_ms - VAD_PADDING_MS)
+            end_ms = min(total_ms, segment.end_ms + VAD_PADDING_MS)
+            start = int(start_ms / 1000.0 * SAMPLE_RATE)
+            end = int(end_ms / 1000.0 * SAMPLE_RATE)
+            chunk = audio[start:end]
+            if len(chunk) == 0:
+                return []
+
+            results = self.asr.recognize_long_form(
+                chunk,
+                language=language,
+                **kwargs,
+            )
+            return build_sentence_info(
+                results,
+                [segment] * len(results),
+                timestamp_offsets_ms=[start_ms] * len(results),
+            )
+
+        results, result_segments, offsets = self._run_asr(
+            audio,
+            [segment],
+            language=language,
+            **kwargs,
+        )
+        return build_sentence_info(
+            results,
+            result_segments,
+            timestamp_offsets_ms=offsets,
+        )
+
+    def finalize_incremental_transcript(
+        self,
+        audio: np.ndarray,
+        sentence_info: list[SentenceInfo],
+        vad_segments: list[Segment],
+    ) -> list[SentenceInfo]:
+        """Assign global speakers and punctuation without changing segment IDs.
+
+        The ordinary full-file pipeline may split a sentence at speaker turns.
+        An incremental upload has already persisted each sentence, so this path
+        projects the final diarization back onto those stable sentence records.
+        """
+        finalized = copy.deepcopy(sentence_info)
+
+        if self.spk is not None and finalized:
+            diarized = self._run_spk(
+                audio,
+                copy.deepcopy(finalized),
+                vad_segments,
+            )
+            for sentence in finalized:
+                candidates = [
+                    (
+                        min(sentence.end, candidate.end)
+                        - max(sentence.start, candidate.start),
+                        candidate.speaker,
+                    )
+                    for candidate in diarized
+                    if candidate.speaker is not None
+                    and min(sentence.end, candidate.end)
+                    > max(sentence.start, candidate.start)
+                ]
+                if candidates:
+                    sentence.speaker = max(candidates, key=lambda item: item[0])[1]
+
+        if (
+            self.punc is not None
+            and not getattr(self.asr, "has_native_punctuation", False)
+        ):
+            finalized = self._run_punc(finalized)
+
+        return finalized
 
     def summarize_meeting(
         self,
