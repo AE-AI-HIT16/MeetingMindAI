@@ -37,8 +37,11 @@ MAX_LLM_INPUT_CHARS = 8000
 MAX_CHARS_PER_CHUNK = 6000
 SAMPLE_CHARS_FOR_PLAN = 4000
 MAX_LABEL_CHARS = 200
-MAX_MAP_TOKENS = 1200
+MAX_MAP_TOKENS = 1600
+MAX_REDUCE_TOKENS = 1600
 MAX_PLAN_TOKENS = 2048
+MAX_MEDIUM_FALLBACK_TOKENS = 4096
+GPT_OSS_MODEL_PREFIX = "openai/gpt-oss-"
 VI_SYSTEM_PROMPT = (
     "Mọi nội dung bạn tạo phải bằng tiếng Việt, có căn cứ từ nguồn và "
     "không được biến lỗi transcript thành dữ kiện."
@@ -151,9 +154,7 @@ class DocumentPlanner:
 
     def plan_only(self, transcript_sample: str) -> tuple[str, list[dict[str, str]]]:
         """Run only the plan step for the realtime document stream."""
-        safe_sample = (
-            transcript_sample if isinstance(transcript_sample, str) else ""
-        )
+        safe_sample = transcript_sample if isinstance(transcript_sample, str) else ""
         return self._plan(safe_sample)
 
     def write_one_section(
@@ -249,23 +250,57 @@ class DocumentPlanner:
             sections_list=sections_list,
             chunk=chunk,
         )
+        response: object = ""
         try:
-            # We explicitly ask for JSON in the prompt, so we can parse it even
-            # if response_format=json_object is not strictly supported by the LLM.
-            response = self.client.chat(
-                prompt,
-                system=self._system_prompt,
-                temperature=self.temperature,
-                max_tokens=self.max_tokens,
-            )
-            return _parse_json_object(response)
-        except Exception as exc:
+            call_kwargs: dict[str, Any] = {
+                "system": self._system_prompt,
+                "temperature": self.temperature,
+                "max_tokens": min(self.max_tokens, MAX_MAP_TOKENS),
+                "response_format": PLAN_RESPONSE_FORMAT,
+            }
+            reasoning_effort = self._reasoning_effort()
+            if reasoning_effort:
+                call_kwargs["reasoning_effort"] = reasoning_effort
+            response = self.client.chat(prompt, **call_kwargs)
+            return self._validate_multi_write_response(response, outline)
+        except Exception as primary_exc:
+            partial = self._usable_multi_write_partial(response, outline)
+            if self._reasoning_effort() == "low":
+                logger.warning(
+                    "Low-reasoning multi-write failed (%s); " "retrying once with medium.",
+                    primary_exc,
+                )
+                try:
+                    return self._retry_multi_write_with_medium(prompt, outline)
+                except Exception as fallback_exc:
+                    logger.warning(
+                        "Medium-reasoning multi-write fallback failed: %s",
+                        fallback_exc,
+                    )
+            if partial:
+                return partial
             logger.warning(
                 "Multi-write step failed (chunk length %d): %s",
                 len(chunk),
-                exc,
+                primary_exc,
             )
             return {}
+
+    def _retry_multi_write_with_medium(
+        self,
+        prompt: str,
+        outline: list[dict[str, str]],
+    ) -> dict[str, str]:
+        """Retry one failed GPT-OSS map with a larger medium budget."""
+        response = self.client.chat(
+            prompt,
+            system=self._system_prompt,
+            temperature=self.temperature,
+            max_tokens=MAX_MEDIUM_FALLBACK_TOKENS,
+            response_format=PLAN_RESPONSE_FORMAT,
+            reasoning_effort="medium",
+        )
+        return self._validate_multi_write_response(response, outline)
 
     def _reduce(
         self,
@@ -281,8 +316,7 @@ class DocumentPlanner:
         )
         data_budget = self._reduce_data_budget(section, content_kind)
         reduce_data = (
-            f"{merge_note}\n\n"
-            f"{bounded_join(drafts, data_budget - len(merge_note) - 2)}"
+            f"{merge_note}\n\n" f"{bounded_join(drafts, data_budget - len(merge_note) - 2)}"
         )
         prompt = self._prompts["reduce_section"].format(
             content_kind=content_kind,
@@ -291,20 +325,92 @@ class DocumentPlanner:
             chunk=reduce_data,
         )
         try:
-            response = self.client.chat(
-                prompt,
-                system=self._system_prompt,
-                temperature=self.temperature,
-                max_tokens=self.max_tokens,
-            )
-            return response.strip() if isinstance(response, str) else joined
-        except Exception as exc:
+            call_kwargs: dict[str, Any] = {
+                "system": self._system_prompt,
+                "temperature": self.temperature,
+                "max_tokens": min(self.max_tokens, MAX_REDUCE_TOKENS),
+            }
+            reasoning_effort = self._reasoning_effort()
+            if reasoning_effort:
+                call_kwargs["reasoning_effort"] = reasoning_effort
+            response = self.client.chat(prompt, **call_kwargs)
+            if not isinstance(response, str) or not response.strip():
+                raise ValueError("reduce returned empty content")
+            return response.strip()
+        except Exception as primary_exc:
+            if self._reasoning_effort() == "low":
+                logger.warning(
+                    "Low-reasoning reduce failed for section '%s' (%s); "
+                    "retrying once with medium.",
+                    section["heading"],
+                    primary_exc,
+                )
+                try:
+                    return self._retry_reduce_with_medium(prompt)
+                except Exception as fallback_exc:
+                    logger.warning(
+                        "Medium-reasoning reduce fallback failed for section '%s': %s",
+                        section["heading"],
+                        fallback_exc,
+                    )
             logger.warning(
                 "Reduce step failed for section '%s': %s",
                 section["heading"],
-                exc,
+                primary_exc,
             )
             return joined
+
+    def _retry_reduce_with_medium(self, prompt: str) -> str:
+        """Retry one failed GPT-OSS reduce with a larger medium budget."""
+        response = self.client.chat(
+            prompt,
+            system=self._system_prompt,
+            temperature=self.temperature,
+            max_tokens=MAX_MEDIUM_FALLBACK_TOKENS,
+            reasoning_effort="medium",
+        )
+        if not isinstance(response, str) or not response.strip():
+            raise ValueError("medium reduce returned empty content")
+        return response.strip()
+
+    def _validate_multi_write_response(
+        self,
+        response: object,
+        outline: list[dict[str, str]],
+    ) -> dict[str, str]:
+        """Require valid JSON with one string value for every planned section."""
+        data = _parse_json_object(response)
+        expected_ids = [section["id"] for section in outline]
+        missing = [section_id for section_id in expected_ids if section_id not in data]
+        if missing:
+            raise ValueError(f"multi-write response is missing section IDs: {missing}")
+        invalid = [
+            section_id for section_id in expected_ids if not isinstance(data[section_id], str)
+        ]
+        if invalid:
+            raise ValueError(f"multi-write response has non-string sections: {invalid}")
+        return {section_id: data[section_id] for section_id in expected_ids}
+
+    def _usable_multi_write_partial(
+        self,
+        response: object,
+        outline: list[dict[str, str]],
+    ) -> dict[str, str]:
+        """Preserve valid string sections if a completeness fallback fails."""
+        try:
+            data = _parse_json_object(response)
+        except Exception:
+            return {}
+        return {
+            section["id"]: data[section["id"]]
+            for section in outline
+            if isinstance(data.get(section["id"]), str)
+        }
+
+    def _reasoning_effort(self) -> str | None:
+        """Use the tested low-reasoning budget only for Groq GPT-OSS models."""
+        model = safe_text(getattr(self.client, "model", ""), "").lower()
+        return "low" if model.startswith(GPT_OSS_MODEL_PREFIX) else None
 
     def _representative_sample(self, text: str, max_chars: int) -> str:
         return representative_sample(text, max_chars)
@@ -314,9 +420,7 @@ class DocumentPlanner:
         if result.sentence_info:
             lines = []
             for sentence in result.sentence_info:
-                speaker = "" if sentence.speaker is None else (
-                    f"Speaker {sentence.speaker}: "
-                )
+                speaker = "" if sentence.speaker is None else (f"Speaker {sentence.speaker}: ")
                 timestamp = format_time_range(sentence.start, sentence.end)
                 lines.append(f"{timestamp} {speaker}{sentence.text}")
             return "\n".join(lines)

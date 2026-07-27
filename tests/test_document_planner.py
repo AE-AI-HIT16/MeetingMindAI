@@ -11,6 +11,8 @@ import meetasr.llm.planner as planner_module
 from meetasr.llm.abs_llm import AbsLLMClient
 from meetasr.llm.planner import (
     MAX_LLM_INPUT_CHARS,
+    MAX_MAP_TOKENS,
+    MAX_REDUCE_TOKENS,
     DocumentPlanner,
     _parse_json_object,
 )
@@ -109,6 +111,7 @@ def _is_multi_write(prompt: str) -> bool:
 
 def test_plan_and_write_uses_plan_then_write() -> None:
     """Even a short transcript follows the documented Plan → Write path."""
+
     def handler(prompt: str) -> str:
         if _is_plan(prompt):
             return _outline_response()
@@ -171,8 +174,158 @@ def test_long_transcript_runs_map_reduce_for_every_section(
     assert sum(_is_reduce(prompt) for prompt in client.calls) == section_count
 
 
+def test_gpt_oss_map_reduce_use_tested_phase_budgets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """GPT-OSS map/reduce calls use low reasoning and bounded completions."""
+    monkeypatch.setattr(planner_module, "MAX_CHARS_PER_CHUNK", 180)
+
+    def handler(prompt: str) -> str:
+        if _is_plan(prompt):
+            return _outline_response()
+        if _is_reduce(prompt):
+            return "Bản hoàn chỉnh."
+        return _multi_write_response()
+
+    client = StubLLMClient(handler)
+    client.model = "openai/gpt-oss-20b"
+    DocumentPlanner(client=client, max_tokens=4096).plan_and_write(_transcript(lines=30))
+
+    plan_kwargs = [
+        kwargs for prompt, kwargs in zip(client.calls, client.call_kwargs) if _is_plan(prompt)
+    ]
+    map_kwargs = [
+        kwargs
+        for prompt, kwargs in zip(client.calls, client.call_kwargs)
+        if _is_multi_write(prompt)
+    ]
+    reduce_kwargs = [
+        kwargs for prompt, kwargs in zip(client.calls, client.call_kwargs) if _is_reduce(prompt)
+    ]
+
+    assert plan_kwargs[0]["max_tokens"] == 2048
+    assert "reasoning_effort" not in plan_kwargs[0]
+    assert map_kwargs
+    assert reduce_kwargs
+    assert all(kwargs["max_tokens"] == MAX_MAP_TOKENS for kwargs in map_kwargs)
+    assert all(kwargs["response_format"] == {"type": "json_object"} for kwargs in map_kwargs)
+    assert all(kwargs["reasoning_effort"] == "low" for kwargs in map_kwargs)
+    assert all(kwargs["max_tokens"] == MAX_REDUCE_TOKENS for kwargs in reduce_kwargs)
+    assert all(kwargs["reasoning_effort"] == "low" for kwargs in reduce_kwargs)
+    assert all("response_format" not in kwargs for kwargs in reduce_kwargs)
+
+
+def test_configured_max_tokens_remains_a_lower_planner_ceiling() -> None:
+    """An explicitly lower global budget is not increased by phase defaults."""
+    client = StubLLMClient(
+        lambda prompt: (_outline_response() if _is_plan(prompt) else _multi_write_response())
+    )
+    DocumentPlanner(client=client, max_tokens=900).plan_and_write(_transcript())
+
+    map_kwargs = next(
+        kwargs
+        for prompt, kwargs in zip(client.calls, client.call_kwargs)
+        if _is_multi_write(prompt)
+    )
+    assert map_kwargs["max_tokens"] == 900
+
+
+def test_gpt_oss_map_retries_invalid_low_output_with_medium() -> None:
+    """Missing map keys trigger one higher-budget medium fallback."""
+
+    class MapFallbackClient(StubLLMClient):
+        model = "openai/gpt-oss-20b"
+
+        def chat(self, prompt: str, **kwargs) -> str:
+            self.calls.append(prompt)
+            self.call_kwargs.append(kwargs)
+            if _is_plan(prompt):
+                return _outline_response()
+            if kwargs.get("reasoning_effort") == "low":
+                return '{"s1": "Thiếu các section còn lại."}'
+            return _multi_write_response()
+
+    client = MapFallbackClient(lambda prompt: "")
+    report = DocumentPlanner(client=client).plan_and_write(_transcript())
+    map_kwargs = [
+        kwargs
+        for prompt, kwargs in zip(client.calls, client.call_kwargs)
+        if _is_multi_write(prompt)
+    ]
+
+    assert len(report.sections) == 4
+    assert [kwargs["reasoning_effort"] for kwargs in map_kwargs] == [
+        "low",
+        "medium",
+    ]
+    assert [kwargs["max_tokens"] for kwargs in map_kwargs] == [1600, 4096]
+
+
+def test_failed_medium_map_fallback_preserves_usable_low_sections() -> None:
+    """A failed fallback must not discard valid keys from the low response."""
+
+    class PartialFallbackClient(StubLLMClient):
+        model = "openai/gpt-oss-20b"
+
+        def chat(self, prompt: str, **kwargs) -> str:
+            self.calls.append(prompt)
+            self.call_kwargs.append(kwargs)
+            if _is_plan(prompt):
+                return _outline_response()
+            if kwargs.get("reasoning_effort") == "low":
+                return '{"s1": "Tổng quan low còn sử dụng được."}'
+            return "medium fallback invalid"
+
+    report = DocumentPlanner(client=PartialFallbackClient(lambda prompt: "")).plan_and_write(
+        _transcript()
+    )
+
+    assert len(report.sections) == 1
+    assert report.sections[0].markdown == "Tổng quan low còn sử dụng được."
+
+
+def test_gpt_oss_reduce_retries_empty_low_output_with_medium(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An empty low-reasoning reduce gets one usable medium fallback."""
+    monkeypatch.setattr(planner_module, "MAX_CHARS_PER_CHUNK", 180)
+
+    class ReduceFallbackClient(StubLLMClient):
+        model = "openai/gpt-oss-20b"
+
+        def chat(self, prompt: str, **kwargs) -> str:
+            self.calls.append(prompt)
+            self.call_kwargs.append(kwargs)
+            if _is_plan(prompt):
+                return _outline_response()
+            if _is_reduce(prompt):
+                if kwargs.get("reasoning_effort") == "low":
+                    return ""
+                return "Bản medium hoàn chỉnh."
+            return _multi_write_response()
+
+    client = ReduceFallbackClient(lambda prompt: "")
+    report = DocumentPlanner(client=client).plan_and_write(_transcript(lines=30))
+    reduce_kwargs = [
+        kwargs for prompt, kwargs in zip(client.calls, client.call_kwargs) if _is_reduce(prompt)
+    ]
+
+    assert len(report.sections) == 4
+    assert all(section.markdown == "Bản medium hoàn chỉnh." for section in report.sections)
+    assert len(reduce_kwargs) == 8
+    assert [kwargs["reasoning_effort"] for kwargs in reduce_kwargs[:2]] == [
+        "low",
+        "medium",
+    ]
+    assert [kwargs["max_tokens"] for kwargs in reduce_kwargs[:2]] == [
+        1600,
+        4096,
+    ]
+
+
 def test_empty_written_section_is_removed() -> None:
     """A section with no grounded content must not appear in the report."""
+
     def handler(prompt: str) -> str:
         if _is_plan(prompt):
             return _outline_response(
@@ -198,18 +351,15 @@ def test_empty_written_section_is_removed() -> None:
             }
         )
 
-    report = DocumentPlanner(client=StubLLMClient(handler)).plan_and_write(
-        _transcript()
-    )
+    report = DocumentPlanner(client=StubLLMClient(handler)).plan_and_write(_transcript())
 
-    assert "Điều chỉnh nhân sự" not in [
-        section.heading for section in report.sections
-    ]
+    assert "Điều chỉnh nhân sự" not in [section.heading for section in report.sections]
     assert len(report.sections) == 2
 
 
 def test_invalid_plan_falls_back_without_crashing() -> None:
     """Malformed plan JSON degrades to the required report outline."""
+
     def handler(prompt: str) -> str:
         if _is_multi_write(prompt):
             return _multi_write_response(
@@ -233,6 +383,7 @@ def test_invalid_plan_falls_back_without_crashing() -> None:
 @pytest.mark.parametrize("first_response", ["", "{}"])
 def test_unusable_plan_is_regenerated_from_transcript(first_response: str) -> None:
     """Empty or incomplete completions trigger fresh planning from the source."""
+
     def handler(prompt: str) -> str:
         if _is_plan(prompt):
             return first_response
@@ -288,12 +439,10 @@ def test_generic_sections_are_replaced_by_concrete_topics() -> None:
 
 def test_invalid_plan_json_is_repaired_before_fallback() -> None:
     """A syntax-only JSON failure gets one deterministic repair attempt."""
+
     def handler(prompt: str) -> str:
         if _is_plan(prompt):
-            return (
-                '{"content_kind": "Phân tích bán kết và chung kết" '
-                '"outline": []}'
-            )
+            return '{"content_kind": "Phân tích bán kết và chung kết" ' '"outline": []}'
         if "JSON kế hoạch dưới đây bị lỗi cú pháp" in prompt:
             return _outline_response("Phân tích bán kết và chung kết")
         return _multi_write_response()
@@ -303,10 +452,7 @@ def test_invalid_plan_json_is_repaired_before_fallback() -> None:
 
     assert report.content_kind == "Phân tích bán kết và chung kết"
     assert len(report.sections) == 4
-    assert sum(
-        "JSON kế hoạch dưới đây bị lỗi cú pháp" in prompt
-        for prompt in client.calls
-    ) == 1
+    assert sum("JSON kế hoạch dưới đây bị lỗi cú pháp" in prompt for prompt in client.calls) == 1
     assert client.call_kwargs[0]["temperature"] == 0.0
     assert client.call_kwargs[1]["temperature"] == 0.0
     assert client.call_kwargs[0]["response_format"] == {"type": "json_object"}
@@ -315,6 +461,7 @@ def test_invalid_plan_json_is_repaired_before_fallback() -> None:
 
 def test_missing_multi_write_section_returns_partial_document() -> None:
     """An empty value in a multi-write response omits only that section."""
+
     def handler(prompt: str) -> str:
         if _is_plan(prompt):
             return _outline_response(
@@ -340,13 +487,9 @@ def test_missing_multi_write_section_returns_partial_document() -> None:
             }
         )
 
-    report = DocumentPlanner(client=StubLLMClient(handler)).plan_and_write(
-        _transcript()
-    )
+    report = DocumentPlanner(client=StubLLMClient(handler)).plan_and_write(_transcript())
 
-    assert "Điều chỉnh nhân sự" not in [
-        section.heading for section in report.sections
-    ]
+    assert "Điều chỉnh nhân sự" not in [section.heading for section in report.sections]
     assert len(report.sections) == 2
 
 
@@ -379,9 +522,9 @@ def test_reduce_failure_preserves_chunk_drafts(
                 }
             )
 
-    report = DocumentPlanner(
-        client=FailingReduceClient(lambda prompt: "")
-    ).plan_and_write(_transcript(lines=20))
+    report = DocumentPlanner(client=FailingReduceClient(lambda prompt: "")).plan_and_write(
+        _transcript(lines=20)
+    )
 
     assert len(report.sections) == 2
     assert report.sections[0].markdown.count("Bản nháp có căn cứ.") > 1
@@ -401,6 +544,7 @@ def test_empty_transcript_skips_llm() -> None:
 
 def test_plan_only_and_write_one_section_support_realtime() -> None:
     """Realtime code can plan once and write one section incrementally."""
+
     def handler(prompt: str) -> str:
         if _is_plan(prompt):
             return _outline_response("Bài giảng")
@@ -498,9 +642,9 @@ def test_report_title_is_not_overlong() -> None:
     """LLM titles are bounded to fourteen words."""
     long_title = " ".join(f"từ{index}" for index in range(20))
     client = StubLLMClient(
-        lambda prompt: _outline_response(long_title)
-        if _is_plan(prompt)
-        else _multi_write_response()
+        lambda prompt: (
+            _outline_response(long_title) if _is_plan(prompt) else _multi_write_response()
+        )
     )
     report = DocumentPlanner(client=client).plan_and_write(_transcript())
 
@@ -611,9 +755,7 @@ def test_parse_json_object_variants() -> None:
 def test_document_report_serialization() -> None:
     """The generic schema emits JSON and Markdown without Phase 1 fields."""
     client = StubLLMClient(
-        lambda prompt: (
-            _outline_response() if _is_plan(prompt) else _multi_write_response()
-        )
+        lambda prompt: (_outline_response() if _is_plan(prompt) else _multi_write_response())
     )
     report = DocumentPlanner(client=client).plan_and_write(_transcript())
 
