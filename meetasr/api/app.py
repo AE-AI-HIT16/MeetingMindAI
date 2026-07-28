@@ -16,6 +16,7 @@ from fastapi.responses import JSONResponse
 from meetasr import __version__
 from meetasr.api.dependencies import CONFIG_PATH, set_pipeline
 from meetasr.api.routes import (
+    auth,
     db_routes,
     document,
     document_jobs,
@@ -116,6 +117,7 @@ app.add_middleware(
 
 # Register route modules
 app.include_router(health.router)
+app.include_router(auth.router)       # POST /v1/auth/google, GET /v1/auth/me
 app.include_router(transcribe.router)
 app.include_router(summarize.router)
 app.include_router(db_routes.router)
