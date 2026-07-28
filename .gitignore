@@ -66,3 +66,12 @@ test_fe.html
 frontend-next/.pnpm-store/
 
 .pnpm-store/
+
+# Environment files — chua credentials, TUYET DOI khong commit
+.env
+.env.local
+.env.*.local
+*.env
+
+node_modules/
+package-lock.json
