@@ -47,6 +47,7 @@ def init_db() -> None:
     # trước khi tiến hành create_all.
     import meetasr.db.models  # noqa: F401
     import meetasr.db.models_phase2  # noqa: F401
+    import meetasr.db.user_model  # noqa: F401  -- bang users
     SQLModel.metadata.create_all(engine)
     _ensure_unique_documents()
     logger.info("Đã khởi tạo các bảng trong cơ sở dữ liệu.")

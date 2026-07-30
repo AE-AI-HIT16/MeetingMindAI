@@ -17,7 +17,7 @@ import mimetypes
 from typing import Annotated, List, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import RedirectResponse, StreamingResponse
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
@@ -120,13 +120,22 @@ class SourceResponse(BaseModel):
 # GET /v1/sources — danh sách tất cả Source (trang Library)
 # ---------------------------------------------------------------------------
 
-@router.get("", response_model=List[SourceResponse])
-def list_sources(db: Annotated[Session, Depends(get_db)]) -> List[SourceResponse]:
-    """Trả về danh sách tất cả Source, sắp xếp mới nhất lên trước.
+from meetasr.api.auth_deps import get_current_user
+from meetasr.db.user_model import User
 
-    Frontend-next dùng endpoint này để render trang Library (``app/page.tsx``).
-    """
-    sources = db.exec(select(Source).order_by(Source.created_at.desc())).all()  # type: ignore[arg-type]
+@router.get("", response_model=List[SourceResponse])
+def list_sources(
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[Optional[User], Depends(get_current_user)],
+) -> List[SourceResponse]:
+    """Trả về danh sách tất cả Source của người dùng hiện tại."""
+    if not current_user:
+        return []
+    sources = db.exec(
+        select(Source)
+        .where(Source.user_id == current_user.id)
+        .order_by(Source.created_at.desc())
+    ).all()
     return [SourceResponse.from_orm(s) for s in sources]
 
 
@@ -139,6 +148,7 @@ async def create_source(
     file: Annotated[UploadFile, File(description="File audio hoặc video cần xử lý.")],
     db: Annotated[Session, Depends(get_db)],
     storage: Annotated[StorageBackend, Depends(get_storage_backend)],
+    current_user: Annotated[Optional[User], Depends(get_current_user)],
 ) -> CreateSourceResponse:
     """Upload file media, lưu vào Storage, tạo Source và Job trong DB.
 
@@ -187,6 +197,7 @@ async def create_source(
         filename=file.filename,
         media_type=media_type,
         storage_path=storage_key,
+        user_id=current_user.id if current_user else None,
     )
     db.add(source)
     db.flush()  # để có source.id trước khi tạo Job
@@ -214,22 +225,21 @@ async def create_source(
 def get_source(
     source_id: str,
     db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[Optional[User], Depends(get_current_user)],
 ) -> SourceResponse:
-    """Trả về chi tiết một Source theo ID.
-
-    Args:
-        source_id: UUID của Source.
-        db:        DB session.
-
-    Raises:
-        HTTPException 404: Nếu Source không tồn tại.
-    """
+    """Trả về chi tiết một Source theo ID."""
     source = db.get(Source, source_id)
     if source is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Source '{source_id}' không tồn tại.",
         )
+    if source.user_id is not None:
+        if current_user is None or source.user_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Bạn không có quyền truy cập file này.",
+            )
     return SourceResponse.from_orm(source)
 
 
@@ -243,37 +253,57 @@ async def stream_media(
     request: Request,
     db: Annotated[Session, Depends(get_db)],
     storage: Annotated[StorageBackend, Depends(get_storage_backend)],
-) -> StreamingResponse:
-    """Phục vụ file audio/video với hỗ trợ HTTP Range (cho phép tua video).
+):
+    """Phu vu file audio/video.
 
-    Trình duyệt dùng thẻ ``<video>`` / ``<audio>`` gọi endpoint này.
-    HTTP Range cho phép tua tới bất kỳ vị trí nào trong file mà không cần
-    tải toàn bộ lên RAM.
+    Hanh vi phu thuoc vao backend:
+      - S3/MinIO (needs_redirect=True): HTTP 307 redirect sang presigned URL.
+        Trinh duyet stream thang tu MinIO, FastAPI khong can doc bytes.
+      - Local (needs_redirect=False): doc bytes tu disk, stream voi HTTP Range.
 
     Args:
-        source_id: UUID của Source.
-        request:   Request gốc (để đọc header Range).
+        source_id: UUID cua Source.
+        request:   Request goc (doc header Range cho local backend).
         db:        DB session.
-        storage:   Storage backend.
+        storage:   Storage backend hien tai.
 
     Raises:
-        HTTPException 404: Source không tồn tại hoặc file không tìm thấy.
-        HTTPException 416: Range không hợp lệ.
+        HTTPException 404: Source khong ton tai hoac file khong tim thay.
+        HTTPException 416: Range header khong hop le (chi local backend).
     """
     source = db.get(Source, source_id)
     if source is None:
-        raise HTTPException(status_code=404, detail=f"Source '{source_id}' không tồn tại.")
+        raise HTTPException(
+            status_code=404, detail=f"Source '{source_id}' khong ton tai."
+        )
 
-    # Đọc toàn bộ bytes từ storage (phù hợp dev/local; MinIO nên dùng presigned URL)
+    # --- S3/MinIO: redirect sang presigned URL ---
+    if storage.needs_redirect():
+        try:
+            url = storage.public_url(source.storage_path)
+        except Exception as exc:
+            logger.error(
+                "Khong the tao presigned URL cho '%s': %s", source.storage_path, exc
+            )
+            raise HTTPException(
+                status_code=500, detail="Khong the tao URL xem media."
+            ) from exc
+        logger.info("Media redirect: source=%s -> presigned URL", source_id)
+        return RedirectResponse(url=url, status_code=307)
+
+    # --- Local: doc bytes tu disk va stream voi HTTP Range ---
     try:
         data = await storage.load(source.storage_path)
     except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="File không tìm thấy trong storage.")
+        raise HTTPException(
+            status_code=404, detail="File khong tim thay trong storage."
+        )
 
     total_size = len(data)
-    mime_type = mimetypes.guess_type(source.filename)[0] or "application/octet-stream"
+    mime_type = (
+        mimetypes.guess_type(source.filename)[0] or "application/octet-stream"
+    )
 
-    # Xử lý HTTP Range request (để trình duyệt tua được video)
     range_header = request.headers.get("Range")
     if range_header:
         try:
@@ -282,26 +312,28 @@ async def stream_media(
             start = int(start_str)
             end = int(end_str) if end_str else total_size - 1
         except ValueError:
-            raise HTTPException(status_code=416, detail="Range header không hợp lệ.")
+            raise HTTPException(
+                status_code=416, detail="Range header khong hop le."
+            )
 
         if start >= total_size or end >= total_size or start > end:
-            raise HTTPException(status_code=416, detail="Range vượt quá kích thước file.")
+            raise HTTPException(
+                status_code=416, detail="Range vuot qua kich thuoc file."
+            )
 
         chunk = data[start : end + 1]
-        headers = {
-            "Content-Range": f"bytes {start}-{end}/{total_size}",
-            "Accept-Ranges": "bytes",
-            "Content-Length": str(len(chunk)),
-            "Content-Type": mime_type,
-        }
         return StreamingResponse(
             iter([chunk]),
             status_code=206,
-            headers=headers,
+            headers={
+                "Content-Range": f"bytes {start}-{end}/{total_size}",
+                "Accept-Ranges": "bytes",
+                "Content-Length": str(len(chunk)),
+                "Content-Type": mime_type,
+            },
             media_type=mime_type,
         )
 
-    # Không có Range → trả toàn bộ file
     return StreamingResponse(
         iter([data]),
         status_code=200,
@@ -314,6 +346,7 @@ async def stream_media(
     )
 
 
+
 # ---------------------------------------------------------------------------
 # DELETE /v1/sources/{source_id} — xóa cascade Source
 # ---------------------------------------------------------------------------
@@ -323,27 +356,21 @@ async def delete_source(
     source_id: str,
     db: Annotated[Session, Depends(get_db)],
     storage: Annotated[StorageBackend, Depends(get_storage_backend)],
+    current_user: Annotated[Optional[User], Depends(get_current_user)],
 ) -> None:
-    """Xóa Source cùng toàn bộ dữ liệu liên quan (cascade).
-
-    Thứ tự xóa:
-        1. Xóa file vật lý trên Storage (local disk hoặc MinIO).
-        2. Xóa bản ghi Source trong DB (Job + Segments + Documents tự xóa cascade).
-
-    Args:
-        source_id: UUID của Source cần xóa.
-        db:        DB session.
-        storage:   Storage backend.
-
-    Raises:
-        HTTPException 404: Nếu Source không tồn tại.
-    """
+    """Xóa Source cùng toàn bộ dữ liệu liên quan (cascade)."""
     source = db.get(Source, source_id)
     if source is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Source '{source_id}' không tồn tại.",
         )
+    if source.user_id is not None:
+        if current_user is None or source.user_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Bạn không có quyền xóa file này.",
+            )
 
     # Bước 1: Xóa file khỏi storage (idempotent — không lỗi nếu file đã mất)
     try:
