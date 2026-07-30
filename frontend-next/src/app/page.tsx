@@ -1,10 +1,44 @@
 import Link from "next/link";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 import { SourceCard } from "@/components/SourceCard";
 import { PageHeader } from "@/components/ui";
 import { APIError, listSources } from "@/lib/api";
 
 export default async function LibraryPage() {
-  const { sources, loadError } = await listSources()
+  const session = await getServerSession(authOptions);
+  const token = (session as any)?.accessToken;
+
+  // Nếu là khách, không tải library
+  if (!session) {
+    return (
+      <div className="mx-auto w-full max-w-6xl px-6 py-10 md:px-10">
+        <PageHeader eyebrow="Thư viện · MeetingMind" title="Tài liệu của bạn" />
+        <div className="mt-8 flex flex-col items-center justify-center rounded-2xl border border-line bg-surface py-20 text-center">
+          <h3 className="font-display text-xl font-medium text-ink">Bạn đang sử dụng ẩn danh</h3>
+          <p className="mt-2 max-w-md text-sm text-ink-soft">
+            Ở chế độ khách, tài liệu không được lưu trữ. Vui lòng đăng nhập để quản lý thư viện của bạn.
+          </p>
+          <div className="mt-6 flex gap-3">
+            <Link
+              href="/upload"
+              className="rounded-xl bg-ink px-5 py-2.5 text-sm font-medium text-white transition hover:bg-ink/90"
+            >
+              Tiếp tục ẩn danh
+            </Link>
+            <Link
+              href="/login"
+              className="rounded-xl border border-line bg-surface px-5 py-2.5 text-sm font-medium text-ink transition hover:bg-surface-2"
+            >
+              Đăng nhập
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const { sources, loadError } = await listSources(token)
     .then((items) => ({ sources: items, loadError: null }))
     .catch((error: unknown) => ({
       sources: [],
