@@ -10,6 +10,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
+from sqlalchemy import UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 
@@ -18,17 +19,21 @@ def _new_uuid() -> str:
 
 
 class User(SQLModel, table=True):
-    """Lưu trữ thông tin người dùng đã xác thực qua Google OAuth."""
+    """Lưu trữ thông tin người dùng đã xác thực qua OAuth."""
 
     __tablename__ = "users"
+    __table_args__ = (
+        UniqueConstraint("provider", "provider_id", name="uq_provider_id"),
+    )
 
     id: str = Field(default_factory=_new_uuid, primary_key=True)
 
-    # Thông tin từ Google id_token
-    google_id: str = Field(unique=True, index=True)   # "sub" claim — bất biến
+    # Xác thực OAuth
+    provider: str = Field(index=True)         # "google", "github"
+    provider_id: str = Field(index=True)      # ID trả về từ provider
     email: str = Field(index=True)
     name: str
-    avatar_url: Optional[str] = None                  # "picture" claim
+    avatar_url: Optional[str] = None          # Ảnh đại diện
 
     created_at: datetime = Field(default_factory=datetime.utcnow)
     last_login_at: datetime = Field(default_factory=datetime.utcnow)
