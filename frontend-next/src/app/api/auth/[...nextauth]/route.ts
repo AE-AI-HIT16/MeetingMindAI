@@ -34,6 +34,12 @@ export const authOptions: NextAuthOptions = {
     signIn: "/login",
   },
 
+  // Duy trì đăng nhập: cookie tồn tại 30 ngày kể cả khi đóng trình duyệt
+  session: {
+    strategy: "jwt",
+    maxAge: 30 * 24 * 60 * 60, // 30 ngày (giây)
+  },
+
   callbacks: {
     async jwt({ token, account, user }) {
       const apiBase = process.env.MEETASR_API || "http://127.0.0.1:8000";
