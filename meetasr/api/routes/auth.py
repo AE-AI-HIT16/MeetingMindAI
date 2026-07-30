@@ -49,9 +49,14 @@ _GOOGLE_TOKENINFO_URL = "https://oauth2.googleapis.com/tokeninfo"
 # Pydantic schemas
 # ---------------------------------------------------------------------------
 
-class GoogleAuthRequest(BaseModel):
-    """Body của POST /v1/auth/google."""
-    id_token: str   # id_token lấy từ next-auth session.id_token
+class SyncUserRequest(BaseModel):
+    """Body của POST /v1/auth/sync."""
+    provider: str
+    provider_id: str
+    email: str
+    name: str
+    avatar_url: str | None = None
+    sync_secret: str  # Dùng để xác thực request từ Next.js
 
 
 class AuthResponse(BaseModel):
@@ -96,87 +101,54 @@ def _create_jwt(user: User) -> tuple[str, int]:
 
 
 # ---------------------------------------------------------------------------
-# POST /v1/auth/google — đổi Google id_token lấy JWT nội bộ
+# POST /v1/auth/sync — đồng bộ user từ NextAuth lấy JWT nội bộ
 # ---------------------------------------------------------------------------
 
-@router.post("/google", response_model=AuthResponse, status_code=status.HTTP_200_OK)
-async def login_with_google(
-    body: GoogleAuthRequest,
+@router.post("/sync", response_model=AuthResponse, status_code=status.HTTP_200_OK)
+async def sync_user(
+    body: SyncUserRequest,
     db: Annotated[Session, Depends(get_db)],
 ) -> AuthResponse:
-    """Xác thực người dùng bằng Google id_token và cấp JWT nội bộ.
+    """Đồng bộ User từ NextAuth và cấp JWT nội bộ.
 
-    Frontend gọi endpoint này ngay sau khi next-auth trả về session.
-    id_token là JWT do Google ký, chứa thông tin người dùng.
-
-    Args:
-        body: Body chứa ``id_token`` từ Google.
-        db:   DB session.
-
-    Returns:
-        ``AuthResponse`` gồm ``access_token`` (JWT nội bộ) và thông tin user.
-
-    Raises:
-        HTTPException 401: id_token không hợp lệ hoặc đã hết hạn.
-        HTTPException 502: Không thể kết nối tới Google để xác minh token.
+    Endpoint này chỉ được gọi từ server-side của Next.js (NextAuth callback).
+    Xác thực thông qua `sync_secret` khớp với `JWT_SECRET`.
     """
-    # Bước 1: Xác minh id_token với Google
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.get(
-                _GOOGLE_TOKENINFO_URL,
-                params={"id_token": body.id_token},
-            )
-    except httpx.RequestError as exc:
-        logger.error("Khong the ket noi toi Google tokeninfo: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Khong the xac minh token voi Google. Thu lai sau.",
-        ) from exc
-
-    if resp.status_code != 200:
+    if body.sync_secret != _JWT_SECRET:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Google id_token khong hop le hoac da het han.",
+            detail="Invalid sync secret.",
         )
 
-    google_data = resp.json()
-
-    # Bước 2: Trích xuất thông tin từ payload Google
-    google_id: str = google_data.get("sub", "")
-    email: str = google_data.get("email", "")
-    name: str = google_data.get("name", email.split("@")[0])
-    avatar_url: str | None = google_data.get("picture")
-
-    if not google_id or not email:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token thieu thong tin can thiet (sub hoac email).",
-        )
-
-    # Bước 3: Tìm User trong DB hoặc tạo mới
-    user = db.exec(select(User).where(User.google_id == google_id)).first()
+    # Tìm User trong DB
+    user = db.exec(
+        select(User)
+        .where(User.provider == body.provider)
+        .where(User.provider_id == body.provider_id)
+    ).first()
 
     if user is None:
         user = User(
-            google_id=google_id,
-            email=email,
-            name=name,
-            avatar_url=avatar_url,
+            provider=body.provider,
+            provider_id=body.provider_id,
+            email=body.email,
+            name=body.name,
+            avatar_url=body.avatar_url,
         )
         db.add(user)
-        logger.info("Tao User moi: email=%s google_id=%s", email, google_id)
+        logger.info("Tao User moi: provider=%s email=%s", body.provider, body.email)
     else:
-        # Cập nhật thông tin có thể thay đổi (tên, avatar)
-        user.name = name
-        user.avatar_url = avatar_url
+        # Cập nhật thông tin có thể thay đổi
+        user.name = body.name
+        user.email = body.email
+        user.avatar_url = body.avatar_url
         user.last_login_at = datetime.utcnow()
-        logger.info("User dang nhap lai: email=%s", email)
+        logger.info("User dang nhap lai: provider=%s email=%s", body.provider, body.email)
 
     db.commit()
     db.refresh(user)
 
-    # Bước 4: Ký JWT nội bộ và trả về
+    # Ký JWT nội bộ
     token, expires_in = _create_jwt(user)
 
     return AuthResponse(
@@ -189,6 +161,7 @@ async def login_with_google(
             avatar_url=user.avatar_url,
         ),
     )
+
 
 
 # ---------------------------------------------------------------------------

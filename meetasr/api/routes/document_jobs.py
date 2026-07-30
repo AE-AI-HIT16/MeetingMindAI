@@ -110,9 +110,15 @@ async def document_generation_events(
 
         while True:
             event = await queue.get()
-            await websocket.send_json(event)
+            try:
+                await websocket.send_json(event)
+            except Exception:
+                break
             if event.get("type") in {"document_done", "document_error"}:
-                await websocket.close()
+                try:
+                    await websocket.close()
+                except Exception:
+                    pass
                 return
     except WebSocketDisconnect:
         return

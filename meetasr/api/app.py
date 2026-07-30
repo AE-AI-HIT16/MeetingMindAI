@@ -9,6 +9,10 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
+from dotenv import load_dotenv
+env_path = r"D:\HIT_BTL_AI\MeetingMindAI\.env"
+load_dotenv(env_path, override=True)
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse

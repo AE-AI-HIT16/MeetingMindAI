@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Annotated
+from typing import Annotated, Optional
 
 import jwt
 from fastapi import Depends, HTTPException, status
@@ -28,29 +28,27 @@ logger = logging.getLogger(__name__)
 _JWT_SECRET = os.environ.get("JWT_SECRET", "change-me-in-production")
 _JWT_ALGORITHM = "HS256"
 
-_bearer = HTTPBearer(auto_error=True)
+# auto_error=False cho phép endpoint truy cập bằng Guest (không có token)
+_bearer = HTTPBearer(auto_error=False)
 
 
 def get_current_user(
-    credentials: Annotated[HTTPAuthorizationCredentials, Depends(_bearer)],
+    credentials: Annotated[Optional[HTTPAuthorizationCredentials], Depends(_bearer)],
     db: Annotated[Session, Depends(get_db)],
-) -> User:
-    """Xác minh Bearer JWT và trả về User tương ứng.
+) -> Optional[User]:
+    """Xác minh Bearer JWT và trả về User tương ứng (nếu có).
 
-    Dùng làm Dependency trong các endpoint cần đăng nhập:
-        ``current_user: User = Depends(get_current_user)``
-
-    Args:
-        credentials: Header ``Authorization: Bearer <token>``.
-        db:          DB session.
+    Dùng làm Dependency: ``current_user: User | None = Depends(get_current_user)``
 
     Returns:
-        User đã xác thực.
+        User đã xác thực hoặc None nếu là khách.
 
     Raises:
-        HTTPException 401: Token thiếu, hết hạn hoặc không hợp lệ.
-        HTTPException 401: User không tồn tại trong DB (đã bị xóa).
+        HTTPException 401: Token có truyền nhưng hết hạn hoặc không hợp lệ.
     """
+    if not credentials or not credentials.credentials:
+        return None
+
     token = credentials.credentials
     try:
         payload = jwt.decode(token, _JWT_SECRET, algorithms=[_JWT_ALGORITHM])
@@ -67,6 +65,7 @@ def get_current_user(
         )
 
     user = db.get(User, user_id)
+    # Nếu gửi JWT nhưng user không có trong DB thì chặn luôn.
     if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

@@ -120,13 +120,22 @@ class SourceResponse(BaseModel):
 # GET /v1/sources — danh sách tất cả Source (trang Library)
 # ---------------------------------------------------------------------------
 
-@router.get("", response_model=List[SourceResponse])
-def list_sources(db: Annotated[Session, Depends(get_db)]) -> List[SourceResponse]:
-    """Trả về danh sách tất cả Source, sắp xếp mới nhất lên trước.
+from meetasr.api.auth_deps import get_current_user
+from meetasr.db.user_model import User
 
-    Frontend-next dùng endpoint này để render trang Library (``app/page.tsx``).
-    """
-    sources = db.exec(select(Source).order_by(Source.created_at.desc())).all()  # type: ignore[arg-type]
+@router.get("", response_model=List[SourceResponse])
+def list_sources(
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[Optional[User], Depends(get_current_user)],
+) -> List[SourceResponse]:
+    """Trả về danh sách tất cả Source của người dùng hiện tại."""
+    if not current_user:
+        return []
+    sources = db.exec(
+        select(Source)
+        .where(Source.user_id == current_user.id)
+        .order_by(Source.created_at.desc())
+    ).all()
     return [SourceResponse.from_orm(s) for s in sources]
 
 
@@ -139,6 +148,7 @@ async def create_source(
     file: Annotated[UploadFile, File(description="File audio hoặc video cần xử lý.")],
     db: Annotated[Session, Depends(get_db)],
     storage: Annotated[StorageBackend, Depends(get_storage_backend)],
+    current_user: Annotated[Optional[User], Depends(get_current_user)],
 ) -> CreateSourceResponse:
     """Upload file media, lưu vào Storage, tạo Source và Job trong DB.
 
@@ -187,6 +197,7 @@ async def create_source(
         filename=file.filename,
         media_type=media_type,
         storage_path=storage_key,
+        user_id=current_user.id if current_user else None,
     )
     db.add(source)
     db.flush()  # để có source.id trước khi tạo Job
@@ -214,22 +225,21 @@ async def create_source(
 def get_source(
     source_id: str,
     db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[Optional[User], Depends(get_current_user)],
 ) -> SourceResponse:
-    """Trả về chi tiết một Source theo ID.
-
-    Args:
-        source_id: UUID của Source.
-        db:        DB session.
-
-    Raises:
-        HTTPException 404: Nếu Source không tồn tại.
-    """
+    """Trả về chi tiết một Source theo ID."""
     source = db.get(Source, source_id)
     if source is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Source '{source_id}' không tồn tại.",
         )
+    if source.user_id is not None:
+        if current_user is None or source.user_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Bạn không có quyền truy cập file này.",
+            )
     return SourceResponse.from_orm(source)
 
 
@@ -323,27 +333,21 @@ async def delete_source(
     source_id: str,
     db: Annotated[Session, Depends(get_db)],
     storage: Annotated[StorageBackend, Depends(get_storage_backend)],
+    current_user: Annotated[Optional[User], Depends(get_current_user)],
 ) -> None:
-    """Xóa Source cùng toàn bộ dữ liệu liên quan (cascade).
-
-    Thứ tự xóa:
-        1. Xóa file vật lý trên Storage (local disk hoặc MinIO).
-        2. Xóa bản ghi Source trong DB (Job + Segments + Documents tự xóa cascade).
-
-    Args:
-        source_id: UUID của Source cần xóa.
-        db:        DB session.
-        storage:   Storage backend.
-
-    Raises:
-        HTTPException 404: Nếu Source không tồn tại.
-    """
+    """Xóa Source cùng toàn bộ dữ liệu liên quan (cascade)."""
     source = db.get(Source, source_id)
     if source is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Source '{source_id}' không tồn tại.",
         )
+    if source.user_id is not None:
+        if current_user is None or source.user_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Bạn không có quyền xóa file này.",
+            )
 
     # Bước 1: Xóa file khỏi storage (idempotent — không lỗi nếu file đã mất)
     try:
