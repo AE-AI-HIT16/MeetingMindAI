@@ -1,5 +1,5 @@
 import type { SourceStatus } from "@/lib/types";
-import { speakerColor, speakerLabel } from "@/lib/format";
+import { getSpeakerStyle, speakerLabel } from "@/lib/format";
 
 /* ---------- Page header ---------- */
 export function PageHeader({
@@ -67,7 +67,7 @@ export function StatusBadge({ status }: { status: SourceStatus }) {
 
 /* ---------- Speaker chip ---------- */
 export function SpeakerChip({ speaker }: { speaker: number | null }) {
-  if (speaker === null) {
+  if (speaker === null || speaker === undefined) {
     return (
       <span className="font-mono text-xs text-ink-faint">
         Chưa xác định
@@ -75,15 +75,19 @@ export function SpeakerChip({ speaker }: { speaker: number | null }) {
     );
   }
 
-  const color = speakerColor(speaker);
+  const style = getSpeakerStyle(speaker);
   return (
     <span
-      className="inline-flex items-center gap-1.5 font-mono text-xs font-bold"
-      style={{ color }}
+      className="inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 font-mono text-xs font-semibold"
+      style={{
+        backgroundColor: style.bg,
+        color: style.color,
+        border: `1px solid ${style.border}`,
+      }}
     >
       <span
-        className="h-2 w-2 rounded-[3px]"
-        style={{ backgroundColor: color }}
+        className="h-1.5 w-1.5 rounded-full"
+        style={{ backgroundColor: style.color }}
       />
       {speakerLabel(speaker)}
     </span>

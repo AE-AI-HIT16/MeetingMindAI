@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRealtimeStream } from "@/lib/useRealtimeStream";
 import type { AudioSource, SentenceInfo } from "@/lib/useRealtimeStream";
-import { formatDuration } from "@/lib/format";
+import { formatDuration, formatStamp, getSpeakerStyle } from "@/lib/format";
 import { StatusBadge, Waveform } from "@/components/ui";
 
 // ----------------------------------------------------------------
@@ -175,13 +175,17 @@ export default function RealtimePage() {
             <div className="space-y-4">
               {transcripts.map((t, i) => (
                 <TranscriptBlock
-                  key={i}
+                  key={`${t.startMs}-${i}`}
                   text={t.text}
                   sentenceInfo={t.sentenceInfo}
                   index={i}
                   isLast={i === transcripts.length - 1}
                   isRecording={isRecording}
                   receivedAt={t.receivedAt}
+                  type={t.type}
+                  speaker={t.speaker}
+                  startMs={t.startMs}
+                  endMs={t.endMs}
                 />
               ))}
               <div ref={scrollRef} />
@@ -251,6 +255,10 @@ function TranscriptBlock({
   isLast,
   isRecording,
   receivedAt,
+  type,
+  speaker,
+  startMs,
+  endMs,
 }: {
   text: string;
   sentenceInfo: SentenceInfo[];
@@ -258,6 +266,10 @@ function TranscriptBlock({
   isLast: boolean;
   isRecording: boolean;
   receivedAt: number;
+  type: "transcript_delta" | "transcript_partial";
+  speaker: number | null;
+  startMs: number;
+  endMs: number;
 }) {
   const timeStr = new Date(receivedAt).toLocaleTimeString("vi-VN", {
     hour: "2-digit",
@@ -265,47 +277,122 @@ function TranscriptBlock({
     second: "2-digit",
   });
 
+  const isPartial = type === "transcript_partial";
+
   return (
     <div className="animate-transcript">
       <div className="flex items-start gap-3">
-        {/* Index badge */}
-        <span
-          className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-xs font-bold text-white"
-          style={{
-            background:
-              "linear-gradient(135deg, var(--color-brand), var(--color-spk-4))",
-          }}
-        >
-          {index + 1}
-        </span>
+        {/* Index / Speaker Badge */}
+        {isPartial ? (
+          <span
+            className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-xs font-bold text-white shadow-xs"
+            style={{
+              background: "linear-gradient(135deg, #9ca3af, #6b7280)",
+            }}
+          >
+            …
+          </span>
+        ) : (
+          <span
+            className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-xs font-bold text-white shadow-xs"
+            style={{
+              background: getSpeakerStyle(speaker).gradient,
+            }}
+          >
+            {speaker !== null && speaker !== undefined ? `S${speaker}` : index + 1}
+          </span>
+        )}
 
         <div className="min-w-0 flex-1">
-          {/* Timestamp */}
-          <span className="font-mono text-[11px] text-ink-faint">
-            {timeStr}
-          </span>
+          {/* Header row: timestamp & status badge */}
+          <div className="flex items-center gap-2">
+            <span className="font-mono text-[11px] text-ink-faint">
+              {formatStamp(startMs)} - {formatStamp(endMs)} ({timeStr})
+            </span>
+            {isPartial && (
+              <span className="rounded-md bg-gray-100 px-1.5 py-0.5 font-mono text-[10px] font-medium text-gray-500 border border-gray-200">
+                Tạm thời (Partial)
+              </span>
+            )}
+          </div>
 
-          {sentenceInfo.length > 0 ? (
-            <div className="mt-1 space-y-2">
-              {sentenceInfo.map((sentence, sentenceIndex) => (
-                <p key={`${sentence.start}-${sentenceIndex}`} className="text-[15px] leading-relaxed text-ink">
-                  <span className="mr-2 rounded bg-brand-wash px-1.5 py-0.5 text-xs font-semibold text-brand-ink">
-                    {sentence.speaker === null || sentence.speaker === undefined ? "Speaker" : `Speaker ${sentence.speaker}`}
-                  </span>
-                  {sentence.text}
-                </p>
-              ))}
-            </div>
-          ) : (
-            <p className={`mt-0.5 text-[15px] leading-relaxed text-ink ${isLast && isRecording ? "caret" : ""}`}>{text}</p>
-          )}
+          {/* Transcript Content */}
+          <div className="mt-1">
+            {isPartial ? (
+              /* Gray text for transcript_partial */
+              <p className="text-[15px] leading-relaxed text-gray-400 italic">
+                {text}
+              </p>
+            ) : (
+              /* Committed transcript_delta with speaker color coding */
+              <div className="space-y-1.5">
+                {sentenceInfo.length > 0 ? (
+                  sentenceInfo.map((sentence, sIdx) => {
+                    const spkNum =
+                      typeof sentence.speaker === "number"
+                        ? sentence.speaker
+                        : speaker;
+                    const style = getSpeakerStyle(spkNum);
+                    return (
+                      <p
+                        key={`${sentence.start}-${sIdx}`}
+                        className={`text-[15px] leading-relaxed text-ink ${
+                          isLast && isRecording ? "caret" : ""
+                        }`}
+                      >
+                        <span
+                          className="mr-2 inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 font-mono text-xs font-semibold"
+                          style={{
+                            backgroundColor: style.bg,
+                            color: style.color,
+                            border: `1px solid ${style.border}`,
+                          }}
+                        >
+                          <span
+                            className="h-1.5 w-1.5 rounded-full"
+                            style={{ backgroundColor: style.color }}
+                          />
+                          {spkNum !== null && spkNum !== undefined
+                            ? `Speaker ${spkNum}`
+                            : "Người nói"}
+                        </span>
+                        {sentence.text}
+                      </p>
+                    );
+                  })
+                ) : (
+                  <p
+                    className={`text-[15px] leading-relaxed text-ink ${
+                      isLast && isRecording ? "caret" : ""
+                    }`}
+                  >
+                    <span
+                      className="mr-2 inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 font-mono text-xs font-semibold"
+                      style={{
+                        backgroundColor: getSpeakerStyle(speaker).bg,
+                        color: getSpeakerStyle(speaker).color,
+                        border: `1px solid ${getSpeakerStyle(speaker).border}`,
+                      }}
+                    >
+                      <span
+                        className="h-1.5 w-1.5 rounded-full"
+                        style={{ backgroundColor: getSpeakerStyle(speaker).color }}
+                      />
+                      {speaker !== null && speaker !== undefined
+                        ? `Speaker ${speaker}`
+                        : "Người nói"}
+                    </span>
+                    {text}
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
       {/* Separator */}
-      {!isLast && (
-        <div className="ml-10 mt-3 border-b border-line-soft" />
-      )}
+      {!isLast && <div className="ml-10 mt-3 border-b border-line-soft" />}
     </div>
   );
 }
