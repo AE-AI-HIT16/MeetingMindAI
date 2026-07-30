@@ -182,9 +182,59 @@ def get_me(
     Returns:
         Thông tin user hiện tại.
     """
+    if current_user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Bạn chưa đăng nhập.",
+        )
     return UserInfo(
         id=current_user.id,
         email=current_user.email,
         name=current_user.name,
         avatar_url=current_user.avatar_url,
+    )
+
+
+# ---------------------------------------------------------------------------
+# POST /v1/auth/refresh — gia hạn JWT nội bộ (duy trì đăng nhập)
+# ---------------------------------------------------------------------------
+
+@router.post("/refresh", response_model=AuthResponse, status_code=status.HTTP_200_OK)
+def refresh_token(
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> AuthResponse:
+    """Gia hạn JWT nội bộ mà không cần đăng nhập lại OAuth.
+
+    Client gọi endpoint này trước khi JWT sắp hết hạn để nhận token mới.
+    Yêu cầu header: ``Authorization: Bearer <access_token>``
+
+    Returns:
+        ``AuthResponse`` gồm ``access_token`` mới và thông tin user.
+
+    Raises:
+        HTTPException 401: Nếu không có token hoặc token hết hạn / không hợp lệ.
+    """
+    if current_user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Bạn chưa đăng nhập.",
+        )
+
+    # Cập nhật last_login_at mỗi lần refresh thành công
+    current_user.last_login_at = datetime.utcnow()
+
+    # Ký JWT mới với thời hạn đầy đủ
+    token, expires_in = _create_jwt(current_user)
+
+    logger.info("Refresh token thành công: user_id=%s", current_user.id)
+
+    return AuthResponse(
+        access_token=token,
+        expires_in=expires_in,
+        user=UserInfo(
+            id=current_user.id,
+            email=current_user.email,
+            name=current_user.name,
+            avatar_url=current_user.avatar_url,
+        ),
     )
