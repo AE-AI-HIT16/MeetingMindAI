@@ -17,7 +17,7 @@ import mimetypes
 from typing import Annotated, List, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import RedirectResponse, StreamingResponse
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
@@ -253,37 +253,57 @@ async def stream_media(
     request: Request,
     db: Annotated[Session, Depends(get_db)],
     storage: Annotated[StorageBackend, Depends(get_storage_backend)],
-) -> StreamingResponse:
-    """Phục vụ file audio/video với hỗ trợ HTTP Range (cho phép tua video).
+):
+    """Phu vu file audio/video.
 
-    Trình duyệt dùng thẻ ``<video>`` / ``<audio>`` gọi endpoint này.
-    HTTP Range cho phép tua tới bất kỳ vị trí nào trong file mà không cần
-    tải toàn bộ lên RAM.
+    Hanh vi phu thuoc vao backend:
+      - S3/MinIO (needs_redirect=True): HTTP 307 redirect sang presigned URL.
+        Trinh duyet stream thang tu MinIO, FastAPI khong can doc bytes.
+      - Local (needs_redirect=False): doc bytes tu disk, stream voi HTTP Range.
 
     Args:
-        source_id: UUID của Source.
-        request:   Request gốc (để đọc header Range).
+        source_id: UUID cua Source.
+        request:   Request goc (doc header Range cho local backend).
         db:        DB session.
-        storage:   Storage backend.
+        storage:   Storage backend hien tai.
 
     Raises:
-        HTTPException 404: Source không tồn tại hoặc file không tìm thấy.
-        HTTPException 416: Range không hợp lệ.
+        HTTPException 404: Source khong ton tai hoac file khong tim thay.
+        HTTPException 416: Range header khong hop le (chi local backend).
     """
     source = db.get(Source, source_id)
     if source is None:
-        raise HTTPException(status_code=404, detail=f"Source '{source_id}' không tồn tại.")
+        raise HTTPException(
+            status_code=404, detail=f"Source '{source_id}' khong ton tai."
+        )
 
-    # Đọc toàn bộ bytes từ storage (phù hợp dev/local; MinIO nên dùng presigned URL)
+    # --- S3/MinIO: redirect sang presigned URL ---
+    if storage.needs_redirect():
+        try:
+            url = storage.public_url(source.storage_path)
+        except Exception as exc:
+            logger.error(
+                "Khong the tao presigned URL cho '%s': %s", source.storage_path, exc
+            )
+            raise HTTPException(
+                status_code=500, detail="Khong the tao URL xem media."
+            ) from exc
+        logger.info("Media redirect: source=%s -> presigned URL", source_id)
+        return RedirectResponse(url=url, status_code=307)
+
+    # --- Local: doc bytes tu disk va stream voi HTTP Range ---
     try:
         data = await storage.load(source.storage_path)
     except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="File không tìm thấy trong storage.")
+        raise HTTPException(
+            status_code=404, detail="File khong tim thay trong storage."
+        )
 
     total_size = len(data)
-    mime_type = mimetypes.guess_type(source.filename)[0] or "application/octet-stream"
+    mime_type = (
+        mimetypes.guess_type(source.filename)[0] or "application/octet-stream"
+    )
 
-    # Xử lý HTTP Range request (để trình duyệt tua được video)
     range_header = request.headers.get("Range")
     if range_header:
         try:
@@ -292,26 +312,28 @@ async def stream_media(
             start = int(start_str)
             end = int(end_str) if end_str else total_size - 1
         except ValueError:
-            raise HTTPException(status_code=416, detail="Range header không hợp lệ.")
+            raise HTTPException(
+                status_code=416, detail="Range header khong hop le."
+            )
 
         if start >= total_size or end >= total_size or start > end:
-            raise HTTPException(status_code=416, detail="Range vượt quá kích thước file.")
+            raise HTTPException(
+                status_code=416, detail="Range vuot qua kich thuoc file."
+            )
 
         chunk = data[start : end + 1]
-        headers = {
-            "Content-Range": f"bytes {start}-{end}/{total_size}",
-            "Accept-Ranges": "bytes",
-            "Content-Length": str(len(chunk)),
-            "Content-Type": mime_type,
-        }
         return StreamingResponse(
             iter([chunk]),
             status_code=206,
-            headers=headers,
+            headers={
+                "Content-Range": f"bytes {start}-{end}/{total_size}",
+                "Accept-Ranges": "bytes",
+                "Content-Length": str(len(chunk)),
+                "Content-Type": mime_type,
+            },
             media_type=mime_type,
         )
 
-    # Không có Range → trả toàn bộ file
     return StreamingResponse(
         iter([data]),
         status_code=200,
@@ -322,6 +344,7 @@ async def stream_media(
         },
         media_type=mime_type,
     )
+
 
 
 # ---------------------------------------------------------------------------
