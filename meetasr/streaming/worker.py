@@ -51,6 +51,20 @@ class AudioWorker:
                     )
                 )
 
+            # Ghép vào partial buffer
+            async with self.session.partial_buffer_lock:
+
+                if self.session.partial_buffer.size == 0:
+                    self.session.partial_buffer = audio
+
+                else:
+                    self.session.partial_buffer = np.concatenate(
+                        (
+                            self.session.partial_buffer,
+                            audio,
+                        )
+                    )
+
             # Chạy Streaming VAD off event loop (CPU-bound)
             await loop.run_in_executor(None, self.processor.process)
 

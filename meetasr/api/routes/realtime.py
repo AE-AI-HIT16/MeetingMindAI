@@ -3,6 +3,7 @@ from meetasr.streaming.worker import AudioWorker
 from meetasr.streaming.audio_receiver import AudioReceiver
 from meetasr.streaming.asr_worker import ASRWorker
 from meetasr.streaming.temp_asr_woker import TempASRWorker
+from meetasr.streaming.partial_buffer_cleaner import PartialBufferCleaner
 from meetasr.streaming.window_builder import SegmentWindowBuilder
 import asyncio
 import logging
@@ -71,6 +72,14 @@ async def realtime_stream(websocket: WebSocket):
     # Khởi chạy luồng phụ
     session.temp_asr_task = asyncio.create_task(
         temp_asr_worker.run()
+    )
+
+    partial_buffer_cleaner = PartialBufferCleaner(
+        session
+    )
+
+    session.partial_cleaner_task = asyncio.create_task(
+        partial_buffer_cleaner.run()
     )
 
     # Worker xử lý audio:

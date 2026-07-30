@@ -53,6 +53,8 @@ class ASRWorker:
 
                     await self._send_result(result)
 
+                    await self._publish_cut_event(result)
+
                 finally:
                     self.session.asr_queue.task_done()
 
@@ -98,3 +100,25 @@ class ASRWorker:
                     "segment": segment.model_dump(mode="json"),
                 }
             )
+
+    async def _publish_cut_event(
+            self,
+            result,
+    ):
+        """
+        Thông báo transcript đã được xác nhận
+        đến một timeline tuyệt đối.
+        """
+
+        absolute_end_ms = (
+                self.session.confirmed_end_ms
+                + result.duration_ms
+        )
+
+        self.session.confirmed_end_ms = (
+            absolute_end_ms
+        )
+
+        await self.session.partial_cut_queue.put(
+            absolute_end_ms
+        )

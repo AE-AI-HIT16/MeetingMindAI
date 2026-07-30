@@ -72,7 +72,8 @@ class StreamingProcessor:
 
         # Đẩy dữ liệu vào queue, để có kết quả sớm cho fe
         try:
-            self.session.temp_asr_queue.put_nowait(audio)
+            if self.session.temp_asr_queue.empty():
+                self.session.temp_asr_queue.put_nowait(None)
 
         except asyncio.QueueFull:
             logger.warning(

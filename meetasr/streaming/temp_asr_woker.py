@@ -32,7 +32,28 @@ class TempASRWorker:
         try:
 
             while True:
-                audio = await self.session.temp_asr_queue.get()
+                await self.session.temp_asr_queue.get()
+
+                async with self.session.partial_buffer_lock:
+
+                    audio = self.session.partial_buffer.copy()
+
+                    start_ms = (
+                        self.session.partial_buffer_start_ms
+                    )
+
+                duration_ms = int(
+                    len(audio)
+                    / 16000
+                    * 1000
+                )
+
+                end_ms = start_ms + duration_ms
+
+                if audio.size == 0:
+                    self.session.temp_asr_queue.task_done()
+                    continue
+
                 try:
                     results = await asyncio.to_thread(
                         self.pipeline.asr.recognize,
@@ -50,8 +71,8 @@ class TempASRWorker:
                             continue
 
                         segment = TranscriptSegmentPayload(
-                            start_ms=0,
-                            end_ms=0,
+                            start_ms=start_ms,
+                            end_ms=end_ms,
                             speaker=None,
                             text=text,
                         )
