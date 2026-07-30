@@ -36,10 +36,11 @@ export const authOptions: NextAuthOptions = {
 
   callbacks: {
     async jwt({ token, account, user }) {
-      // Khi user đăng nhập lần đầu, account và user sẽ có giá trị
+      const apiBase = process.env.MEETASR_API || "http://127.0.0.1:8000";
+
+      // --- Lần đăng nhập đầu tiên: Sync với Backend ---
       if (account && user) {
         try {
-          const apiBase = process.env.MEETASR_API || "http://127.0.0.1:8000";
           const res = await fetch(`${apiBase}/v1/auth/sync`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -52,18 +53,53 @@ export const authOptions: NextAuthOptions = {
               sync_secret: process.env.NEXTAUTH_SECRET || "",
             }),
           });
-          
+
           if (res.ok) {
             const data = await res.json();
             token.accessToken = data.access_token;
             token.sub = data.user.id;
+            // Lưu thời điểm hết hạn (expires_in trả về = giây)
+            token.tokenExpiry = Date.now() + data.expires_in * 1000;
           } else {
             console.error("Backend sync failed", await res.text());
           }
         } catch (error) {
           console.error("Lỗi khi gọi /v1/auth/sync:", error);
         }
+        return token;
       }
+
+      // --- Các lần tiếp theo: Auto-refresh nếu còn < 7 ngày ---
+      const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+      const expiry = (token.tokenExpiry as number | undefined) ?? 0;
+      const shouldRefresh = expiry - Date.now() < sevenDaysMs;
+
+      if (token.accessToken && shouldRefresh) {
+        try {
+          const res = await fetch(`${apiBase}/v1/auth/refresh`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token.accessToken}`,
+            },
+          });
+
+          if (res.ok) {
+            const data = await res.json();
+            token.accessToken = data.access_token;
+            token.tokenExpiry = Date.now() + data.expires_in * 1000;
+            console.log("✅ Token đã được gia hạn tự động.");
+          } else {
+            // Token đã hết hạn hoàn toàn, xóa để buộc đăng nhập lại
+            console.warn("⚠️ Refresh thất bại, yêu cầu đăng nhập lại.");
+            token.accessToken = undefined;
+            token.tokenExpiry = undefined;
+          }
+        } catch (error) {
+          console.error("Lỗi khi gọi /v1/auth/refresh:", error);
+        }
+      }
+
       return token;
     },
 
