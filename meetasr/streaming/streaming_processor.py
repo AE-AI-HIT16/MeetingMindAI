@@ -3,6 +3,7 @@ import logging
 import numpy as np
 
 from meetasr.schemas import Segment
+import asyncio
 
 
 SAMPLE_RATE = 16000
@@ -52,41 +53,10 @@ class StreamingProcessor:
         if self.session.vad_state is None:
             self.session.vad_state = {}
 
-        pending_s = self.session.pending_audio.size / SAMPLE_RATE
-
-        # segments = self.pipeline.vad.detect(
-        #     self.session.pending_audio,
-        #     cache=self.session.vad_state,
-        #     is_final=True,
-        # )
-
         segments = split_fixed_segments(
             self.session.pending_audio,
             segment_ms=SECOND * 1000,
         )
-
-        # DEBUG: đếm số lần process được gọi
-        # self._debug_chunk_count += 1
-        # if (self._debug_chunk_count == 10):
-        #     print("=" * 50)
-        #     print(f"pending audio duration: {pending_s:.2f}s")
-        #     print(f"VAD returned {len(segments)} segments")
-        #
-        #     for i, seg in enumerate(segments):
-        #         print(
-        #             f"  Segment {i}: "
-        #             f"{seg.start_ms / 1000:.3f}s -> "
-        #             f"{seg.end_ms / 1000:.3f}s "
-        #             f"(duration={(seg.end_ms - seg.start_ms) / 1000:.3f}s)"
-        #         )
-        #
-        #     print("=" * 50)
-        #     self._debug_chunk_count = 0
-
-        log_key = (len(segments), int(pending_s))
-        # if getattr(self, "_last_vad_log", None) != log_key:
-        #     print(f"VAD: {len(segments)} segment(s), pending={pending_s:.2f}s")
-        #     self._last_vad_log = log_key
 
         if len(segments) < 2:
             return
@@ -100,12 +70,14 @@ class StreamingProcessor:
 
         self.session.ready_segments.append(audio)
 
-        # print(
-        #     f"VAD: emitted ready segment "
-        #     f"{first_segment.start_ms / 1000.0:.2f}s - "
-        #     f"{first_segment.end_ms / 1000.0:.2f}s "
-        #     f"(ready_segments={len(self.session.ready_segments)})"
-        # )
+        # Đẩy dữ liệu vào queue, để có kết quả sớm cho fe
+        try:
+            self.session.temp_asr_queue.put_nowait(audio)
+
+        except asyncio.QueueFull:
+            logger.warning(
+                "Temp ASR queue full, dropping segment"
+            )
 
         self._remove_processed_audio(
                 first_segment,

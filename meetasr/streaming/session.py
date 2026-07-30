@@ -36,6 +36,9 @@ class StreamSession:
             maxsize=50
         )
 
+        # Chứa các đoạn audio để xử lý trước, đưa ngay kết quả cho fe
+        self.temp_asr_queue = asyncio.Queue(maxsize=20)
+
         # ==========================================================
         # Raw audio
         # ==========================================================
@@ -99,6 +102,8 @@ class StreamSession:
 
         self.asr_task = None
 
+        self.temp_asr_task = None
+
         self.closed = False
 
     async def close(self):
@@ -108,26 +113,26 @@ class StreamSession:
 
         if self.closed:
             return
-
         self.closed = True
 
         if self.worker_task:
-
             self.worker_task.cancel()
-
             try:
                 await self.worker_task
-
             except asyncio.CancelledError:
                 pass
 
         if self.asr_task:
-
             self.asr_task.cancel()
-
             try:
                 await self.asr_task
+            except asyncio.CancelledError:
+                pass
 
+        if self.temp_asr_task:
+            self.temp_asr_task.cancel()
+            try:
+                await self.temp_asr_task
             except asyncio.CancelledError:
                 pass
 
@@ -153,6 +158,14 @@ class StreamSession:
             try:
                 self.asr_queue.get_nowait()
                 self.asr_queue.task_done()
+
+            except asyncio.QueueEmpty:
+                break
+
+        while not self.temp_asr_queue.empty():
+            try:
+                self.temp_asr_queue.get_nowait()
+                self.temp_asr_queue.task_done()
 
             except asyncio.QueueEmpty:
                 break

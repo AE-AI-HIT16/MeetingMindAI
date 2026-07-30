@@ -191,6 +191,7 @@ export function useRealtimeStream(): RealtimeStreamState &
               : new TextDecoder().decode(ev.data),
           );
           const segment = data.segment as ApiTranscriptSegment | undefined;
+          console.log("WS segment:", segment);
           if (data.type === "transcript_delta" && segment) {
             const mapped = mapTranscriptSegment(segment);
             setTranscripts((prev) => [
