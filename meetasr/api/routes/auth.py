@@ -238,3 +238,43 @@ def refresh_token(
             avatar_url=current_user.avatar_url,
         ),
     )
+
+
+# ---------------------------------------------------------------------------
+# POST /v1/auth/logout — ghi nhận đăng xuất
+# ---------------------------------------------------------------------------
+
+class LogoutResponse(BaseModel):
+    """Response sau khi đăng xuất."""
+    message: str
+
+
+@router.post("/logout", response_model=LogoutResponse, status_code=status.HTTP_200_OK)
+def logout(
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> LogoutResponse:
+    """Ghi nhận đăng xuất và cập nhật thời gian hoạt động cuối.
+
+    Frontend gọi endpoint này trước khi xóa session cookie của NextAuth.
+    Yêu cầu header: ``Authorization: Bearer <access_token>``
+
+    Note:
+        JWT là stateless — token cũ vẫn hợp lệ cho đến khi hết hạn tự nhiên.
+        Lớp bảo mật thực sự là NextAuth xóa session cookie phía client.
+
+    Returns:
+        Thông báo đăng xuất thành công.
+    """
+    if current_user is None:
+        # Guest logout — không cần làm gì
+        return LogoutResponse(message="Đã đăng xuất.")
+
+    logger.info(
+        "User đăng xuất: user_id=%s email=%s provider=%s",
+        current_user.id,
+        current_user.email,
+        current_user.provider,
+    )
+
+    return LogoutResponse(message=f"Tạm biệt, {current_user.name}!")
