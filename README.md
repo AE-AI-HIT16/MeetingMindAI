@@ -135,6 +135,7 @@ pytest tests/ -v
 |---|---|---|
 | SenseVoiceSmall | `sensevoice-small` | ASR (vi/zh/en/ja/ko) |
 | Paraformer-zh | `paraformer-zh` | ASR (zh/en, fastest) |
+| Qwen3-ASR 0.6B | `qwen3-asr` | Offline multilingual ASR, including Vietnamese |
 | Silero VAD | `silero-vad` | Default VAD for uploaded/offline audio |
 | FSMN-VAD | `fsmn-vad` | Optional fallback VAD |
 | CT-Punc | `ct-punc` | Punctuation Restoration |

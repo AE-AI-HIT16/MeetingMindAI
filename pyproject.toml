@@ -46,6 +46,8 @@ dependencies = [
     "onnxruntime>=1.16.1,<2",
     # Production multilingual ASR backend
     "faster-whisper>=1.2,<2",
+    # Qwen3-ASR offline multilingual backend
+    "qwen-asr>=0.0.6,<0.1",
     # Vietnamese ASR backend
     "sherpa-onnx",
     # Speaker clustering (3D-Speaker port)
