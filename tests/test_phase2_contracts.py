@@ -14,7 +14,7 @@ from meetasr.api.schemas_phase2 import (
 )
 from meetasr.db.models_phase2 import TranscriptSegment
 from meetasr.realtime.events import EventBus
-from meetasr.schemas import Segment, SentenceInfo, TranscriptResult
+from meetasr.schemas import Segment, SentenceInfo, SpeakerTurn, TranscriptResult
 from meetasr.services import asr_service
 from meetasr.services.asr_service import ASRService, ASRServiceResult
 from meetasr.streaming.asr_worker import ASRWorker
@@ -244,3 +244,57 @@ def test_asr_service_exposes_incremental_pipeline_steps(monkeypatch) -> None:
 
     assert prepared.duration_ms == 3000
     assert finalized[0].speaker == 0
+
+
+def test_asr_service_uses_diarization_first_turns_and_default_language(
+    monkeypatch,
+) -> None:
+    async def run_inline(function, *args, **kwargs):
+        return function(*args, **kwargs)
+
+    monkeypatch.setattr(asr_service.asyncio, "to_thread", run_inline)
+
+    class StubPipeline:
+        diarization_first = True
+        transcription_language = "vi"
+
+        def prepare_diarization_first_transcription(self, audio_source):
+            assert audio_source == "meeting.wav"
+            return (
+                "decoded-audio",
+                [Segment(0, 4000)],
+                [SpeakerTurn(500, 2500, 1)],
+                4000,
+            )
+
+        def transcribe_vad_segment(
+            self,
+            audio,
+            segment,
+            language,
+            **kwargs,
+        ):
+            assert audio == "decoded-audio"
+            assert segment == Segment(500, 2500)
+            assert language == "vi"
+            return [SentenceInfo(text="Xin chào", start=0.5, end=2.5)]
+
+        def finalize_preassigned_transcript(self, sentences):
+            assert sentences[0].speaker == 1
+            return sentences
+
+    async def run_flow():
+        service = ASRService(StubPipeline())
+        prepared = await service.prepare_incremental("meeting.wav")
+        assert prepared.speaker_turns is not None
+        turn = prepared.speaker_turns[0]
+        sentences = await service.transcribe_segment(
+            prepared,
+            turn.to_segment(),
+        )
+        sentences[0].speaker = turn.speaker
+        return await service.finalize_incremental(prepared, sentences)
+
+    finalized = asyncio.run(run_flow())
+
+    assert finalized[0].speaker == 1

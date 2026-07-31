@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Optional, Any
+from typing import Any
 
 from omegaconf import OmegaConf
 
-from meetasr.pipeline import MeetPipeline
 from meetasr.auto.auto_model import AutoModel
+from meetasr.pipeline import MeetPipeline
 
 
 class AutoPipeline:
@@ -68,6 +68,7 @@ class AutoPipeline:
 
         pipeline_cfg = config.get("pipeline") or {}
         gap_rescue_cfg = pipeline_cfg.get("gap_rescue") or {}
+        diarization_first_cfg = pipeline_cfg.get("diarization_first") or {}
 
         return MeetPipeline(
             asr_model=asr_model,
@@ -78,6 +79,23 @@ class AutoPipeline:
             doc_planner=doc_planner,
             device=device,
             enable_gap_rescue=gap_rescue_cfg.get("enabled", False),
+            diarization_first=diarization_first_cfg.get("enabled", False),
+            speaker_turn_max_chunk_ms=diarization_first_cfg.get(
+                "max_chunk_ms",
+                15000,
+            ),
+            speaker_turn_boundary_search_ms=diarization_first_cfg.get(
+                "boundary_search_ms",
+                2000,
+            ),
+            speaker_turn_min_chunk_ms=diarization_first_cfg.get(
+                "min_chunk_ms",
+                1000,
+            ),
+            transcription_language=pipeline_cfg.get(
+                "transcription_language",
+                "auto",
+            ),
         )
 
     @classmethod

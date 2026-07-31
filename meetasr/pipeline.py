@@ -11,17 +11,23 @@ from typing import Optional
 import numpy as np
 import torch
 
-from meetasr.schemas import MeetingReport, Segment, SentenceInfo, TranscriptResult
+from meetasr.schemas import (
+    MeetingReport,
+    Segment,
+    SentenceInfo,
+    SpeakerTurn,
+    TranscriptResult,
+)
 from meetasr.utils.audio import load_audio
 from meetasr.utils.diarization import (
     assign_speakers_by_overlap,
+    build_speaker_turns,
     chunk_segment,
     circle_pad,
     compressed_seg,
     map_chars_to_speakers,
     split_at_speaker_turns,
 )
-
 from meetasr.utils.timestamp import (
     build_sentence_info,
     clip_sentence_to_range,
@@ -60,6 +66,11 @@ class MeetPipeline:
         doc_planner=None,
         device: str = "cpu",
         enable_gap_rescue: bool = False,
+        diarization_first: bool = False,
+        speaker_turn_max_chunk_ms: int = 15000,
+        speaker_turn_boundary_search_ms: int = 2000,
+        speaker_turn_min_chunk_ms: int = 1000,
+        transcription_language: str = "auto",
     ):
         """Initialize MeetPipeline with pre-built model instances.
 
@@ -73,7 +84,24 @@ class MeetPipeline:
             device: Torch device string.
             enable_gap_rescue: Re-decode VAD-confirmed speech gaps for ASR
                 models with native long-form timestamps. Disabled by default.
+            diarization_first: Build speaker turns before ASR for uploaded media.
+            speaker_turn_max_chunk_ms: Maximum Qwen input duration per turn.
+            speaker_turn_boundary_search_ms: Backward low-energy search window.
+            speaker_turn_min_chunk_ms: Minimum tail duration when splitting turns.
+            transcription_language: Default language used by upload jobs.
         """
+        if speaker_turn_max_chunk_ms <= 0:
+            raise ValueError("speaker_turn_max_chunk_ms must be positive")
+        if speaker_turn_boundary_search_ms < 0:
+            raise ValueError("speaker_turn_boundary_search_ms must be non-negative")
+        if (
+            speaker_turn_min_chunk_ms <= 0
+            or speaker_turn_min_chunk_ms >= speaker_turn_max_chunk_ms
+        ):
+            raise ValueError(
+                "speaker_turn_min_chunk_ms must be positive and smaller than "
+                "speaker_turn_max_chunk_ms"
+            )
         self.asr = asr_model
         self.vad = vad_model
         self.punc = punc_model
@@ -82,6 +110,11 @@ class MeetPipeline:
         self.doc_planner = doc_planner
         self.device = device
         self.enable_gap_rescue = enable_gap_rescue
+        self.diarization_first = diarization_first
+        self.speaker_turn_max_chunk_ms = speaker_turn_max_chunk_ms
+        self.speaker_turn_boundary_search_ms = speaker_turn_boundary_search_ms
+        self.speaker_turn_min_chunk_ms = speaker_turn_min_chunk_ms
+        self.transcription_language = transcription_language
 
     # ------------------------------------------------------------------
     # Public API
@@ -175,6 +208,55 @@ class MeetPipeline:
         duration_ms = int(len(audio) / SAMPLE_RATE * 1000)
         return audio, self._run_vad(audio), duration_ms
 
+    def prepare_diarization_first_transcription(
+        self,
+        audio_source,
+    ) -> tuple[np.ndarray, list[Segment], list[SpeakerTurn] | None, int]:
+        """Decode audio, run VAD + diarization, and build ASR-ready turns.
+
+        ``None`` speaker turns means the caller must use the legacy ASR-first
+        fallback. This preserves transcript availability when diarization is
+        disabled, produces no usable chunks, or fails.
+        """
+        audio = load_audio(audio_source)
+        duration_ms = int(len(audio) / SAMPLE_RATE * 1000)
+        vad_segments = self._run_vad(audio)
+        if not self.diarization_first or self.spk is None or not vad_segments:
+            return audio, vad_segments, None, duration_ms
+
+        try:
+            diar_segments = self._diarize_segments(audio, vad_segments)
+            if not diar_segments:
+                logging.warning(
+                    "SPK-first: no diarization segments; using ASR-first fallback."
+                )
+                return audio, vad_segments, None, duration_ms
+            speaker_turns = build_speaker_turns(
+                audio,
+                diar_segments,
+                max_chunk_ms=self.speaker_turn_max_chunk_ms,
+                boundary_search_ms=self.speaker_turn_boundary_search_ms,
+                min_chunk_ms=self.speaker_turn_min_chunk_ms,
+                sample_rate=SAMPLE_RATE,
+            )
+            if not speaker_turns:
+                logging.warning(
+                    "SPK-first: no speaker turns; using ASR-first fallback."
+                )
+                return audio, vad_segments, None, duration_ms
+            logging.info(
+                "SPK-first: built %s ASR turn(s) from %s diarization segment(s).",
+                len(speaker_turns),
+                len(diar_segments),
+            )
+            return audio, vad_segments, speaker_turns, duration_ms
+        except Exception as exc:
+            logging.warning(
+                "SPK-first preparation failed: %s. Using ASR-first fallback.",
+                exc,
+            )
+            return audio, vad_segments, None, duration_ms
+
     def transcribe_vad_segment(
         self,
         audio: np.ndarray,
@@ -263,6 +345,19 @@ class MeetPipeline:
         ):
             finalized = self._run_punc(finalized)
 
+        return finalized
+
+    def finalize_preassigned_transcript(
+        self,
+        sentence_info: list[SentenceInfo],
+    ) -> list[SentenceInfo]:
+        """Restore punctuation without changing preassigned speaker turns."""
+        finalized = copy.deepcopy(sentence_info)
+        if self.punc is not None and (
+            not getattr(self.asr, "has_native_punctuation", False)
+            or _needs_external_punctuation(finalized)
+        ):
+            finalized = self._run_punc(finalized)
         return finalized
 
     def summarize_meeting(
@@ -474,37 +569,12 @@ class MeetPipeline:
         """
         t0 = time.perf_counter()
         try:
-            sample_rate = 16000
-            target_len = int(1.5 * sample_rate)  # 24,000 frames
-
-            # T1: Sub-segmentation — collect all chunks across all VAD segments
-            all_chunks = []
-            for seg in segments:
-                all_chunks.extend(chunk_segment(seg.start_s, seg.end_s, dur=1.5, step=0.75))
-
-            if not all_chunks:
+            diar_segs = self._diarize_segments(audio, segments)
+            if not diar_segs:
                 logging.warning("SPK: no chunks produced — skipping diarization.")
                 return sentence_info
 
-            # T1: Extract embedding per chunk (sequential, memory-safe)
-            embeddings = []
-            for st, ed in all_chunks:
-                chunk_np = audio[int(st * sample_rate):int(ed * sample_rate)]
-                if len(chunk_np) < target_len:
-                    t = torch.from_numpy(chunk_np).float()
-                    chunk_np = circle_pad(t, target_len).numpy()
-                emb = self.spk.embed(chunk_np.astype(np.float32))
-                embeddings.append(emb)
-
-            # Cluster all chunk embeddings
-            all_embs = torch.cat(embeddings, dim=0)
-            labels = self.spk.cluster(all_embs)
-
-            # T3: Build diar segments + merge adjacent same-speaker chunks
-            diar_segs = [[c[0], c[1], int(l)] for c, l in zip(all_chunks, labels)]
-            diar_segs = compressed_seg(diar_segs)
-
-            # T4: Word-level speaker attribution 
+            # T4: Word-level speaker attribution
             new_sentence_info = []
             for sent in sentence_info:
                 if sent.char_timestamps:
@@ -530,13 +600,64 @@ class MeetPipeline:
 
             n_speakers = len(spk_mapping)
             logging.info(
-                f"SPK: {n_speakers} speaker(s), {len(all_chunks)} chunks "
+                f"SPK: {n_speakers} speaker(s), {len(diar_segs)} turn(s) "
                 f"({time.perf_counter() - t0:.2f}s)"
             )
         except Exception as e:
             logging.warning(f"Speaker diarization failed: {e}. Proceeding without speaker labels.")
 
         return sentence_info
+
+    def _diarize_segments(
+        self,
+        audio: np.ndarray,
+        segments: list[Segment],
+    ) -> list[list]:
+        """Return compressed ``[start_s, end_s, speaker_id]`` segments."""
+        if self.spk is None or not segments:
+            return []
+
+        sample_rate = SAMPLE_RATE
+        target_len = int(1.5 * sample_rate)
+        all_chunks = []
+        for seg in segments:
+            all_chunks.extend(
+                chunk_segment(seg.start_s, seg.end_s, dur=1.5, step=0.75)
+            )
+        if not all_chunks:
+            return []
+
+        embedded_chunks = []
+        embeddings = []
+        for st, ed in all_chunks:
+            chunk_np = audio[int(st * sample_rate):int(ed * sample_rate)]
+            if len(chunk_np) == 0:
+                continue
+            if len(chunk_np) < target_len:
+                tensor = torch.from_numpy(chunk_np).float()
+                chunk_np = circle_pad(tensor, target_len).numpy()
+            embeddings.append(self.spk.embed(chunk_np.astype(np.float32)))
+            embedded_chunks.append([st, ed])
+
+        if not embeddings:
+            return []
+        all_embs = torch.cat(embeddings, dim=0)
+        labels = self.spk.cluster(all_embs)
+        usable_count = min(len(embedded_chunks), len(labels))
+        if usable_count != len(embedded_chunks):
+            logging.warning(
+                "SPK returned %s labels for %s chunks; truncating.",
+                len(labels),
+                len(embedded_chunks),
+            )
+        diar_segs = [
+            [chunk[0], chunk[1], int(label)]
+            for chunk, label in zip(
+                embedded_chunks[:usable_count],
+                labels[:usable_count],
+            )
+        ]
+        return compressed_seg(diar_segs)
 
 
 # ------------------------------------------------------------------
@@ -573,3 +694,20 @@ def _derive_key(source) -> str:
     if isinstance(source, str):
         return os.path.splitext(os.path.basename(source))[0]
     return f"audio_{int(time.time())}"
+
+
+def _needs_external_punctuation(
+    sentences: list[SentenceInfo],
+    *,
+    min_text_chars: int = 80,
+    max_chars_per_terminal_mark: int = 240,
+) -> bool:
+    """Detect long ASR text whose claimed native punctuation is unusable."""
+    text = " ".join(sentence.text.strip() for sentence in sentences if sentence.text.strip())
+    if len(text) < min_text_chars:
+        return False
+    terminal_marks = sum(text.count(mark) for mark in ".!?。！？")
+    return (
+        terminal_marks == 0
+        or len(text) / terminal_marks > max_chars_per_terminal_mark
+    )

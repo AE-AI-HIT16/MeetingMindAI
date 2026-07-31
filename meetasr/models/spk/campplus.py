@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
+
 import numpy as np
 
-from meetasr.register import tables
 from meetasr.models.abs_models import AbsSpk
+from meetasr.register import tables
+
+if TYPE_CHECKING:
+    import torch
 
 
 @tables.register("model_classes", key="cam++")
@@ -58,6 +63,8 @@ class CAMPlusPlus(AbsSpk):
                 device=self.device,
                 disable_update=True,
                 disable_log=True,
+                disable_pbar=True,
+                log_level="ERROR",
             )
             logging.info(f"CAM++ loaded from {self.model_path} on {self.device}")
         except Exception as e:
@@ -75,6 +82,7 @@ class CAMPlusPlus(AbsSpk):
         """
         import torch
         self._ensure_loaded()
+        kwargs.setdefault("disable_pbar", True)
         results = self._inner.generate(input=audio, **kwargs)
         if results and "spk_embedding" in results[0]:
             emb = results[0]["spk_embedding"]

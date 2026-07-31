@@ -7,15 +7,79 @@ Tests cover:
     - split_at_speaker_turns: splitting sentences at speaker boundaries
 """
 
+import numpy as np
 import pytest
 
 from meetasr.schemas import SentenceInfo
 from meetasr.utils.diarization import (
-    map_chars_to_speakers,
-    split_at_speaker_turns,
     _fill_none_gaps,
     _merge_short_groups,
+    build_speaker_turns,
+    chunk_segment,
+    map_chars_to_speakers,
+    split_at_speaker_turns,
 )
+
+
+def test_chunk_segment_keeps_short_backchannel():
+    assert chunk_segment(1.0, 1.4) == [[1.0, 1.4]]
+
+
+def test_build_speaker_turns_splits_long_turn_at_quiet_audio():
+    audio = np.ones(36 * 16000, dtype=np.float32)
+    audio[int(13.8 * 16000):int(14.2 * 16000)] = 0.0
+
+    turns = build_speaker_turns(
+        audio,
+        [
+            [0.0, 32.0, 7],
+            [32.0, 36.0, 9],
+        ],
+        max_chunk_ms=15000,
+        boundary_search_ms=2000,
+        min_chunk_ms=1000,
+    )
+
+    assert turns[0].speaker == 0
+    assert 13700 <= turns[0].end_ms <= 14300
+    assert turns[1].start_ms == turns[0].end_ms
+    assert turns[-1].speaker == 1
+    assert turns[-1].start_ms == 32000
+    assert turns[-1].end_ms == 36000
+
+
+def test_build_speaker_turns_prefers_target_when_energy_is_equal():
+    turns = build_speaker_turns(
+        np.zeros(20 * 16000, dtype=np.float32),
+        [[0.0, 20.0, 4]],
+        max_chunk_ms=15000,
+        boundary_search_ms=2000,
+        min_chunk_ms=1000,
+    )
+
+    assert [(turn.start_ms, turn.end_ms) for turn in turns] == [
+        (0, 15000),
+        (15000, 20000),
+    ]
+
+
+def test_build_speaker_turns_coalesces_small_same_speaker_gap():
+    turns = build_speaker_turns(
+        np.zeros(4 * 16000, dtype=np.float32),
+        [
+            [0.0, 1.0, 3],
+            [1.2, 3.0, 3],
+            [3.0, 4.0, 8],
+        ],
+    )
+
+    assert [
+        (turn.start_ms, turn.end_ms, turn.speaker)
+        for turn in turns
+    ] == [
+        (0, 3000, 0),
+        (3000, 4000, 1),
+    ]
 
 
 # ======================================================================
