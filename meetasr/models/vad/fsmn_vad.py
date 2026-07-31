@@ -34,6 +34,8 @@ class FsmnVAD(AbsVAD):
       hf: funasr/fsmn-vad
     """
 
+    model_name = "fsmn-vad"
+
     def __init__(
         self,
         model_path: str = "",

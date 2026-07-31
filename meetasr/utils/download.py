@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import os
-from pathlib import Path
 from typing import Any
 
 from omegaconf import OmegaConf
@@ -30,6 +29,15 @@ def download_model(
     Raises:
         RuntimeError: If model cannot be found or downloaded.
     """
+    # Some wrappers ship versioned assets inside their Python dependency and
+    # must not be looked up on ModelScope/HuggingFace.
+    if model in _PACKAGE_MODELS and not os.path.isdir(model):
+        return {
+            "model": model,
+            "model_path": "",
+            "hub": "package",
+        }
+
     model_path = _resolve_model_path(model, hub, model_revision)
     try:
         config = _load_config(model_path)
@@ -102,6 +110,8 @@ def _load_config(model_path: str) -> dict:
 
 
 # Shorthand aliases — same as FunASR for compatibility
+_PACKAGE_MODELS = frozenset({"silero-vad"})
+
 _MS_ALIASES = {
     "fsmn-vad": "damo/speech_fsmn_vad_zh-cn-16k-common-pytorch",
     "ct-punc": "iic/punc_ct-transformer_cn-en-common-vocab471067-large",
