@@ -18,7 +18,7 @@ class AutoPipeline:
     Example — from dict:
         >>> pipeline = AutoPipeline.from_config({
         ...     "asr": {"model": "sensevoice-small", "device": "cpu"},
-        ...     "vad": {"model": "fsmn-vad"},
+        ...     "vad": {"model": "silero-vad"},
         ...     "punc": {"model": "ct-punc"},
         ...     "spk": {"model": "cam++"},
         ...     "llm": {

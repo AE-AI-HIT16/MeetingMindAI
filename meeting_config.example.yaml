@@ -9,10 +9,15 @@ asr:
   num_threads: 4
 
 vad:
-  model: fsmn-vad
-  hub: ms
-  max_single_segment_time: 15000
-  min_segment_ms: 200
+  model: silero-vad
+  backend: onnx
+  device: cpu
+  threshold: 0.5
+  neg_threshold: 0.35
+  min_speech_duration_ms: 250
+  min_silence_duration_ms: 500
+  speech_pad_ms: 80
+  max_speech_duration_s: 30
 
 spk:
   model: cam++
