@@ -1,15 +1,17 @@
-import os
 import json
+import os
+
+import pytest
 from dotenv import load_dotenv
 
 from meetasr.llm.abs_llm import AbsLLMClient
 from meetasr.llm.summarizer import MeetingSummarizer
-from meetasr.schemas import TranscriptResult, SentenceInfo
+from meetasr.schemas import SentenceInfo, TranscriptResult
 
 load_dotenv()
 
 
-class TestClient(AbsLLMClient):
+class _ChatClient(AbsLLMClient):
     """Simple wrapper test client using Groq/OpenAI-compatible interface."""
 
     def __init__(self, client):
@@ -37,6 +39,10 @@ def load_mock_transcript(path: str) -> TranscriptResult:
     )
 
 
+@pytest.mark.skipif(
+    os.environ.get("MEETASR_RUN_LIVE_TESTS") != "1",
+    reason="calls the live Groq API; set MEETASR_RUN_LIVE_TESTS=1",
+)
 def test_meeting_summarizer_end_to_end():
     from meetasr.llm.groq_client import GroqClient
 
@@ -44,11 +50,11 @@ def test_meeting_summarizer_end_to_end():
     # 1. Init LLM client
     # ----------------------------
     raw_client = GroqClient(
-        api_key=os.getenv("GROD_API_KEY_KHANH"),
+        api_key=os.getenv("GROQ_API_KEY"),
         model="llama-3.3-70b-versatile"
     )
 
-    client = TestClient(raw_client)
+    client = _ChatClient(raw_client)
 
     # ----------------------------
     # 2. Init summarizer

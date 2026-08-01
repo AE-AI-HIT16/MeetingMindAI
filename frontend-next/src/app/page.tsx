@@ -7,7 +7,7 @@ import { APIError, listSources } from "@/lib/api";
 
 export default async function LibraryPage() {
   const session = await getServerSession(authOptions);
-  const token = (session as any)?.accessToken;
+  const token = session?.accessToken;
 
   // Nếu là khách, không tải library
   if (!session) {

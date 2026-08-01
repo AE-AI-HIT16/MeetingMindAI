@@ -115,7 +115,7 @@ export const authOptions: NextAuthOptions = {
         (session.user as { id?: string }).id = token.sub;
       }
       // Gắn JWT nội bộ vào session để client gọi API
-      (session as any).accessToken = token.accessToken;
+      session.accessToken = token.accessToken;
       return session;
     },
   },

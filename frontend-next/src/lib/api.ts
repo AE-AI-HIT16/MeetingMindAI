@@ -120,7 +120,7 @@ export async function uploadSource(
   onProgress?: (percent: number) => void,
 ): Promise<CreateSourceResponse> {
   const session = await getSession();
-  const token = (session as any)?.accessToken;
+  const token = session?.accessToken;
   const formData = new FormData();
   formData.append("file", file);
 

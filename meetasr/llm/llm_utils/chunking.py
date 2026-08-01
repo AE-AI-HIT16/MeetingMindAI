@@ -1,13 +1,27 @@
-from typing import List, Dict
-from sentence_transformers import SentenceTransformer
-import numpy as np
+import logging
+from functools import lru_cache
+from typing import Any, Dict, List
 
-import tiktoken
+import numpy as np
 
 MAX_TOKEN = 1500
 OVERLAP_SENTENCES = 3
+logger = logging.getLogger(__name__)
 
-enc = tiktoken.encoding_for_model("gpt-4o-mini")
+
+@lru_cache(maxsize=1)
+def _get_token_encoder() -> Any | None:
+    """Load tiktoken lazily so importing this module never requires network."""
+    try:
+        import tiktoken
+
+        return tiktoken.encoding_for_model("gpt-4o-mini")
+    except Exception as exc:
+        logger.warning(
+            "tiktoken encoder is unavailable; using an approximate token count: %s",
+            exc,
+        )
+        return None
 
 # =========================
 # 1. BUILD WINDOWS
@@ -57,12 +71,25 @@ def windows_to_embeddings(windows: List[Dict], model_name: str = "all-MiniLM-L6-
     Returns:
         Numpy array of embeddings.
     """
+    try:
+        from sentence_transformers import SentenceTransformer
+    except ImportError as exc:
+        raise RuntimeError(
+            "Semantic chunking requires the optional 'legacy-llm' dependencies. "
+            "Install with: pip install -e '.[legacy-llm]'"
+        ) from exc
+
     model = SentenceTransformer(model_name)
     texts = [w["merged_text"] for w in windows]
     return np.array(model.encode(texts))
 
 def count_tokens(text: str) -> int:
-    return len(enc.encode(text))
+    encoder = _get_token_encoder()
+    if encoder is not None:
+        return len(encoder.encode(text))
+    # Conservative local approximation used only when the optional tokenizer
+    # is missing or its vocabulary cannot be downloaded.
+    return max(1, (len(text) + 3) // 4)
 
 # =========================
 # 3. COSINE SIM
@@ -179,8 +206,6 @@ def build_chunks_from_boundaries(
     while i < n:
         # lấy overlap từ chunk trước
         overlap_start = max(0, i - OVERLAP_SENTENCES)
-        current_sentences = sentence_info[overlap_start:i]
-
         start_i = i
 
         while i < n:
@@ -266,14 +291,11 @@ def run_pipeline(
     Returns:
         List of chunk dictionaries.
     """
-    import logging
-    logger = logging.getLogger(__name__)
-    
     windows = build_windows(sentence_info, window_size)
     embeddings = windows_to_embeddings(windows, model_name)
     boundaries = detect_boundaries(embeddings, threshold)
     chunks = build_chunks_from_boundaries(sentence_info, boundaries)
-    
+
     logger.debug(f"Chunking: {len(sentence_info)} sentences -> {len(chunks)} chunks")
     return chunks
 

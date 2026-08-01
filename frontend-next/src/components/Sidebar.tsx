@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
 
@@ -82,11 +83,12 @@ function UserSection() {
     return (
       <div className="mt-4 flex items-center gap-2.5 rounded-xl border border-line bg-surface-2 p-3">
         {session.user.image ? (
-          <img
+          <Image
             src={session.user.image}
             alt={session.user.name ?? "Avatar"}
             width={32}
             height={32}
+            unoptimized
             className="shrink-0 rounded-full border border-line"
           />
         ) : (
