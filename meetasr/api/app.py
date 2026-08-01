@@ -3,6 +3,10 @@
 Registers all routers and configures the application lifespan,
 CORS middleware, and global exception handler.
 """
+# Loading .env must happen before importing route modules because they read
+# authentication and database variables at import time.
+# ruff: noqa: E402
+
 from __future__ import annotations
 
 import logging
@@ -10,8 +14,10 @@ import os
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
-env_path = r"D:\HIT_BTL_AI\MeetingMindAI\.env"
-load_dotenv(env_path, override=True)
+
+# Load the repository-local .env without overriding variables supplied by the
+# shell, container or deployment platform.
+load_dotenv()
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
