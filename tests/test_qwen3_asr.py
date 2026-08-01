@@ -29,16 +29,15 @@ class _FakeQwenModel:
 
 def test_qwen3_asr_is_registered_and_buildable_without_downloading():
     assert tables.model_classes["qwen3-asr"] is Qwen3ASR
-    assert tables.model_classes["Qwen/Qwen3-ASR-0.6B"] is Qwen3ASR
+    assert tables.model_classes["Qwen/Qwen3-ASR-1.7B"] is Qwen3ASR
 
     model = AutoModel(
         model="qwen3-asr",
         hub="none",
-        model_size="Qwen/Qwen3-ASR-0.6B",
     )
 
     assert isinstance(model, Qwen3ASR)
-    assert model.model_name == "Qwen/Qwen3-ASR-0.6B"
+    assert model.model_name == "Qwen/Qwen3-ASR-1.7B"
 
 
 def test_qwen3_asr_loads_resolved_local_path_with_explicit_options(monkeypatch):
@@ -56,7 +55,7 @@ def test_qwen3_asr_loads_resolved_local_path_with_explicit_options(monkeypatch):
     monkeypatch.setitem(sys.modules, "qwen_asr", fake_qwen_module)
 
     model = Qwen3ASR(
-        model_path="/models/qwen3-asr-0.6b",
+        model_path="/models/qwen3-asr-1.7b",
         device="cuda",
         dtype="float16",
         forced_aligner="/models/qwen3-forced-aligner",
@@ -66,7 +65,7 @@ def test_qwen3_asr_loads_resolved_local_path_with_explicit_options(monkeypatch):
     )
     model._ensure_loaded()
 
-    assert captured["checkpoint"] == "/models/qwen3-asr-0.6b"
+    assert captured["checkpoint"] == "/models/qwen3-asr-1.7b"
     assert captured["kwargs"]["device_map"] == "cuda:0"
     assert captured["kwargs"]["max_inference_batch_size"] == 2
     assert captured["kwargs"]["max_new_tokens"] == 256

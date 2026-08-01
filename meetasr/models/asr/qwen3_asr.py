@@ -6,7 +6,7 @@ Uses the ``qwen-asr`` library for inference with HuggingFace Transformers backen
 Config example:
     asr:
       model: qwen3-asr
-      model_size: Qwen/Qwen3-ASR-0.6B
+      model_size: Qwen/Qwen3-ASR-1.7B
       device: cuda:0
       dtype: bfloat16
       # Optional for supported aligner languages (Vietnamese is not supported):
@@ -44,12 +44,12 @@ logger = logging.getLogger(__name__)
 
 
 @tables.register("model_classes", key="qwen3-asr")
-@tables.register("model_classes", key="Qwen/Qwen3-ASR-0.6B")
+@tables.register("model_classes", key="Qwen/Qwen3-ASR-1.7B")
 class Qwen3ASR(AbsASR):
     """Qwen3-ASR — multilingual speech recognition (52+ languages).
 
-    Compatible with Qwen/Qwen3-ASR-0.6B and Qwen/Qwen3-ASR-1.7B.
-    Uses ``qwen-asr`` library with Transformers backend.
+    Uses Qwen/Qwen3-ASR-1.7B through the ``qwen-asr`` library with the
+    Transformers backend.
 
     Notable attributes consumed by MeetPipeline:
         uses_internal_vad = False   — relies on external VAD
@@ -62,7 +62,7 @@ class Qwen3ASR(AbsASR):
     def __init__(
         self,
         model_path: str = "",
-        model_size: str = "Qwen/Qwen3-ASR-0.6B",
+        model_size: str = "Qwen/Qwen3-ASR-1.7B",
         device: str = "cpu",
         forced_aligner: str = "",
         dtype: str = "bfloat16",
@@ -76,7 +76,7 @@ class Qwen3ASR(AbsASR):
         Args:
             model_path: Downloaded local directory from AutoModel. When ``hub:
                 none`` leaves this at the registry key, ``model_size`` is used.
-            model_size: HuggingFace model ID (e.g. "Qwen/Qwen3-ASR-0.6B").
+            model_size: HuggingFace model ID (e.g. "Qwen/Qwen3-ASR-1.7B").
             device: Torch device string (e.g. "cpu", "cuda", "cuda:0").
             forced_aligner: Optional HuggingFace model ID for forced aligner
                 timestamps. The official aligner does not support Vietnamese.

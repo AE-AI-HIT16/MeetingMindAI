@@ -1,6 +1,6 @@
-# Qwen3-ASR 0.6B preset for offline Vietnamese transcription.
+# Qwen3-ASR 1.7B preset for offline Vietnamese transcription.
 #
-# qwen-asr downloads Qwen/Qwen3-ASR-0.6B on first use. For an air-gapped
+# qwen-asr downloads Qwen/Qwen3-ASR-1.7B on first use. For an air-gapped
 # runtime, download it in advance and set model_size to the local directory.
 
 device: cpu
@@ -19,7 +19,7 @@ pipeline:
 asr:
   model: qwen3-asr
   hub: none
-  model_size: Qwen/Qwen3-ASR-0.6B
+  model_size: Qwen/Qwen3-ASR-1.7B
   device: cuda:0
   dtype: bfloat16
   max_inference_batch_size: 1

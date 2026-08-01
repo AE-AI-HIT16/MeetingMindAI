@@ -4,7 +4,7 @@ Hệ thống nhận dạng tiếng nói cuộc họp, phân tách người nói 
 audio/video. Cấu hình mặc định của nhánh integration sử dụng:
 
 ```text
-Silero VAD → CAM++ → speaker turns → Zipformer tiếng Việt → ViBERT punctuation
+Silero VAD → CAM++ → speaker turns → Qwen3-ASR 1.7B
 ```
 
 Phần xử lý file tải lên là pipeline offline. WebSocket realtime có vòng đời VAD
@@ -71,8 +71,8 @@ Mặc định hệ thống dùng SQLite và lưu media tại `data/media`, vì v
 Docker để phát triển local. `HF_TOKEN` là tùy chọn, dùng để tránh giới hạn tải
 ẩn danh của Hugging Face.
 
-Lần khởi động đầu tiên sẽ tải Zipformer, CAM++ và ViBERT. Những lần sau model
-được dùng từ cache.
+Lần khởi động đầu tiên sẽ tải Qwen3-ASR 1.7B và CAM++. Những lần
+sau model được dùng từ cache.
 
 ## 3. Chạy backend
 
@@ -143,35 +143,31 @@ MINIO_BUCKET=meetasr-audio
 SQLite và local storage vẫn là lựa chọn đơn giản nhất khi chỉ test end-to-end
 trên một máy.
 
-## Cấu hình Zipformer
+## Cấu hình Qwen3-ASR 1.7B
 
 Cấu hình mặc định nằm trong `meeting_config.example.yaml`; preset không có LLM
-nằm trong `configs/models/zipformer_vi.yaml`.
+nằm trong `configs/qwen3_asr_1_7b.example.yaml`.
 
 ```yaml
 asr:
-  model: zipformer-vi
-  hub: hf
-  device: cpu
-  model_variant: fp32
-  encoder: encoder-epoch-20-avg-10.onnx
-  decoder: decoder-epoch-20-avg-10.onnx
-  joiner: joiner-epoch-20-avg-10.onnx
+  model: qwen3-asr
+  hub: none
+  model_size: Qwen/Qwen3-ASR-1.7B
+  device: cuda:0
+  dtype: bfloat16
+  max_inference_batch_size: 1
+  max_new_tokens: 512
 ```
 
-- `fp32`: ưu tiên chất lượng và dùng để benchmark.
-- `int8`: nhẹ và nhanh hơn trên CPU. Khi đổi sang `int8`, bỏ ba tên file FP32
-  hoặc thay bằng đúng tên file `.int8.onnx` trong snapshot.
+- Qwen chạy trên GPU với `bfloat16`; Silero VAD và CAM++ tiếp tục chạy CPU.
+- Qwen tự trả dấu câu nên pipeline không nạp model punctuation riêng.
+- Forced Aligner chính thức không hỗ trợ tiếng Việt nên không được bật.
 
-Chạy preset Zipformer không tạo tóm tắt:
+Chạy preset Qwen không tạo tóm tắt:
 
 ```bash
-meetasr server --config configs/models/zipformer_vi.yaml --port 8000
+meetasr server --config configs/qwen3_asr_1_7b.example.yaml --port 8000
 ```
-
-Model `hynt/Zipformer-30M-RNNT-6000h` sử dụng giấy phép
-CC-BY-NC-ND-4.0. Cần xem lại giới hạn phi thương mại trước khi dùng ngoài mục
-đích nghiên cứu hoặc đánh giá.
 
 ## Test và kiểm tra chất lượng
 
@@ -200,22 +196,9 @@ pnpm build
 
 | Model | Key | Vai trò |
 |---|---|---|
-<<<<<<< HEAD
-| SenseVoiceSmall | `sensevoice-small` | ASR (vi/zh/en/ja/ko) |
-| Paraformer-zh | `paraformer-zh` | ASR (zh/en, fastest) |
-| Qwen3-ASR 0.6B | `qwen3-asr` | Offline multilingual ASR, including Vietnamese |
-| Silero VAD | `silero-vad` | Default VAD for uploaded/offline audio |
-| FSMN-VAD | `fsmn-vad` | Optional fallback VAD |
-| CT-Punc | `ct-punc` | Punctuation Restoration |
-| CAM++ | `cam++` | Speaker Diarization |
-=======
-| Zipformer 30M RNNT | `zipformer-vi` | STT tiếng Việt mặc định, tối ưu CPU |
-| Faster-Whisper | `faster-whisper` | STT đa ngôn ngữ tùy chọn |
-| SenseVoiceSmall | `sensevoice-small` | STT đa ngôn ngữ tùy chọn |
-| Silero VAD | `silero-vad` | Phát hiện vùng có tiếng nói cho file upload |
+| Qwen3-ASR 1.7B | `qwen3-asr` | STT tiếng Việt mặc định, tự tạo dấu câu |
+| Silero VAD | `silero-vad` | Phát hiện vùng có tiếng nói |
 | CAM++ | `cam++` | Embedding và phân cụm người nói |
-| ViBERT-CaPu | `vibert-capu` | Viết hoa và khôi phục dấu câu tiếng Việt |
->>>>>>> anhtu/integration/phase2-end-to-end
 
 ## Cấu trúc chính
 
