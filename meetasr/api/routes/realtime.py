@@ -40,8 +40,8 @@ async def realtime_stream(websocket: WebSocket):
     receiver = AudioReceiver(session)
 
     # Lấy pipeline ASR đã khởi tạo khi server start
-    pipeline = getattr(websocket.app.state, "pipeline", None)
-    asr_service = getattr(websocket.app.state, "asr_service", None)
+    pipeline = getattr(websocket.app.state, "realtime_pipeline", None)
+    asr_service = getattr(websocket.app.state, "realtime_asr_service", None)
 
     # Nếu pipeline chưa load thì đóng kết nối
     if pipeline is None or asr_service is None:
