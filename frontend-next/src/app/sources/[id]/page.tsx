@@ -22,7 +22,7 @@ export default async function SourcePage({
   let source: Source;
 
   const session = await getServerSession(authOptions);
-  const token = (session as any)?.accessToken;
+  const token = session?.accessToken;
 
   try {
     source = await getSource(id, token);
