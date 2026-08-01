@@ -1,5 +1,6 @@
-# MeetASR — Vietnamese CPU configuration used by the local frontend.
-# Copy to meeting_config.yaml, set GROQ_API_KEY, then start the backend.
+# Zipformer 30M RNNT preset for offline Vietnamese meeting transcription.
+# The ONNX snapshot is downloaded from Hugging Face on first use.
+
 device: cpu
 
 pipeline:
@@ -43,16 +44,8 @@ spk:
   cluster_type: spectral
   min_cluster_size: 4
 
+# Zipformer emits unpunctuated uppercase text. ViBERT restores Vietnamese
+# capitalization and punctuation after all speaker turns have been decoded.
 punc:
   model: vibert-capu
   hub: hf
-
-llm:
-  provider: groq
-  model: openai/gpt-oss-20b
-  api_key: ${oc.env:GROQ_API_KEY}
-  language: vi                  # requires matching generic prompt files
-  temperature: 0.3
-  max_tokens: 4096
-  timeout: 120
-  retry_attempts: 3
