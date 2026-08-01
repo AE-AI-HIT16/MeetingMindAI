@@ -101,3 +101,18 @@ class StorageBackend(ABC):
         Returns:
             Một URL đầy đủ (fully-qualified) hoặc đường dẫn API tuyệt đối.
         """
+
+    def needs_redirect(self) -> bool:
+        """Cho biết backend hỗ trợ presigned URL redirect thay vì stream bytes.
+
+        Trả về ``True`` nghĩa là endpoint ``/media`` nên dùng HTTP 307 redirect
+        sang :meth:`public_url` (presigned URL của MinIO/S3), thay vì đọc toàn
+        bộ file vào RAM rồi stream lại qua FastAPI.
+
+        Mặc định ``False`` (LocalStorage stream bytes qua API).
+        Override trong ``S3Storage`` để trả ``True``.
+
+        Returns:
+            ``True`` nếu backend hỗ trợ presigned redirect; ``False`` nếu cần stream.
+        """
+        return False

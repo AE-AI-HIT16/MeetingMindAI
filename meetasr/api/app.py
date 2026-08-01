@@ -9,6 +9,10 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
+from dotenv import load_dotenv
+env_path = r"D:\HIT_BTL_AI\MeetingMindAI\.env"
+load_dotenv(env_path, override=True)
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -16,6 +20,7 @@ from fastapi.responses import JSONResponse
 from meetasr import __version__
 from meetasr.api.dependencies import CONFIG_PATH, set_pipeline
 from meetasr.api.routes import (
+    auth,
     db_routes,
     document,
     document_jobs,
@@ -116,6 +121,7 @@ app.add_middleware(
 
 # Register route modules
 app.include_router(health.router)
+app.include_router(auth.router)       # POST /v1/auth/google, GET /v1/auth/me
 app.include_router(transcribe.router)
 app.include_router(summarize.router)
 app.include_router(db_routes.router)

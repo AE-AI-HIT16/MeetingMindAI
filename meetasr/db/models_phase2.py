@@ -85,6 +85,7 @@ class Source(SQLModel, table=True):
     __tablename__ = "sources"
 
     id: str = Field(default_factory=_new_uuid, primary_key=True)
+    user_id: Optional[str] = Field(default=None, foreign_key="users.id", index=True)
     filename: str = Field(index=True)           # original file name, e.g. "meeting.mp4"
     media_type: str                              # "audio" | "video"
     duration: Optional[float] = None            # seconds; None until extracted

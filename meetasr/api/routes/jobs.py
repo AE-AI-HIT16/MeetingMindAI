@@ -108,7 +108,10 @@ async def job_events(websocket: WebSocket, job_id: str) -> None:
 
         while True:
             event = await queue.get()
-            await websocket.send_json(event)
+            try:
+                await websocket.send_json(event)
+            except Exception:
+                break
     except WebSocketDisconnect:
         return
     finally:

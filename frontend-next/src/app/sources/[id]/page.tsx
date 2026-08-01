@@ -1,4 +1,6 @@
 import { notFound } from "next/navigation";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 import { APIError, getDocument, getSource } from "@/lib/api";
 import { ProcessingView } from "@/components/ProcessingView";
 import { DocumentView } from "@/components/DocumentView";
@@ -19,8 +21,11 @@ export default async function SourcePage({
   const { view, jobId, documentId } = await searchParams;
   let source: Source;
 
+  const session = await getServerSession(authOptions);
+  const token = (session as any)?.accessToken;
+
   try {
-    source = await getSource(id);
+    source = await getSource(id, token);
   } catch (error) {
     if (error instanceof APIError && error.status === 404) {
       notFound();
@@ -31,7 +36,7 @@ export default async function SourcePage({
   if (view === "doc" && documentId) {
     let document: DocumentData;
     try {
-      document = await getDocument(documentId);
+      document = await getDocument(documentId, token);
     } catch (error) {
       if (error instanceof APIError && error.status === 404) notFound();
       throw error;
