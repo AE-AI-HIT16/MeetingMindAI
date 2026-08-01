@@ -5,6 +5,7 @@ import time
 import numpy as np
 
 from meetasr.streaming.audio_queue import AudioQueue
+from meetasr.streaming.audio_archive import AudioArchive
 
 
 class StreamSession:
@@ -63,6 +64,8 @@ class StreamSession:
         # Timeline tuyệt đối của sample đầu tiên
         # trong partial_buffer
         self.partial_buffer_start_ms = 0
+
+        self.audio_archive = AudioArchive()
 
         # ==========================================================
         # VAD
@@ -187,6 +190,8 @@ class StreamSession:
         self.asr_state = None
 
         self.diarizer_state = None
+
+        self.audio_archive.reset()
 
         while not self.asr_queue.empty():
             try:
