@@ -129,6 +129,7 @@ _HF_ALIASES = {
     "sensevoice-small": "FunAudioLLM/SenseVoiceSmall",
     "zipformer-vi": "hynt/Zipformer-30M-RNNT-6000h",
     "vibert-capu": "dragonSwing/vibert-capu",
+    "qwen3-asr": "Qwen/Qwen3-ASR-1.7B",
 }
 
 
