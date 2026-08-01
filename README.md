@@ -17,7 +17,7 @@ from meetasr.auto.auto_pipeline import AutoPipeline
 
 pipeline = AutoPipeline.from_config({
     "asr": {"model": "sensevoice-small", "device": "cpu"},
-    "vad": {"model": "fsmn-vad"},
+    "vad": {"model": "silero-vad"},
     "punc": {"model": "ct-punc"},
     "llm": {
         "provider": "ollama",
@@ -68,7 +68,7 @@ curl -X POST http://localhost:8000/v1/meeting/summarize \
 meetasr/                  ← Core package
 ├── auto/                 ← AutoModel + AutoPipeline (entry points)
 ├── models/               ← VAD, ASR, Punc, Speaker wrappers
-│   ├── vad/              ← fsmn_vad.py
+│   ├── vad/              ← silero_vad.py, fsmn_vad.py
 │   ├── asr/              ← sense_voice.py, paraformer.py
 │   ├── punc/             ← ct_transformer.py
 │   └── spk/              ← campplus.py
@@ -104,7 +104,10 @@ asr:
   device: cpu
 
 vad:
-  model: fsmn-vad
+  model: silero-vad
+  backend: onnx
+  threshold: 0.5
+  min_silence_duration_ms: 500
 
 punc:
   model: ct-punc
@@ -115,6 +118,10 @@ llm:
   api_key: ${OPENAI_API_KEY}
   language: vi
 ```
+
+The Silero configuration above applies to uploaded/offline transcription. The
+WebSocket realtime processor has a separate VAD lifecycle and is not changed by
+this backend.
 
 ## Running Tests
 
@@ -128,7 +135,8 @@ pytest tests/ -v
 |---|---|---|
 | SenseVoiceSmall | `sensevoice-small` | ASR (vi/zh/en/ja/ko) |
 | Paraformer-zh | `paraformer-zh` | ASR (zh/en, fastest) |
-| FSMN-VAD | `fsmn-vad` | Voice Activity Detection |
+| Silero VAD | `silero-vad` | Default VAD for uploaded/offline audio |
+| FSMN-VAD | `fsmn-vad` | Optional fallback VAD |
 | CT-Punc | `ct-punc` | Punctuation Restoration |
 | CAM++ | `cam++` | Speaker Diarization |
 

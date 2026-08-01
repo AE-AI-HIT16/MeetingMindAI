@@ -1,6 +1,8 @@
 """Health check endpoint — GET /v1/health."""
 from __future__ import annotations
+
 from fastapi import APIRouter
+
 from meetasr import __version__
 from meetasr.api import dependencies
 
@@ -18,7 +20,12 @@ async def health() -> dict:
     if pipeline is not None:
         # Collect names of loaded model components
         if getattr(pipeline, "vad", None) is not None:
-            models_loaded.append("fsmn-vad")
+            vad_name = getattr(pipeline.vad, "model_name", None)
+            models_loaded.append(
+                vad_name
+                if isinstance(vad_name, str)
+                else type(pipeline.vad).__name__
+            )
         if getattr(pipeline, "asr", None) is not None:
             models_loaded.append(getattr(pipeline.asr, "model_name", "asr"))
         if getattr(pipeline, "punc", None) is not None:

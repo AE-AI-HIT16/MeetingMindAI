@@ -12,6 +12,7 @@ from __future__ import annotations
 import numpy as np
 import torch
 
+from meetasr.schemas import SentenceInfo, SpeakerTurn
 
 
 def chunk_segment(
@@ -39,7 +40,166 @@ def chunk_segment(
         subseg_ed = round(min(subseg_st+dur, end_s), 3)
         chunks.append([subseg_st, subseg_ed])
         subseg_st = round(subseg_st+step,3)
+    if not chunks and end_s > start_s:
+        # Keep short backchannels (for example "Dạ") in diarization. The
+        # embedding caller circular-pads these ranges to the model input size.
+        chunks.append([round(start_s, 3), round(end_s, 3)])
     return chunks
+
+
+def build_speaker_turns(
+    audio: np.ndarray,
+    diar_segments: list[list],
+    *,
+    max_chunk_ms: int = 15000,
+    boundary_search_ms: int = 2000,
+    min_chunk_ms: int = 1000,
+    same_speaker_merge_gap_ms: int = 300,
+    sample_rate: int = 16000,
+) -> list[SpeakerTurn]:
+    """Convert diarization output into ASR-ready, speaker-homogeneous turns.
+
+    Long turns are split close to ``max_chunk_ms`` at the quietest local audio
+    frame. This keeps Qwen inputs bounded without blindly cutting at an exact
+    wall-clock interval. Speaker IDs are remapped by first appearance.
+    """
+    if max_chunk_ms <= 0:
+        raise ValueError("max_chunk_ms must be positive")
+    if boundary_search_ms < 0:
+        raise ValueError("boundary_search_ms must be non-negative")
+    if min_chunk_ms <= 0 or min_chunk_ms >= max_chunk_ms:
+        raise ValueError("min_chunk_ms must be positive and smaller than max_chunk_ms")
+    if same_speaker_merge_gap_ms < 0:
+        raise ValueError("same_speaker_merge_gap_ms must be non-negative")
+    if sample_rate <= 0:
+        raise ValueError("sample_rate must be positive")
+
+    duration_ms = int(len(audio) / sample_rate * 1000)
+    speaker_mapping: dict[int, int] = {}
+    normalized_turns: list[list[int]] = []
+
+    for raw_start_s, raw_end_s, raw_speaker in sorted(
+        diar_segments,
+        key=lambda item: (item[0], item[1]),
+    ):
+        start_ms = max(0, min(duration_ms, int(round(raw_start_s * 1000))))
+        end_ms = max(start_ms, min(duration_ms, int(round(raw_end_s * 1000))))
+        if end_ms <= start_ms:
+            continue
+
+        speaker = speaker_mapping.setdefault(
+            int(raw_speaker),
+            len(speaker_mapping),
+        )
+        if (
+            normalized_turns
+            and normalized_turns[-1][2] == speaker
+            and start_ms - normalized_turns[-1][1] <= same_speaker_merge_gap_ms
+        ):
+            normalized_turns[-1][1] = max(
+                normalized_turns[-1][1],
+                end_ms,
+            )
+        else:
+            normalized_turns.append([start_ms, end_ms, speaker])
+
+    turns: list[SpeakerTurn] = []
+    for start_ms, end_ms, speaker in normalized_turns:
+        turn_parts = _split_turn_at_quiet_boundaries(
+            audio,
+            start_ms,
+            end_ms,
+            max_chunk_ms=max_chunk_ms,
+            boundary_search_ms=boundary_search_ms,
+            min_chunk_ms=min_chunk_ms,
+            sample_rate=sample_rate,
+        )
+        turns.extend(
+            SpeakerTurn(part_start, part_end, speaker)
+            for part_start, part_end in turn_parts
+        )
+
+    return turns
+
+
+def _split_turn_at_quiet_boundaries(
+    audio: np.ndarray,
+    start_ms: int,
+    end_ms: int,
+    *,
+    max_chunk_ms: int,
+    boundary_search_ms: int,
+    min_chunk_ms: int,
+    sample_rate: int,
+) -> list[tuple[int, int]]:
+    """Split one speaker turn, preferring low-energy boundaries."""
+    parts: list[tuple[int, int]] = []
+    current_ms = start_ms
+
+    while end_ms - current_ms > max_chunk_ms:
+        target_ms = current_ms + max_chunk_ms
+        search_start_ms = max(
+            current_ms + min_chunk_ms,
+            target_ms - boundary_search_ms,
+        )
+        search_end_ms = min(
+            target_ms,
+            end_ms - min_chunk_ms,
+        )
+        cut_ms = _quietest_cut_ms(
+            audio,
+            search_start_ms,
+            search_end_ms,
+            target_ms=target_ms,
+            sample_rate=sample_rate,
+        )
+        if cut_ms <= current_ms:
+            cut_ms = target_ms
+        parts.append((current_ms, cut_ms))
+        current_ms = cut_ms
+
+    if end_ms > current_ms:
+        if (
+            parts
+            and end_ms - current_ms < min_chunk_ms
+            and parts[-1][1] == current_ms
+        ):
+            parts[-1] = (parts[-1][0], end_ms)
+        else:
+            parts.append((current_ms, end_ms))
+
+    return parts
+
+
+def _quietest_cut_ms(
+    audio: np.ndarray,
+    search_start_ms: int,
+    search_end_ms: int,
+    *,
+    target_ms: int,
+    sample_rate: int,
+) -> int:
+    """Return the lowest-RMS 40 ms frame, preferring cuts near the target."""
+    if search_end_ms <= search_start_ms:
+        return target_ms
+
+    frame_ms = 40
+    hop_ms = 10
+    frame_samples = max(1, int(frame_ms * sample_rate / 1000))
+    best: tuple[float, int, int] | None = None
+
+    for frame_start_ms in range(search_start_ms, search_end_ms + 1, hop_ms):
+        start = int(frame_start_ms * sample_rate / 1000)
+        frame = audio[start:start + frame_samples]
+        if frame.size == 0:
+            continue
+        rms = float(np.sqrt(np.mean(np.square(frame, dtype=np.float64))))
+        cut_ms = min(search_end_ms, frame_start_ms + frame_ms // 2)
+        candidate = (rms, abs(target_ms - cut_ms), -cut_ms)
+        if best is None or candidate < best:
+            best = candidate
+
+    return target_ms if best is None else -best[2]
 
 
 def circle_pad(x: "torch.Tensor", target_len: int, dim: int = 0) -> "torch.Tensor":
@@ -190,10 +350,10 @@ def _merge_short_groups(
             merged.append((start_idx, end_idx, spk))
     return merged
 def split_at_speaker_turns(
-    sentence: "SentenceInfo",
+    sentence: SentenceInfo,
     char_speakers: list[int | None],
     min_chars: int = 3,
-) -> list["SentenceInfo"]:
+) -> list[SentenceInfo]:
     """Split a sentence into multiple sub-sentences at speaker turns.
 
     Args:
@@ -204,7 +364,6 @@ def split_at_speaker_turns(
     Returns:
         List of new SentenceInfo objects divided by speaker turns.
     """
-    from meetasr.schemas import SentenceInfo
     if not char_speakers or not sentence.char_timestamps:
         return [sentence]
     char_speakers = _fill_none_gaps(char_speakers)

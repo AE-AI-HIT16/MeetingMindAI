@@ -12,6 +12,11 @@ from typing import List, Optional
 from sqlalchemy import UniqueConstraint
 from sqlmodel import Field, Relationship, SQLModel
 
+# Source.user_id references users.id. Importing the referenced model here
+# guarantees that the users table is registered in SQLModel.metadata even when
+# callers create an isolated test database from models_phase2 directly.
+from meetasr.db import user_model as _user_model  # noqa: F401
+
 '''
     Enum class
 '''

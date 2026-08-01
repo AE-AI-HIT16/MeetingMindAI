@@ -20,7 +20,7 @@ def cmd_transcribe(args: argparse.Namespace) -> None:
         # Minimal config — ASR only, no LLM
         pipeline = AutoPipeline.from_config({
             "asr": {"model": args.model, "device": args.device, "hub": args.hub},
-            "vad": {"model": "fsmn-vad", "hub": args.hub},
+            "vad": {"model": "silero-vad"},
             "punc": {"model": "ct-punc", "hub": args.hub} if not args.no_punc else None,
         })
 

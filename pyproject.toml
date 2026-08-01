@@ -41,6 +41,9 @@ dependencies = [
     "openai>=1.0",
     # FunASR (for model weight reuse)
     "funasr",
+    # Default multilingual VAD for uploaded/offline audio
+    "silero-vad==6.2.1",
+    "onnxruntime>=1.16.1,<2",
     # Production multilingual ASR backend
     "faster-whisper>=1.2,<2",
     # Vietnamese ASR backend

@@ -9,7 +9,7 @@ from typing import Any
 import numpy as np
 
 from meetasr.api.schemas_phase2 import TranscriptSegmentPayload
-from meetasr.schemas import Segment, SentenceInfo
+from meetasr.schemas import Segment, SentenceInfo, SpeakerTurn
 
 
 @dataclass(frozen=True)
@@ -28,6 +28,7 @@ class PreparedTranscription:
     audio: np.ndarray
     vad_segments: list[Segment]
     duration_ms: int
+    speaker_turns: list[SpeakerTurn] | None = None
 
 
 class ASRService:
@@ -87,16 +88,29 @@ class ASRService:
         self,
         audio_source: Any,
     ) -> PreparedTranscription:
-        """Decode an uploaded file and run VAD once."""
+        """Decode audio and optionally build diarization-first ASR turns."""
         async with self._transcribe_lock:
-            audio, vad_segments, duration_ms = await asyncio.to_thread(
-                self.pipeline.prepare_incremental_transcription,
-                audio_source,
-            )
+            if getattr(self.pipeline, "diarization_first", False):
+                (
+                    audio,
+                    vad_segments,
+                    speaker_turns,
+                    duration_ms,
+                ) = await asyncio.to_thread(
+                    self.pipeline.prepare_diarization_first_transcription,
+                    audio_source,
+                )
+            else:
+                audio, vad_segments, duration_ms = await asyncio.to_thread(
+                    self.pipeline.prepare_incremental_transcription,
+                    audio_source,
+                )
+                speaker_turns = None
         return PreparedTranscription(
             audio=audio,
             vad_segments=vad_segments,
             duration_ms=duration_ms,
+            speaker_turns=speaker_turns,
         )
 
     async def transcribe_segment(
@@ -109,12 +123,17 @@ class ASRService:
     ) -> list[SentenceInfo]:
         """Run ASR for one VAD segment while preserving global timestamps."""
         kwargs = {"key": key} if key is not None else {}
+        effective_language = (
+            getattr(self.pipeline, "transcription_language", "auto")
+            if language == "auto"
+            else language
+        )
         async with self._transcribe_lock:
             return await asyncio.to_thread(
                 self.pipeline.transcribe_vad_segment,
                 prepared.audio,
                 segment,
-                language,
+                effective_language,
                 **kwargs,
             )
 
@@ -123,8 +142,13 @@ class ASRService:
         prepared: PreparedTranscription,
         sentences: list[SentenceInfo],
     ) -> list[SentenceInfo]:
-        """Run full-file diarization/punctuation after provisional ASR."""
+        """Finalize preassigned turns or run legacy ASR-first diarization."""
         async with self._transcribe_lock:
+            if prepared.speaker_turns is not None:
+                return await asyncio.to_thread(
+                    self.pipeline.finalize_preassigned_transcript,
+                    sentences,
+                )
             return await asyncio.to_thread(
                 self.pipeline.finalize_incremental_transcript,
                 prepared.audio,
