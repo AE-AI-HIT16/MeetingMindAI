@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # MeetASR backend runtime dependencies (Python 3.10+)
 #
 # FFmpeg is a system dependency and cannot be installed reliably with pip.
@@ -47,3 +48,9 @@ openai>=1.50,<3
 
 # Project package
 -e .
+=======
+# Convenience install for contributors who need every supported local feature.
+# Dependency versions live in pyproject.toml so the two files cannot drift.
+# FFmpeg remains a system dependency; see README.md.
+-e .[dev,export,postgres,s3]
+>>>>>>> anhtu/integration/phase2-end-to-end

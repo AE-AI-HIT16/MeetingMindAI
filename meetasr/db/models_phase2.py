@@ -12,6 +12,11 @@ from typing import List, Optional
 from sqlalchemy import UniqueConstraint
 from sqlmodel import Field, Relationship, SQLModel
 
+# Source.user_id references users.id. Importing the referenced model here
+# guarantees that the users table is registered in SQLModel.metadata even when
+# callers create an isolated test database from models_phase2 directly.
+from meetasr.db import user_model as _user_model  # noqa: F401
+
 '''
     Enum class
 '''
@@ -85,6 +90,7 @@ class Source(SQLModel, table=True):
     __tablename__ = "sources"
 
     id: str = Field(default_factory=_new_uuid, primary_key=True)
+    user_id: Optional[str] = Field(default=None, foreign_key="users.id", index=True)
     filename: str = Field(index=True)           # original file name, e.g. "meeting.mp4"
     media_type: str                              # "audio" | "video"
     duration: Optional[float] = None            # seconds; None until extracted

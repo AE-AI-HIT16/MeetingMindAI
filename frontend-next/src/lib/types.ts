@@ -50,6 +50,9 @@ export interface TranscriptSegment {
   endMs: number;
   speaker: number | null; // 0-based; null until diarization completes
   text: string;
+  /** Internal marker: "partial" for in-progress ASR, "delta" for confirmed.
+   *  Used to control which segments get replaced when a delta arrives. */
+  _partialType?: "partial" | "delta";
 }
 
 export interface DocSection {
@@ -79,6 +82,11 @@ export interface StatusJobEvent {
 
 export interface TranscriptDeltaJobEvent {
   type: "transcript_delta";
+  segment: ApiTranscriptSegment;
+}
+
+export interface TranscriptPartialJobEvent {
+  type: "transcript_partial";
   segment: ApiTranscriptSegment;
 }
 
@@ -112,6 +120,7 @@ export interface ErrorJobEvent {
 export type JobEvent =
   | StatusJobEvent
   | TranscriptDeltaJobEvent
+  | TranscriptPartialJobEvent
   | DocDeltaJobEvent
   | SpeakerUpdateJobEvent
   | DoneJobEvent

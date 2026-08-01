@@ -1,12 +1,17 @@
 import type { NextConfig } from "next";
+import path from "path";
 
-// Proxy small API/media calls to FastAPI during dev. Large file uploads go
-// directly to FastAPI because the Next proxy buffers and limits request bodies.
+// Proxy /v1/* sang FastAPI khi dev
 const API = process.env.MEETASR_API ?? "http://127.0.0.1:8000";
 
 const nextConfig: NextConfig = {
+  allowedDevOrigins: ["127.0.0.1", "localhost"],
   async rewrites() {
     return [{ source: "/v1/:path*", destination: `${API}/v1/:path*` }];
+  },
+  // Bao Turbopack biet dung root la thu muc frontend-next, tranh nham voi lockfile o thu muc cha
+  turbopack: {
+    root: path.resolve(__dirname),
   },
 };
 

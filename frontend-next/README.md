@@ -8,7 +8,9 @@ Kế hoạch chi tiết: [`../meet_docs/docs/12_frontend_nextjs_plan.md`](../mee
 ## Chạy dev
 
 ```bash
-pnpm install
+corepack enable
+pnpm install --frozen-lockfile
+cp .env.example .env.local
 pnpm dev            # http://localhost:3000
 ```
 
@@ -22,7 +24,9 @@ cầu finalize đi trực tiếp từ browser tới FastAPI. Finalize trả `202
 - `NEXT_PUBLIC_WS_HOST`: host WebSocket Job/live mic.
 
 Sao chép `.env.example` thành `.env.local` nếu backend không chạy ở host mặc
-định.
+định. OAuth là tùy chọn vì giao diện hỗ trợ chế độ khách. Nếu bật đăng nhập,
+điền `NEXTAUTH_URL`, `NEXTAUTH_SECRET` và credentials Google/GitHub; giá trị
+`NEXTAUTH_SECRET` phải giống `JWT_SECRET` của backend trong flow local hiện tại.
 
 ## Ngôn ngữ thiết kế — "Transcription Studio"
 

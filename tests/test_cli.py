@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import json
+import os
 from argparse import Namespace
 
-from meetasr.bin.cli import cmd_transcribe
+from meetasr.bin.cli import cmd_server, cmd_transcribe
 from meetasr.schemas import SentenceInfo, TranscriptResult
 
 
@@ -73,3 +74,22 @@ def test_transcribe_json_writes_output_file(monkeypatch, tmp_path, capsys):
     assert payload["key"] == "meeting"
     assert "Saved JSON:" in captured.err
     assert captured.out == ""
+
+
+def test_server_explicit_config_overrides_environment(monkeypatch):
+    captured = {}
+    monkeypatch.setenv("MEETASR_CONFIG", "old.yaml")
+    monkeypatch.setattr("uvicorn.run", lambda *args, **kwargs: captured.update(kwargs))
+
+    cmd_server(
+        Namespace(
+            config="chosen.yaml",
+            host="127.0.0.1",
+            port=8123,
+            reload=False,
+        )
+    )
+
+    assert captured["host"] == "127.0.0.1"
+    assert captured["port"] == 8123
+    assert os.environ["MEETASR_CONFIG"] == "chosen.yaml"

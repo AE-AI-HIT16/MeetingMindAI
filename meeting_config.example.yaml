@@ -2,11 +2,28 @@
 # Copy to meeting_config.yaml, set GROQ_API_KEY, then start the backend.
 device: cpu
 
+pipeline:
+  transcription_language: vi
+  diarization_first:
+    enabled: true
+    max_chunk_ms: 15000
+    boundary_search_ms: 2000
+    min_chunk_ms: 1000
+
 asr:
   model: zipformer-vi
   hub: hf
   device: cpu
+  model_variant: fp32
+  encoder: encoder-epoch-20-avg-10.onnx
+  decoder: decoder-epoch-20-avg-10.onnx
+  joiner: joiner-epoch-20-avg-10.onnx
+  tokens: config.json
+  bpe_vocab: bpe.model
+  sample_rate: 16000
+  feature_dim: 80
   num_threads: 4
+  decoding_method: greedy_search
 
 vad:
   model: silero-vad
@@ -22,6 +39,7 @@ vad:
 spk:
   model: cam++
   hub: ms
+  device: cpu
   cluster_type: spectral
   min_cluster_size: 4
 

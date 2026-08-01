@@ -36,13 +36,20 @@ export class APIError extends Error {
 async function apiFetch<T>(
   input: string,
   init?: RequestInit,
+  token?: string,
 ): Promise<T> {
   const apiBase =
     typeof window === "undefined"
       ? process.env.MEETASR_API ?? "http://127.0.0.1:8000"
       : "";
   const url = apiBase ? new URL(input, apiBase).toString() : input;
-  const res = await fetch(url, init);
+  
+  const headers = new Headers(init?.headers);
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+
+  const res = await fetch(url, { ...init, headers });
 
   if (!res.ok) {
     let message = `HTTP ${res.status}`;
@@ -86,16 +93,16 @@ function directApiUrl(path: string): string {
  * Lấy danh sách tất cả Source (trang Library).
  * Tương đương: GET /v1/sources
  */
-export async function listSources(): Promise<Source[]> {
-  return apiFetch<Source[]>("/v1/sources", { cache: "no-store" });
+export async function listSources(token?: string): Promise<Source[]> {
+  return apiFetch<Source[]>("/v1/sources", { cache: "no-store" }, token);
 }
 
 /**
  * Lấy chi tiết một Source theo ID.
  * Tương đương: GET /v1/sources/{id}
  */
-export async function getSource(id: string): Promise<Source> {
-  return apiFetch<Source>(`/v1/sources/${id}`, { cache: "no-store" });
+export async function getSource(id: string, token?: string): Promise<Source> {
+  return apiFetch<Source>(`/v1/sources/${id}`, { cache: "no-store" }, token);
 }
 
 /**
@@ -106,10 +113,14 @@ export async function getSource(id: string): Promise<Source> {
  * @param onProgress  Callback nhận % upload (0–100); chỉ hoạt động trên trình duyệt.
  * @returns ID của Source và Job vừa tạo (status = "queued").
  */
+import { getSession } from "next-auth/react";
+
 export async function uploadSource(
   file: File,
   onProgress?: (percent: number) => void,
 ): Promise<CreateSourceResponse> {
+  const session = await getSession();
+  const token = session?.accessToken;
   const formData = new FormData();
   formData.append("file", file);
 
@@ -118,6 +129,9 @@ export async function uploadSource(
     return new Promise<CreateSourceResponse>((resolve, reject) => {
       const xhr = new XMLHttpRequest();
       xhr.open("POST", directApiUrl("/v1/sources"));
+      if (token) {
+        xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+      }
 
       xhr.upload.addEventListener("progress", (e) => {
         if (e.lengthComputable) {
@@ -158,7 +172,7 @@ export async function uploadSource(
   return apiFetch<CreateSourceResponse>(directApiUrl("/v1/sources"), {
     method: "POST",
     body: formData,
-  });
+  }, token);
 }
 
 /**
@@ -181,10 +195,10 @@ export function mediaUrl(sourceId: string): string {
 // Documents API
 // ---------------------------------------------------------------------------
 
-export async function getDocument(id: string): Promise<DocumentData> {
+export async function getDocument(id: string, token?: string): Promise<DocumentData> {
   return apiFetch<DocumentData>(`/v1/documents/${id}`, {
     cache: "no-store",
-  });
+  }, token);
 }
 
 export async function finalizeDocument(

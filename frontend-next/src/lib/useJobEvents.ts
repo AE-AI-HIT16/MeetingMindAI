@@ -72,7 +72,7 @@ export function useJobEvents(jobId: string | null): JobEventsState {
         }
 
         if (event.type === "transcript_delta") {
-          const incoming = mapTranscriptSegment(event.segment);
+          const incoming = { ...mapTranscriptSegment(event.segment), _partialType: "delta" as const };
           setSegments((current) => {
             const index = current.findIndex((item) =>
               incoming.id !== null
@@ -81,9 +81,22 @@ export function useJobEvents(jobId: string | null): JobEventsState {
                   item.endMs === incoming.endMs &&
                   item.text === incoming.text,
             );
-            if (index < 0) return [...current, incoming];
-            const next = [...current];
-            next[index] = incoming;
+
+            let next: typeof current;
+            if (index < 0) {
+              next = [...current, incoming];
+            } else {
+              next = [...current];
+              next[index] = incoming;
+            }
+
+            // Remove only partial segments whose startMs <= this delta's endMs.
+            // These partials are now confirmed/superseded by the delta.
+            // Partials that start AFTER the delta are still in-progress and should remain.
+            next = next.filter(
+              (item) => item._partialType !== "partial" || item.startMs > incoming.endMs,
+            );
+
             return next;
           });
           return;
@@ -124,6 +137,35 @@ export function useJobEvents(jobId: string | null): JobEventsState {
           return;
         }
 
+        if (event.type === "transcript_partial") {
+          const incoming = { ...mapTranscriptSegment(event.segment), _partialType: "partial" as const };
+          setSegments((current) => {
+            // Get max endMs of confirmed delta segments
+            const maxDeltaEndMs = current.reduce(
+              (max, item) =>
+                item._partialType === "delta" ? Math.max(max, item.endMs) : max,
+              0,
+            );
+
+            // Ignore stale partials belonging to an already confirmed delta timeframe
+            if (incoming.startMs < maxDeltaEndMs) {
+              return current;
+            }
+
+            // Append partial: if a partial with the same startMs exists
+            // (same utterance being refined by ASR), update it in place.
+            // Otherwise, add the new partial alongside existing ones.
+            const index = current.findIndex(
+              (item) => item._partialType === "partial" && item.startMs === incoming.startMs,
+            );
+            if (index < 0) return [...current, incoming];
+            const next = [...current];
+            next[index] = incoming;
+            return next;
+          });
+          return;
+        }
+
         if (event.type === "done") {
           terminal = true;
           setDone(true);
@@ -134,9 +176,12 @@ export function useJobEvents(jobId: string | null): JobEventsState {
           return;
         }
 
-        terminal = true;
-        setError(event.message);
-        socket?.close();
+        if (event.type === "error") {
+          terminal = true;
+          setError(event.message);
+          socket?.close();
+          return;
+        }
       };
 
       socket.onerror = () => {

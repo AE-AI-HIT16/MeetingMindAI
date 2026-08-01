@@ -11,8 +11,14 @@ import type { ApiTranscriptSegment } from "./types";
 export interface TranscriptDelta {
   text: string;
   sentenceInfo: SentenceInfo[];
-  /** Local timestamp (ms since epoch) when we received this delta. */
   receivedAt: number;
+
+  startMs: number;
+  endMs: number;
+  speaker: number | null;
+
+  // thêm để biết loại transcript
+  type: "transcript_delta" | "transcript_partial";
 }
 
 export interface SentenceInfo {
@@ -191,11 +197,13 @@ export function useRealtimeStream(): RealtimeStreamState &
               : new TextDecoder().decode(ev.data),
           );
           const segment = data.segment as ApiTranscriptSegment | undefined;
+          console.log("WS message:", data.type, segment);
+
           if (data.type === "transcript_delta" && segment) {
             const mapped = mapTranscriptSegment(segment);
-            setTranscripts((prev) => [
-              ...prev,
-              {
+
+            setTranscripts((prev) => {
+              const item: TranscriptDelta = {
                 text: mapped.text,
                 sentenceInfo: [
                   {
@@ -206,8 +214,90 @@ export function useRealtimeStream(): RealtimeStreamState &
                   },
                 ],
                 receivedAt: Date.now(),
-              },
-            ]);
+                startMs: mapped.startMs,
+                endMs: mapped.endMs,
+                speaker: mapped.speaker,
+                type: "transcript_delta",
+              };
+
+              // Find if delta already exists for this exact startMs
+              const deltaIndex = prev.findIndex(
+                (t) => t.type === "transcript_delta" && t.startMs === mapped.startMs,
+              );
+
+              let next: TranscriptDelta[];
+              if (deltaIndex !== -1) {
+                next = [...prev];
+                next[deltaIndex] = item;
+              } else {
+                next = [...prev, item];
+              }
+
+              // Remove only partial segments whose startMs <= this delta's endMs.
+              // These partials are now confirmed/superseded by the delta.
+              // Partials that start AFTER the delta are still in-progress and should remain.
+              next = next.filter(
+                (t) => t.type !== "transcript_partial" || t.startMs > mapped.endMs,
+              );
+
+              next.sort((a, b) => a.startMs - b.startMs);
+              return next;
+            });
+          }
+
+          if (data.type === "transcript_partial" && segment) {
+            const mapped = mapTranscriptSegment(segment);
+
+            setTranscripts((prev) => {
+              // Get max endMs of confirmed transcript_delta segments
+              const maxDeltaEndMs = prev.reduce(
+                (max, t) =>
+                  t.type === "transcript_delta" ? Math.max(max, t.endMs) : max,
+                0,
+              );
+
+              // Ignore stale partials belonging to an already confirmed delta timeframe
+              if (mapped.startMs < maxDeltaEndMs) {
+                return prev;
+              }
+
+              const item: TranscriptDelta = {
+                text: mapped.text,
+                sentenceInfo: [
+                  {
+                    text: mapped.text,
+                    start: mapped.startMs / 1000,
+                    end: mapped.endMs / 1000,
+                    speaker: mapped.speaker,
+                  },
+                ],
+                receivedAt: Date.now(),
+                startMs: mapped.startMs,
+                endMs: mapped.endMs,
+                speaker: mapped.speaker,
+                type: "transcript_partial",
+              };
+
+              // Append partial: if a partial with the same startMs already exists
+              // (same utterance being refined by ASR), update it in place.
+              // Otherwise, add the new partial alongside existing ones so multiple
+              // concurrent partial utterances are visible on the UI.
+              const existingIdx = prev.findIndex(
+                (t) => t.type === "transcript_partial" && t.startMs === mapped.startMs,
+              );
+
+              let next: TranscriptDelta[];
+              if (existingIdx !== -1) {
+                next = [...prev];
+                next[existingIdx] = item;
+              } else {
+                next = [...prev, item];
+              }
+//               const next = [...prev, item];
+
+              next.sort((a, b) => a.startMs - b.startMs);
+              return next;
+            });
           }
         } catch {
           // ignore non-JSON

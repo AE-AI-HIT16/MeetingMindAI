@@ -1,0 +1,51 @@
+# Zipformer 30M RNNT preset for offline Vietnamese meeting transcription.
+# The ONNX snapshot is downloaded from Hugging Face on first use.
+
+device: cpu
+
+pipeline:
+  transcription_language: vi
+  diarization_first:
+    enabled: true
+    max_chunk_ms: 15000
+    boundary_search_ms: 2000
+    min_chunk_ms: 1000
+
+asr:
+  model: zipformer-vi
+  hub: hf
+  device: cpu
+  model_variant: fp32
+  encoder: encoder-epoch-20-avg-10.onnx
+  decoder: decoder-epoch-20-avg-10.onnx
+  joiner: joiner-epoch-20-avg-10.onnx
+  tokens: config.json
+  bpe_vocab: bpe.model
+  sample_rate: 16000
+  feature_dim: 80
+  num_threads: 4
+  decoding_method: greedy_search
+
+vad:
+  model: silero-vad
+  backend: onnx
+  device: cpu
+  threshold: 0.5
+  neg_threshold: 0.35
+  min_speech_duration_ms: 250
+  min_silence_duration_ms: 500
+  speech_pad_ms: 80
+  max_speech_duration_s: 30
+
+spk:
+  model: cam++
+  hub: ms
+  device: cpu
+  cluster_type: spectral
+  min_cluster_size: 4
+
+# Zipformer emits unpunctuated uppercase text. ViBERT restores Vietnamese
+# capitalization and punctuation after all speaker turns have been decoded.
+punc:
+  model: vibert-capu
+  hub: hf

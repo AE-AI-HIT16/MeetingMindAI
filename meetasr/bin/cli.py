@@ -8,6 +8,8 @@ import logging
 import os
 import sys
 
+from dotenv import load_dotenv
+
 
 def cmd_transcribe(args: argparse.Namespace) -> None:
     """Run transcription on one or more audio files."""
@@ -104,7 +106,7 @@ def cmd_server(args: argparse.Namespace) -> None:
     """Start the FastAPI server."""
     import uvicorn
     if args.config:
-        os.environ.setdefault("MEETASR_CONFIG", args.config)
+        os.environ["MEETASR_CONFIG"] = args.config
     uvicorn.run(
         "meetasr.api.app:app",
         host=args.host,
@@ -116,6 +118,7 @@ def cmd_server(args: argparse.Namespace) -> None:
 
 def main() -> None:
     """Main CLI entry point."""
+    load_dotenv()
     parser = argparse.ArgumentParser(
         prog="meetasr",
         description="MeetASR — Meeting Speech Recognition + LLM Summarization",

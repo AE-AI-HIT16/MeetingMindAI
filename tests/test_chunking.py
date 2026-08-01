@@ -1,8 +1,11 @@
+import json
 import pprint
+
+import numpy as np
+
+from meetasr.llm.llm_utils import chunking
 from meetasr.llm.llm_utils.chunking import run_pipeline_with_markdown
 from meetasr.llm.llm_utils.validate import process_transcript
-import json
-
 
 # =========================
 # MOCK DATA
@@ -39,7 +42,16 @@ with open("tests/data/meeting_mock.json", "r", encoding="utf-8") as f:
 # =========================
 # TEST CASE
 # =========================
-def test_run_pipeline_with_markdown():
+def test_run_pipeline_with_markdown(monkeypatch):
+    monkeypatch.setattr(
+        chunking,
+        "windows_to_embeddings",
+        lambda windows, model_name="all-MiniLM-L6-v2": np.ones(
+            (len(windows), 2), dtype=np.float32
+        ),
+    )
+    monkeypatch.setattr(chunking, "count_tokens", lambda text: len(text.split()))
+
     process_transcript(mock_meeting)
     sentence_info = mock_meeting["sentence_info"]
 
@@ -83,4 +95,3 @@ def test_run_pipeline_with_markdown():
 
     print("\n================ MARKDOWN ================\n")
     print(markdown)
-

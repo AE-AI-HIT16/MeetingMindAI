@@ -5,7 +5,7 @@ import numpy as np
 
 SAMPLE_RATE = 16000
 
-MIN_WINDOW_SECONDS = 4
+MIN_WINDOW_SECONDS = 1
 MAX_WINDOW_SECONDS = 30
 
 logger = logging.getLogger(__name__)
@@ -42,47 +42,50 @@ class SegmentWindowBuilder:
             await self._append_segment(segment)
 
 
-    async def _append_segment(self, segment: np.ndarray,):
+    async def _append_segment(self, segment: np.ndarray):
         """
         Thêm segment vào buffer.
-        Có xử lý segment >30s.
+
+        - Không cắt segment nếu còn đủ chỗ trong window.
+        - Nếu segment tiếp theo làm vượt MAX_WINDOW_SECONDS thì flush window hiện tại.
+        - Chỉ cắt khi chính segment lớn hơn MAX_WINDOW_SECONDS.
         """
 
+        max_samples = int(MAX_WINDOW_SECONDS * SAMPLE_RATE)
         remaining = segment
 
         while len(remaining) > 0:
-            max_samples = int(MAX_WINDOW_SECONDS * SAMPLE_RATE)
-
             current_samples = sum(len(x) for x in self.buffer)
 
-            remain_capacity = (max_samples - current_samples)
-
-            # ==================================================
-            # Segment còn dư lớn hơn phần window còn lại
-            # ==================================================
-            if len(remaining) >= remain_capacity:
-
-                part = remaining[:remain_capacity]
+            # --------------------------------------------------
+            # Buffer đang rỗng nhưng segment > MAX_WINDOW_SECONDS
+            # -> phải cắt thành nhiều phần
+            # --------------------------------------------------
+            if current_samples == 0 and len(remaining) > max_samples:
+                part = remaining[:max_samples]
 
                 self.buffer.append(part)
+                self.duration += len(part) / SAMPLE_RATE
 
-                self.duration += (len(part) / SAMPLE_RATE)
+                remaining = remaining[max_samples:]
 
-                remaining = remaining[remain_capacity:]
-
-                # Window đủ 30s
                 await self.flush()
+                continue
 
-            else:
+            # --------------------------------------------------
+            # Thêm cả segment vẫn không vượt MAX_WINDOW_SECONDS
+            # --------------------------------------------------
+            if current_samples + len(remaining) <= max_samples:
                 self.buffer.append(remaining)
+                self.duration += len(remaining) / SAMPLE_RATE
+                break
 
-                self.duration += (len(remaining) / SAMPLE_RATE)
-
-                remaining = np.empty(0, dtype=np.float32)
-
-                # Window đạt tối thiểu 4s
-                if (self.duration >= MIN_WINDOW_SECONDS):
-                    await self.flush()
+            # --------------------------------------------------
+            # Nếu thêm segment sẽ vượt MAX_WINDOW_SECONDS
+            # -> gửi window hiện tại trước
+            # --------------------------------------------------
+            if current_samples > 0:
+                await self.flush()
 
 
     async def flush(self):
