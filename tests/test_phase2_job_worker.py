@@ -9,7 +9,6 @@ import pytest
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine, select
 
-from meetasr.api.schemas_phase2 import TranscriptSegmentPayload
 from meetasr.db.models_phase2 import (
     Document,
     DocumentMode,
@@ -20,7 +19,7 @@ from meetasr.db.models_phase2 import (
     TranscriptSegment,
 )
 from meetasr.realtime import job_worker
-from meetasr.schemas import Segment, SentenceInfo
+from meetasr.schemas import Segment, SentenceInfo, SpeakerTurn
 from meetasr.services.asr_service import PreparedTranscription
 
 
@@ -175,4 +174,90 @@ async def test_upload_worker_persists_segments_document_and_done_event(
     )
     assert [update["speaker"] for update in speaker_event["updates"]] == [0, 1]
     assert published[-1]["live_document_id"] == live_document.id
+    engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_upload_worker_persists_diarization_first_speakers_immediately(
+    monkeypatch,
+) -> None:
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    SQLModel.metadata.create_all(engine)
+    monkeypatch.setattr(job_worker, "engine", engine)
+
+    with Session(engine) as db:
+        source = Source(
+            filename="meeting.wav",
+            media_type=MediaType.AUDIO,
+            storage_path="uploads/meeting.wav",
+        )
+        db.add(source)
+        db.flush()
+        job = Job(source_id=source.id, status=JobStatus.QUEUED)
+        db.add(job)
+        db.commit()
+        db.refresh(job)
+        job_id = job.id
+
+    class FakeStorage:
+        def abs_path(self, key: str) -> Path:
+            return Path("/tmp/meeting.wav")
+
+    class FakeASRService:
+        async def prepare_incremental(self, audio_source):
+            return PreparedTranscription(
+                audio=np.zeros(4 * 16000, dtype=np.float32),
+                vad_segments=[Segment(0, 4000)],
+                duration_ms=4000,
+                speaker_turns=[
+                    SpeakerTurn(0, 2000, 0),
+                    SpeakerTurn(2000, 4000, 1),
+                ],
+            )
+
+        async def transcribe_segment(self, prepared, segment, *, key=None):
+            return [
+                SentenceInfo(
+                    text="Lượt một" if segment.start_ms == 0 else "Lượt hai",
+                    start=segment.start_s,
+                    end=segment.end_s,
+                )
+            ]
+
+        async def finalize_incremental(self, prepared, sentences):
+            return sentences
+
+    published: list[dict] = []
+
+    class FakeEventBus:
+        async def publish(self, event_job_id, event):
+            assert event_job_id == job_id
+            published.append(event.model_dump(mode="json"))
+
+    monkeypatch.setattr(job_worker, "event_bus", FakeEventBus())
+    queue = job_worker.JobQueue()
+    queue._storage = FakeStorage()
+    queue._asr_service = FakeASRService()
+
+    await queue._process(job_id)
+
+    with Session(engine) as db:
+        segments = db.exec(
+            select(TranscriptSegment)
+            .where(TranscriptSegment.job_id == job_id)
+            .order_by(TranscriptSegment.start_ms)
+        ).all()
+
+    assert [segment.speaker for segment in segments] == [0, 1]
+    transcript_events = [
+        event for event in published if event["type"] == "transcript_delta"
+    ]
+    assert [
+        event["segment"]["speaker"] for event in transcript_events
+    ] == [0, 1]
+    assert not any(event["type"] == "speaker_update" for event in published)
     engine.dispose()

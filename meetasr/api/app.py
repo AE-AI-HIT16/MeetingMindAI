@@ -3,12 +3,22 @@
 Registers all routers and configures the application lifespan,
 CORS middleware, and global exception handler.
 """
+# Loading .env must happen before importing route modules because they read
+# authentication and database variables at import time.
+# ruff: noqa: E402
+
 from __future__ import annotations
 
 import logging
 import os
 import asyncio
 from contextlib import asynccontextmanager
+
+from dotenv import load_dotenv
+
+# Load the repository-local .env without overriding variables supplied by the
+# shell, container or deployment platform.
+load_dotenv()
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,6 +27,7 @@ from fastapi.responses import JSONResponse
 from meetasr import __version__
 from meetasr.api.dependencies import CONFIG_PATH, set_pipeline
 from meetasr.api.routes import (
+    auth,
     db_routes,
     document,
     document_jobs,
@@ -222,6 +233,7 @@ app.add_middleware(
 
 # Register route modules
 app.include_router(health.router)
+app.include_router(auth.router)       # POST /v1/auth/google, GET /v1/auth/me
 app.include_router(transcribe.router)
 app.include_router(summarize.router)
 app.include_router(db_routes.router)

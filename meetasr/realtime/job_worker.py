@@ -35,7 +35,6 @@ from meetasr.services.asr_service import ASRService
 from meetasr.services.document_service import DocumentService
 from meetasr.storage.backend import StorageBackend
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -122,28 +121,46 @@ class JobQueue:
             if self._asr_service is None:
                 raise RuntimeError("ASR pipeline chưa được cấu hình.")
 
-            prepared = await self._asr_service.prepare_incremental(audio_source)
             await self._publish_status(
                 job_id,
                 JobStage.TRANSCRIBING,
-                0.15,
+                0.10,
             )
+            prepared = await self._asr_service.prepare_incremental(audio_source)
             provisional_sentences: list[SentenceInfo] = []
             persisted: list[TranscriptSegmentPayload] = []
-            chunk_count = max(len(prepared.vad_segments), 1)
+            speaker_first = prepared.speaker_turns is not None
+            work_items = (
+                [
+                    (turn.to_segment(), turn.speaker)
+                    for turn in prepared.speaker_turns
+                ]
+                if speaker_first
+                else [
+                    (vad_segment, None)
+                    for vad_segment in prepared.vad_segments
+                ]
+            )
+            chunk_count = max(len(work_items), 1)
 
-            for index, vad_segment in enumerate(
-                prepared.vad_segments,
+            for index, (transcription_segment, speaker) in enumerate(
+                work_items,
                 start=1,
             ):
                 chunk_sentences = await self._asr_service.transcribe_segment(
                     prepared,
-                    vad_segment,
+                    transcription_segment,
                     key=f"{source.filename}:chunk-{index}",
                 )
+                if speaker_first:
+                    for sentence in chunk_sentences:
+                        sentence.speaker = speaker
                 provisional_sentences.extend(chunk_sentences)
                 chunk_payloads = [
-                    _sentence_to_payload(sentence, speaker=None)
+                    _sentence_to_payload(
+                        sentence,
+                        speaker=sentence.speaker if speaker_first else None,
+                    )
                     for sentence in chunk_sentences
                 ]
                 persisted_chunk = self._persist_segments(

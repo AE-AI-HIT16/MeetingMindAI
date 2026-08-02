@@ -1,7 +1,9 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
+import { useSession, signOut } from "next-auth/react";
 
 const NAV = [
   { href: "/", label: "Thư viện", icon: LibraryIcon },
@@ -52,20 +54,77 @@ export function Sidebar() {
         })}
       </nav>
 
-      {/* Storage — what the person actually controls */}
-      <div className="mt-auto rounded-xl border border-line bg-surface-2 p-4">
+      {/* User info hoac nut dang nhap */}
+      <UserSection />
+
+      {/* Storage */}
+      <div className="mt-4 rounded-xl border border-line bg-surface-2 p-4">
         <div className="flex items-center justify-between">
-          <p className="eyebrow">Dung lượng</p>
+          <p className="eyebrow">Dung luong</p>
           <span className="font-mono text-xs text-ink-soft">6.2 / 20 GB</span>
         </div>
         <div className="mt-2.5 h-1.5 overflow-hidden rounded-full bg-line">
           <div className="h-full w-[31%] rounded-full bg-brand" />
         </div>
         <p className="mt-2 text-xs text-ink-faint">
-          Audio, video và tài liệu được lưu trên máy chủ.
+          Audio, video va tai lieu duoc luu tren may chu.
         </p>
       </div>
     </aside>
+  );
+}
+
+function UserSection() {
+  const { data: session, status } = useSession();
+
+  if (status === "loading") return null;
+
+  if (status === "authenticated" && session?.user) {
+    return (
+      <div className="mt-4 flex items-center gap-2.5 rounded-xl border border-line bg-surface-2 p-3">
+        {session.user.image ? (
+          <Image
+            src={session.user.image}
+            alt={session.user.name ?? "Avatar"}
+            width={32}
+            height={32}
+            unoptimized
+            className="shrink-0 rounded-full border border-line"
+          />
+        ) : (
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand text-xs font-semibold text-white">
+            {session.user.name?.[0]?.toUpperCase() ?? "U"}
+          </div>
+        )}
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium text-ink leading-tight">
+            {session.user.name}
+          </p>
+          <button
+            onClick={() => signOut({ callbackUrl: "/login" })}
+            className="text-xs text-ink-faint transition hover:text-red-500"
+          >
+            Dang xuat
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-4">
+      <Link
+        href="/login"
+        className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-line px-4 py-2 text-xs text-ink-faint transition hover:border-brand hover:text-brand"
+      >
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+          <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
+          <polyline points="10 17 15 12 10 7" />
+          <line x1="15" y1="12" x2="3" y2="12" />
+        </svg>
+        Dang nhap de luu du lieu
+      </Link>
+    </div>
   );
 }
 

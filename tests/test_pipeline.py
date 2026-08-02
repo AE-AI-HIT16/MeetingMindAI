@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import numpy as np
 
 from meetasr.pipeline import MeetPipeline
@@ -235,6 +234,59 @@ def test_incremental_finalize_preserves_sentence_count_and_assigns_speakers():
     assert len(finalized) == len(original)
     assert [sentence.speaker for sentence in finalized] == [0, 1]
     assert [sentence.text for sentence in finalized] == ["câu một", "câu hai"]
+
+
+def test_prepare_diarization_first_builds_preassigned_speaker_turns():
+    audio = np.zeros(4 * 16000, dtype=np.float32)
+    pipeline = MeetPipeline(
+        asr_model=FakeASR(),
+        vad_model=FakeVAD(),
+        spk_model=object(),
+        diarization_first=True,
+    )
+    pipeline._diarize_segments = lambda prepared_audio, segments: [
+        [0.5, 1.5, 7],
+        [2.2, 3.4, 9],
+    ]
+
+    prepared_audio, vad_segments, turns, duration_ms = (
+        pipeline.prepare_diarization_first_transcription(audio)
+    )
+
+    assert prepared_audio.shape == audio.shape
+    assert vad_segments == [Segment(500, 1500), Segment(2200, 3400)]
+    assert turns is not None
+    assert [
+        (turn.start_ms, turn.end_ms, turn.speaker)
+        for turn in turns
+    ] == [
+        (500, 1500, 0),
+        (2200, 3400, 1),
+    ]
+    assert duration_ms == 4000
+
+
+def test_finalize_preassigned_uses_punctuation_fallback_and_keeps_speaker():
+    asr = FakeASR()
+    asr.has_native_punctuation = True
+    punc = RecordingPunc()
+    punc.restore = lambda text: f"{text}."
+    pipeline = MeetPipeline(asr_model=asr, punc_model=punc)
+    original = [
+        SentenceInfo(
+            text="một đoạn hội thoại dài không có bất kỳ dấu kết thúc câu nào "
+            "nên hệ thống cần chạy bộ khôi phục dấu câu bên ngoài",
+            start=0.0,
+            end=8.0,
+            speaker=2,
+        )
+    ]
+
+    finalized = pipeline.finalize_preassigned_transcript(original)
+
+    assert finalized[0].text.endswith(".")
+    assert finalized[0].speaker == 2
+    assert original[0].text.endswith("ngoài")
 
 
 def test_transcribe_splits_long_punctuated_segments():

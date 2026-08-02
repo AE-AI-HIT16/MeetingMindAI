@@ -22,8 +22,8 @@ asr:
   num_workers: 1
 
   # Decode one recording at a time. Faster-Whisper's internal VAD keeps the
-  # original global timestamps, so MeetPipeline does not cut ASR at FSMN VAD
-  # boundaries. FSMN VAD remains available for CAM++ diarization.
+  # original global timestamps, so MeetPipeline does not cut ASR at external
+  # VAD boundaries. Silero VAD remains available for CAM++ diarization.
   vad_filter: true
   vad_parameters:
     min_silence_duration_ms: 500
@@ -39,11 +39,15 @@ asr:
   no_speech_threshold: 0.6
 
 vad:
-  model: fsmn-vad
-  hub: ms
+  model: silero-vad
+  backend: onnx
   device: cpu
-  max_single_segment_time: 30000
-  min_segment_ms: 300
+  threshold: 0.5
+  neg_threshold: 0.35
+  min_speech_duration_ms: 250
+  min_silence_duration_ms: 500
+  speech_pad_ms: 80
+  max_speech_duration_s: 30
 
 # Whisper already returns punctuation. Establish an ASR baseline before adding
 # an external punctuation model.

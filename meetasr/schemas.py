@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from typing import Optional
-
 
 # ---------------------------------------------------------------------------
 # ASR Output
@@ -29,6 +28,23 @@ class Segment:
     @property
     def end_s(self) -> float:
         return self.end_ms / 1000.0
+
+
+@dataclass
+class SpeakerTurn:
+    """A time range attributed to one diarized speaker."""
+
+    start_ms: int
+    end_ms: int
+    speaker: int
+
+    @property
+    def duration_ms(self) -> int:
+        return self.end_ms - self.start_ms
+
+    def to_segment(self) -> Segment:
+        """Return the time range without its speaker label."""
+        return Segment(self.start_ms, self.end_ms)
 
 
 @dataclass
@@ -130,15 +146,15 @@ class MeetingReport:
         from meetasr.utils.misc import seconds_to_human
 
         lines = [
-            f"# Báo cáo Cuộc họp",
-            f"",
+            "# Báo cáo Cuộc họp",
+            "",
             f"**Thời lượng:** {seconds_to_human(self.transcript.duration)}  ",
             f"**Ngôn ngữ:** {self.language}  ",
             f"**Mô hình ASR:** {self.asr_model}  ",
             f"**Mô hình LLM:** {self.llm_model}  ",
-            f"",
-            f"---",
-            f"",
+            "",
+            "---",
+            "",
         ]
 
         if self.summary:

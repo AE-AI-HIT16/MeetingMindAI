@@ -1,28 +1,41 @@
-# MeetASR — Vietnamese CPU configuration used by the local frontend.
+# MeetASR — Qwen3-ASR 1.7B configuration used by the local frontend.
 # Copy to meeting_config.yaml, set GROQ_API_KEY, then start the backend.
 device: cpu
 
+pipeline:
+  transcription_language: vi
+  diarization_first:
+    enabled: true
+    max_chunk_ms: 15000
+    boundary_search_ms: 2000
+    min_chunk_ms: 1000
+
 asr:
-  model: zipformer-vi
-  hub: hf
-  device: cpu
-  num_threads: 4
+  model: qwen3-asr
+  hub: none
+  model_size: Qwen/Qwen3-ASR-1.7B
+  device: cuda:0
+  dtype: bfloat16
+  max_inference_batch_size: 1
+  max_new_tokens: 512
 
 vad:
-  model: fsmn-vad
-  hub: ms
-  max_single_segment_time: 15000
-  min_segment_ms: 200
+  model: silero-vad
+  backend: onnx
+  device: cpu
+  threshold: 0.5
+  neg_threshold: 0.35
+  min_speech_duration_ms: 250
+  min_silence_duration_ms: 500
+  speech_pad_ms: 80
+  max_speech_duration_s: 30
 
 spk:
   model: cam++
   hub: ms
+  device: cpu
   cluster_type: spectral
   min_cluster_size: 4
-
-punc:
-  model: vibert-capu
-  hub: hf
 
 llm:
   provider: groq
