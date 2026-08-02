@@ -10,7 +10,10 @@ from meetasr.streaming.final_transcript_queue import FinalTranscriptJob
 import asyncio
 import logging
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends
+from sqlmodel import Session
+from meetasr.db.connection import get_db
+from meetasr.db.models_phase2 import Source, MediaType, Job, JobStatus
 
 router = APIRouter()
 
@@ -18,7 +21,7 @@ logger = logging.getLogger("realtime")
 
 
 @router.websocket("/v1/realtime/stream")
-async def realtime_stream(websocket: WebSocket):
+async def realtime_stream(websocket: WebSocket, db: Session = Depends(get_db)):
     """
     Endpoint WebSocket nhận audio realtime từ frontend.
     Mỗi client kết nối sẽ tạo ra một session độc lập.
@@ -32,6 +35,27 @@ async def realtime_stream(websocket: WebSocket):
     )
 
     session = StreamSession(websocket)
+    # -------------------------------------------------------------------
+    # Create a Source and Job in the database for this realtime session
+    # -------------------------------------------------------------------
+    from datetime import datetime
+    temp_filename = f"realtime_{datetime.utcnow().isoformat()}.wav"
+    source = Source(filename=temp_filename, media_type=MediaType.AUDIO, storage_path="")
+    db.add(source)
+    db.flush()  # obtain source.id
+    job = Job(source_id=source.id, status=JobStatus.PROCESSING)
+    db.add(job)
+    db.commit()
+    # Store IDs on the session for later use
+    session.source_id = source.id
+    session.job_id = job.id
+
+    # Gửi source_id và job_id về frontend để điều hướng sau khi ghi xong
+    await websocket.send_json({
+        "type": "session_init",
+        "source_id": source.id,
+        "job_id": job.id,
+    })
 
     receiver = AudioReceiver(session)
 
@@ -165,7 +189,8 @@ async def realtime_stream(websocket: WebSocket):
 
                     await final_transcript_queue.put(
                         FinalTranscriptJob(
-                            audio=audio
+                            job_id=session.job_id,
+                            audio=audio,
                         )
                     )
 

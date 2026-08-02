@@ -41,6 +41,8 @@ export interface RealtimeStreamState {
   elapsedMs: number;
   /** Last error message, if any. */
   error: string | null;
+  /** Source ID created by backend for this realtime session. */
+  sourceId: string | null;
 }
 
 export interface RealtimeStreamActions {
@@ -81,6 +83,7 @@ export function useRealtimeStream(): RealtimeStreamState &
   const [transcripts, setTranscripts] = useState<TranscriptDelta[]>([]);
   const [elapsedMs, setElapsedMs] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [sourceId, setSourceId] = useState<string | null>(null);
 
   // ------------------------------------------------------------------
   // Cleanup helper
@@ -134,6 +137,7 @@ export function useRealtimeStream(): RealtimeStreamState &
   const start = useCallback(async (source: AudioSource) => {
     setError(null);
     setTranscripts([]);
+    setSourceId(null);
     setElapsedMs(0);
 
     try {
@@ -198,6 +202,11 @@ export function useRealtimeStream(): RealtimeStreamState &
           );
           const segment = data.segment as ApiTranscriptSegment | undefined;
           console.log("WS message:", data.type, segment);
+
+          if (data.type === "session_init") {
+            setSourceId(data.source_id ?? null);
+            return;
+          }
 
           if (data.type === "transcript_delta" && segment) {
             const mapped = mapTranscriptSegment(segment);
@@ -352,6 +361,7 @@ export function useRealtimeStream(): RealtimeStreamState &
     transcripts,
     elapsedMs,
     error,
+    sourceId,
     start,
     stop,
   };

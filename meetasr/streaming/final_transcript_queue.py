@@ -8,6 +8,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass(slots=True)
 class FinalTranscriptJob:
+    job_id: int
     audio: np.ndarray
 
 class FinalTranscriptQueue:

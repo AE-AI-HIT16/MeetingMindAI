@@ -32,7 +32,9 @@ class FinalTranscriptWorker:
 
         while True:
 
-            job_id = await self.queue.get()
+            final_job = await self.queue.get()
+            job_id = final_job.job_id
+            audio = final_job.audio
 
             job = None
 
@@ -53,17 +55,6 @@ class FinalTranscriptWorker:
                         continue
 
 
-                    source = db.get(
-                        Source,
-                        job.source_id,
-                    )
-
-                    if source is None:
-                        raise RuntimeError(
-                            f"Source {job.source_id} not found"
-                        )
-
-
                     # -----------------------------
                     # Update trạng thái processing
                     # -----------------------------
@@ -75,9 +66,6 @@ class FinalTranscriptWorker:
                     db.commit()
 
 
-                    storage_path = source.storage_path
-
-
                 # -----------------------------
                 # Chạy ASR ngoài DB session
                 # tránh block connection
@@ -85,7 +73,7 @@ class FinalTranscriptWorker:
 
                 transcript = await asyncio.to_thread(
                     self.pipeline.transcribe,
-                    storage_path,
+                    audio,
                 )
 
 
@@ -126,6 +114,25 @@ class FinalTranscriptWorker:
                         db.add(job)
 
                     db.commit()
+
+
+                    # -----------------------------------------
+                    # Tạo Document (live) qua DocumentService
+                    # để frontend truy vấn /v1/documents/{id}
+                    # -----------------------------------------
+
+                    from meetasr.services.document_service import DocumentService
+
+                    doc_service = DocumentService(db)
+                    source_id = db.get(Job, job_id).source_id
+                    transcript_result = doc_service.build_transcript(source_id)
+                    markdown = DocumentService.full_text_markdown(transcript_result)
+                    doc_service.save_live_document(source_id, markdown)
+
+                    logger.info(
+                        "Live document saved for source=%s",
+                        source_id,
+                    )
 
 
                 logger.info(
