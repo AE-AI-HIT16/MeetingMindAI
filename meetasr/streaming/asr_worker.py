@@ -1,5 +1,6 @@
-import asyncio
 import logging
+import asyncio
+import traceback
 
 
 logger = logging.getLogger(
@@ -28,12 +29,16 @@ class ASRWorker:
         self.asr_service = asr_service
         self.offset_ms = 0
 
-
     async def run(self):
+        print("ASR worker started")
 
         try:
             while True:
-                audio = await (self.session.asr_queue.get())
+                print("Waiting for audio...")
+
+                audio = await self.session.asr_queue.get()
+
+                print(f"Got audio, queue={self.session.asr_queue.qsize()}")
 
                 try:
                     duration_s = len(audio) / 16000.0
@@ -43,26 +48,50 @@ class ASRWorker:
                         f"asr_q={self.session.asr_queue.qsize()}"
                     )
 
-                    result = await self._transcribe(audio)
+                    try:
+                        result = await self._transcribe(audio)
+                        print("DEBUG: _transcribe() OK")
+                    except Exception:
+                        print("DEBUG: _transcribe() FAILED")
+                        traceback.print_exc()
+                        raise
 
-                    text_len = len(result.text)
+                    print(f"ASR: done text_len={len(result.text)}")
 
-                    print(
-                        f"ASR: done text_len={text_len}"
-                    )
+                    try:
+                        await self._send_result(result)
+                        print("DEBUG: _send_result() OK")
+                    except Exception:
+                        print("DEBUG: _send_result() FAILED")
+                        traceback.print_exc()
+                        raise
 
-                    await self._send_result(result)
-
-                    await self._publish_cut_event(result)
+                    try:
+                        await self._publish_cut_event(result)
+                        print("DEBUG: _publish_cut_event() OK")
+                    except Exception:
+                        print("DEBUG: _publish_cut_event() FAILED")
+                        traceback.print_exc()
+                        raise
 
                 finally:
-                    self.session.asr_queue.task_done()
+                    try:
+                        self.session.asr_queue.task_done()
+                        print("DEBUG: task_done() OK")
+                    except Exception:
+                        print("DEBUG: task_done() FAILED")
+                        traceback.print_exc()
+                        raise
 
         except asyncio.CancelledError:
+            print("ASR worker cancelled")
             raise
 
-        except Exception:
-            print("ASR worker crashed")
+        except Exception as e:
+            print("=" * 80)
+            print(f"ASR worker crashed: {type(e).__name__}: {e}")
+            traceback.print_exc()
+            print("=" * 80)
             raise
 
 

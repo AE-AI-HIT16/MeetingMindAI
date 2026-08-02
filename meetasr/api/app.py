@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import os
+import asyncio
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
@@ -44,6 +45,11 @@ from meetasr.db.connection import init_db
 from meetasr.realtime.document_generation import document_generation_queue
 from meetasr.realtime.job_worker import job_queue
 from meetasr.services.asr_service import ASRService
+from meetasr.services.realtime_asr_service import RealtimeASRService
+from meetasr.pipeline_realtime import ASRPipeline
+from meetasr.streaming.final_transcript_queue import FinalTranscriptQueue
+from meetasr.streaming.final_transcript_worker import FinalTranscriptWorker
+
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -54,50 +60,150 @@ logger = logging.getLogger(__name__)
 # ------------------------------------------------------------------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Manage server lifespan: load pipeline on startup, release on shutdown.
+    """Manage server lifespan: load pipeline on startup, release on shutdown."""
 
-    Args:
-        app: The FastAPI application instance.
-
-    Yields:
-        Control to the running server between startup and shutdown.
-    """
+    # --------------------------------------------------------------
+    # Initialize application state
+    # --------------------------------------------------------------
     app.state.pipeline = None
+    app.state.realtime_pipeline = None
+
     app.state.asr_service = None
+    app.state.realtime_asr_service = None
+    app.state.final_transcript_queue = None
+    app.state.final_transcript_worker = None
+    app.state.final_transcript_task = None
+
     init_db()
     logger.info("Database tables initialized.")
-    # --- STARTUP ---
+
+    # --------------------------------------------------------------
+    # STARTUP
+    # --------------------------------------------------------------
     if os.path.exists(CONFIG_PATH):
         logger.info(f"Loading pipeline from {CONFIG_PATH}...")
+
+        # Full pipeline:
+        # ASR + VAD + Punctuation + Speaker + LLM + Document planner
         pipeline = AutoPipeline.from_yaml(CONFIG_PATH)
+
+        # Lightweight realtime pipeline:
+        # ASR + VAD only
+        # Reuse loaded model instances from full pipeline
+        realtime_pipeline = ASRPipeline(
+            asr_model=pipeline.asr,
+            vad_model=pipeline.vad,
+            device=pipeline.device,
+        )
+
+        # Keep global full pipeline reference
         set_pipeline(pipeline)
 
         app.state.pipeline = pipeline
-        app.state.asr_service = ASRService(pipeline)
-        logger.info("Pipeline ready.")
+        app.state.realtime_pipeline = realtime_pipeline
+
+        # ----------------------------------------------------------
+        # Create independent services
+        # ----------------------------------------------------------
+
+        # Full processing service:
+        # Used by upload jobs / transcription APIs
+        app.state.asr_service = ASRService(
+            pipeline
+        )
+
+        # Realtime websocket service:
+        # Used by realtime streaming workers
+        app.state.realtime_asr_service = RealtimeASRService(
+            realtime_pipeline
+        )
+
+        logger.info("Full ASR pipeline ready.")
+        logger.info("Realtime ASR pipeline ready.")
+
+        # ----------------------------------------------------------
+        # Final transcript worker
+        # ----------------------------------------------------------
+
+        app.state.final_transcript_queue = FinalTranscriptQueue()
+
+        app.state.final_transcript_worker = FinalTranscriptWorker(
+            queue=app.state.final_transcript_queue,
+            pipeline=pipeline,
+        )
+
+        app.state.final_transcript_task = asyncio.create_task(
+            app.state.final_transcript_worker.run()
+        )
+
+        logger.info("Final transcript worker started.")
+
     else:
         logger.warning(
             f"Config '{CONFIG_PATH}' not found. "
-            "Server starts without pipeline — set MEETASR_CONFIG."
+            "Server starts without pipeline."
         )
 
-    await job_queue.start(app.state.asr_service, sources.get_storage_backend())
+    # --------------------------------------------------------------
+    # Start background workers
+    # --------------------------------------------------------------
+    await job_queue.start(
+        app.state.asr_service,
+        sources.get_storage_backend(),
+    )
+
     await document_generation_queue.start(
-        getattr(app.state.pipeline, "doc_planner", None)
+        getattr(
+            app.state.pipeline,
+            "doc_planner",
+            None,
+        )
     )
 
     print(logger.level)
     print(logger.getEffectiveLevel())
 
-    yield  # server is now running and serving requests
+    yield
 
-    # --- SHUTDOWN ---
-    logger.info("Shutting down... Cleaning up ML models and freeing VRAM.")
+    # --------------------------------------------------------------
+    # SHUTDOWN
+    # --------------------------------------------------------------
+    logger.info(
+        "Shutting down... Cleaning up ML models and freeing VRAM."
+    )
+
     await document_generation_queue.stop()
     await job_queue.stop()
-    set_pipeline(None)  # release reference so GC can free RAM/VRAM
+
+    set_pipeline(None)
+
     app.state.asr_service = None
+    app.state.realtime_asr_service = None
+
     app.state.pipeline = None
+    app.state.realtime_pipeline = None
+
+    # --------------------------------------------------------------
+    # Stop final transcript worker
+    # --------------------------------------------------------------
+
+    if app.state.final_transcript_task:
+
+        app.state.final_transcript_task.cancel()
+
+        try:
+
+            await app.state.final_transcript_task
+
+        except asyncio.CancelledError:
+            pass
+
+    if app.state.final_transcript_queue:
+        await app.state.final_transcript_queue.clear()
+
+    app.state.final_transcript_worker = None
+    app.state.final_transcript_queue = None
+    app.state.final_transcript_task = None
 
 # Set log cho api realtime
 

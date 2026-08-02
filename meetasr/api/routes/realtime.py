@@ -5,132 +5,154 @@ from meetasr.streaming.asr_worker import ASRWorker
 from meetasr.streaming.temp_asr_woker import TempASRWorker
 from meetasr.streaming.partial_buffer_cleaner import PartialBufferCleaner
 from meetasr.streaming.window_builder import SegmentWindowBuilder
+from meetasr.streaming.final_transcript_queue import FinalTranscriptJob
+
 import asyncio
 import logging
-import uuid
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends
+from sqlmodel import Session
+from meetasr.db.connection import get_db
+from meetasr.db.models_phase2 import Source, MediaType, Job, JobStatus
 
-# Tạo router để đăng ký endpoint WebSocket
 router = APIRouter()
 
-# Logger dùng để ghi log của module này
 logger = logging.getLogger("realtime")
 
 
 @router.websocket("/v1/realtime/stream")
-async def realtime_stream(websocket: WebSocket):
+async def realtime_stream(websocket: WebSocket, db: Session = Depends(get_db)):
     """
     Endpoint WebSocket nhận audio realtime từ frontend.
     Mỗi client kết nối sẽ tạo ra một session độc lập.
     """
 
-    # Chấp nhận kết nối WebSocket
     await websocket.accept()
 
-    # Sinh một session id ngắn để dễ theo dõi log
-    session_id = uuid.uuid4().hex[:8]
+    logger.info(
+        "WS accepted client=%s",
+        websocket.client,
+    )
 
-    print("WS accepted", session_id, websocket.client)
-
-    # Tạo đối tượng lưu trạng thái của phiên làm việc
     session = StreamSession(websocket)
+    # -------------------------------------------------------------------
+    # Create a Source and Job in the database for this realtime session
+    # -------------------------------------------------------------------
+    from datetime import datetime
+    temp_filename = f"realtime_{datetime.utcnow().isoformat()}.wav"
+    source = Source(filename=temp_filename, media_type=MediaType.AUDIO, storage_path="")
+    db.add(source)
+    db.flush()  # obtain source.id
+    job = Job(source_id=source.id, status=JobStatus.PROCESSING)
+    db.add(job)
+    db.commit()
+    # Store IDs on the session for later use
+    session.source_id = source.id
+    session.job_id = job.id
 
-    # Đối tượng nhận audio từ client
+    # Gửi source_id và job_id về frontend để điều hướng sau khi ghi xong
+    await websocket.send_json({
+        "type": "session_init",
+        "source_id": source.id,
+        "job_id": job.id,
+    })
+
     receiver = AudioReceiver(session)
 
-    # Lấy pipeline ASR đã khởi tạo khi server start
-    pipeline = getattr(websocket.app.state, "pipeline", None)
-    asr_service = getattr(websocket.app.state, "asr_service", None)
+    pipeline = getattr(
+        websocket.app.state,
+        "realtime_pipeline",
+        None,
+    )
 
-    # Nếu pipeline chưa load thì đóng kết nối
+    asr_service = getattr(
+        websocket.app.state,
+        "realtime_asr_service",
+        None,
+    )
+
     if pipeline is None or asr_service is None:
-        print("Pipeline not loaded", session_id)
+        logger.error(
+            "Realtime pipeline not loaded",
+        )
         await websocket.close(code=1013)
         return
 
-    logger.info("Realtime VAD: %s", type(pipeline.vad).__name__)
+    logger.info(
+        "Realtime VAD: %s",
+        type(pipeline.vad).__name__,
+    )
 
-    # Ghép các chunk audio thành từng cửa sổ (window)
-    # để đưa sang ASR
     window_builder = SegmentWindowBuilder(session)
 
-    # Worker xử lý nhận kết quả ASR
-    asr_worker = ASRWorker(session, asr_service)
+    asr_worker = ASRWorker(
+        session,
+        asr_service,
+    )
 
-    # Chạy ASR worker ở background
     session.asr_task = asyncio.create_task(
         asr_worker.run()
     )
 
-    # Luồng phụ chạy song song với luồng chính giúp đưa kết quả sớm cho fe
     temp_asr_worker = TempASRWorker(
         session,
-        pipeline
+        pipeline,
     )
 
-    # Khởi chạy luồng phụ
     session.temp_asr_task = asyncio.create_task(
         temp_asr_worker.run()
     )
 
     partial_buffer_cleaner = PartialBufferCleaner(
-        session
+        session,
     )
 
     session.partial_cleaner_task = asyncio.create_task(
         partial_buffer_cleaner.run()
     )
 
-    # Worker xử lý audio:
-    # Queue audio -> tạo segment -> đưa sang pipeline
     worker = AudioWorker(
         session,
         pipeline,
-        window_builder
+        window_builder,
     )
 
-    # Chạy worker ở background
     worker_task = asyncio.create_task(
         worker.run()
     )
 
-    # Lưu task để session có thể quản lý
     session.worker_task = worker_task
 
     try:
 
-        # Vòng lặp chính
-        # Liên tục nhận audio từ frontend
         while True:
 
-            # Chờ client gửi dữ liệu audio dạng bytes
             audio = await websocket.receive_bytes()
 
-            # Đưa audio cho AudioReceiver xử lý
+            # Lưu toàn bộ audio của phiên realtime
+            session.audio_archive.append(audio)
+
+            # Xử lý realtime như hiện tại
             await receiver.receive(audio)
 
-    # Client đóng WebSocket
     except WebSocketDisconnect:
 
-        print("Client disconnected", session_id)
+        logger.info(
+            "Client disconnected",
+        )
 
-    # Các lỗi ngoài dự kiến
     except Exception:
 
         logger.exception(
-            "Realtime stream crashed session=%s",
-            session_id,
+            "Realtime stream crashed",
         )
 
     finally:
 
         # ===================================================
-        # Cleanup
+        # Flush phần audio còn lại
         # ===================================================
 
-        # Đẩy phần audio còn sót trong buffer
-        # để không bị mất đoạn cuối
         try:
 
             await receiver.flush()
@@ -138,12 +160,56 @@ async def realtime_stream(websocket: WebSocket):
         except Exception:
 
             logger.exception(
-                "Audio flush failed session=%s",
-                session_id,
+                "Audio flush failed",
             )
 
-        # Đóng session
-        # Giải phóng queue, websocket,...
+        # ===================================================
+        # Giao audio cho worker xử lý offline
+        # ===================================================
+
+        try:
+
+            audio = session.audio_archive.get_numpy()
+
+            if len(audio) > 0:
+
+                final_transcript_queue = getattr(
+                    websocket.app.state,
+                    "final_transcript_queue",
+                    None,
+                )
+
+                if final_transcript_queue is None:
+
+                    logger.error(
+                        "Final transcript queue not initialized ",
+                    )
+
+                else:
+
+                    await final_transcript_queue.put(
+                        FinalTranscriptJob(
+                            job_id=session.job_id,
+                            audio=audio,
+                        )
+                    )
+
+                    logger.info(
+                        "Offline transcription queued "
+                        "samples=%d",
+                        len(audio),
+                    )
+
+        except Exception:
+
+            logger.exception(
+                "Failed to enqueue offline job",
+            )
+
+        # ===================================================
+        # Cleanup session
+        # ===================================================
+
         try:
 
             await session.close()
@@ -151,32 +217,31 @@ async def realtime_stream(websocket: WebSocket):
         except Exception:
 
             logger.exception(
-                "Session close failed session=%s",
-                session_id,
+                "Session close failed",
             )
 
-        # Dừng worker background
+        # ===================================================
+        # Shutdown realtime worker
+        # ===================================================
+
         if worker_task:
 
-            # Gửi tín hiệu cancel
             worker_task.cancel()
 
             try:
 
-                # Đợi worker kết thúc
                 await worker_task
 
-            # Đây là trường hợp bình thường
             except asyncio.CancelledError:
+
                 pass
 
-            # Nếu worker lỗi khi shutdown
             except Exception:
 
                 logger.exception(
-                    "Worker shutdown failed session=%s",
-                    session_id,
+                    "Worker shutdown failed",
                 )
 
-        # Kết thúc quá trình cleanup
-        logger.info("WS cleanup done session=%s", session_id)
+        logger.info(
+            "WS cleanup done",
+        )
