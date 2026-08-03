@@ -164,4 +164,6 @@ async def test_partial_worker_crops_audio_and_forces_configured_language(
     assert session.first_partial_emitted_at is not None
     assert "first_audio_to_partial_ms=" in caplog.text
     assert "utterance_to_partial_ms=" in caplog.text
+    assert "audio_end_to_request_ms=" in caplog.text
+    assert "audio_end_to_emit_ms=" in caplog.text
     assert "request_to_emit_ms=" in caplog.text

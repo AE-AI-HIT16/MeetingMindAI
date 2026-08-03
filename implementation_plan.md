@@ -457,6 +457,20 @@ Quyết định Bước 7:
   first-audio-to-partial, utterance-to-partial và update interval. Bước đo này
   không thay đổi timing `700/800/5000 ms` hay priority hiện tại.
 
+Baseline thực tế 86,1 giây, 18 utterance và 60 partial:
+
+- First partial: mean 1.633,7 ms; P50 1.611,3 ms; P95 2.097,6 ms.
+- Update interval: mean 825,4 ms; P50 862,2 ms; P95 986,9 ms.
+- Coordinator partial: average wait 18,5 ms; average run 301,4 ms; queue cực đại
+  1, không drop và không inference failure.
+- Rolling window 5 giây cần khoảng 525-604 ms/model call, trong khi partial ngắn
+  thường cần khoảng 100-320 ms.
+- `pcm-processor.js` làm tròn xuống output của từng block 128 mẫu và không giữ
+  fractional resampling phase. Với input 48 kHz, mỗi block phát 42 thay vì
+  42,67 mẫu, tương đương 15.750 Hz; audio timeline vì thế chậm dần khoảng 1,56%.
+  Baseline quan sát upstream lag tăng từ gần 0 lên khoảng 1,2 giây sau 81 giây,
+  phù hợp với sai số này.
+
 Hotfix nghiệm thu sau Bước 7:
 
 - Client gửi JWT trong control frame đầu tiên của WebSocket; backend xác thực

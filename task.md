@@ -108,7 +108,7 @@ Quy ước:
 
 ## Partial realtime nhanh và đầy đủ
 
-- [/] Bước 1: Instrument baseline latency theo inference kind và utterance.
+- [x] Bước 1: Instrument và đo baseline latency theo inference kind/utterance.
 - [ ] Bước 2: Tích lũy prefix xám và rolling tail.
 - [ ] Bước 3: Tối ưu timing/priority dựa trên baseline.
 - [ ] Bước 4: Frontend thay partial theo utterance.

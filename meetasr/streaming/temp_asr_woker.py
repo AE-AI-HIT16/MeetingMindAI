@@ -190,12 +190,24 @@ class TempASRWorker:
             if first_audio_at is not None
             else -1.0
         )
+        request_to_emit_ms = (emitted_at - request.requested_at) * 1000
+        audio_end_to_emit_ms = (
+            first_audio_latency_ms - request.end_ms
+            if first_audio_at is not None
+            else -1.0
+        )
+        audio_end_to_request_ms = (
+            audio_end_to_emit_ms - request_to_emit_ms
+            if first_audio_at is not None
+            else -1.0
+        )
         logger.info(
             "Partial latency job=%s count=%d utterance_count=%d "
             "utterance_start_ms=%d "
             "window=%d-%d worker_wait_ms=%.1f inference_ms=%.1f "
             "request_to_emit_ms=%.1f first_audio_to_partial_ms=%.1f "
-            "utterance_to_partial_ms=%.1f update_interval_ms=%.1f",
+            "utterance_to_partial_ms=%.1f audio_end_to_request_ms=%.1f "
+            "audio_end_to_emit_ms=%.1f update_interval_ms=%.1f",
             getattr(self.session, "job_id", "unknown"),
             self.session.partial_emitted_count,
             self.session.partial_utterance_emitted_count,
@@ -204,9 +216,11 @@ class TempASRWorker:
             request.end_ms,
             (worker_started_at - request.requested_at) * 1000,
             inference_ms,
-            (emitted_at - request.requested_at) * 1000,
+            request_to_emit_ms,
             first_audio_latency_ms,
             utterance_to_partial_ms,
+            audio_end_to_request_ms,
+            audio_end_to_emit_ms,
             update_interval_ms,
         )
 
