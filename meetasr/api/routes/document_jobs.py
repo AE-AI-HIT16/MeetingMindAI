@@ -11,6 +11,7 @@ from meetasr.api.schemas_phase2 import (
     DocumentGenerationResponse,
     DocumentGenerationStatusEvent,
 )
+from meetasr.api.websocket_events import close_websocket, stream_event_queue
 from meetasr.db.connection import engine
 from meetasr.db.models_phase2 import (
     DocumentGenerationJob,
@@ -99,27 +100,20 @@ async def document_generation_events(
             and snapshot[-1].get("code")
             == "document_generation_not_found"
         ):
-            await websocket.close(code=4404)
+            await close_websocket(websocket, code=4404)
             return
         if snapshot and snapshot[-1].get("type") in {
             "document_done",
             "document_error",
         }:
-            await websocket.close()
+            await close_websocket(websocket)
             return
 
-        while True:
-            event = await queue.get()
-            try:
-                await websocket.send_json(event)
-            except Exception:
-                break
-            if event.get("type") in {"document_done", "document_error"}:
-                try:
-                    await websocket.close()
-                except Exception:
-                    pass
-                return
+        await stream_event_queue(
+            websocket,
+            queue,
+            terminal_types={"document_done", "document_error"},
+        )
     except WebSocketDisconnect:
         return
     finally:

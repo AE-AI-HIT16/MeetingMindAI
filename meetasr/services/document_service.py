@@ -243,6 +243,8 @@ class DocumentService:
     def full_text_markdown(transcript: TranscriptResult) -> str:
         """Render a readable transcript without invoking an LLM."""
         lines = [f"# Toàn văn: {transcript.key}", ""]
+        if not transcript.sentence_info:
+            lines.append("_Không phát hiện lời nói trong bản ghi âm._")
         for sentence in transcript.sentence_info:
             minutes, seconds = divmod(int(sentence.start), 60)
             speaker = (

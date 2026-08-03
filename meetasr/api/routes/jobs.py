@@ -13,6 +13,7 @@ from meetasr.api.schemas_phase2 import (
     TranscriptDeltaEvent,
     TranscriptSegmentPayload,
 )
+from meetasr.api.websocket_events import close_websocket, stream_event_queue
 from meetasr.db.connection import engine
 from meetasr.db.models_phase2 import (
     Document,
@@ -108,15 +109,17 @@ async def job_events(websocket: WebSocket, job_id: str) -> None:
         for event in snapshot:
             await websocket.send_json(event)
         if snapshot and snapshot[-1].get("code") == "job_not_found":
-            await websocket.close(code=4404)
+            await close_websocket(websocket, code=4404)
+            return
+        if snapshot and snapshot[-1].get("type") in {"done", "error"}:
+            await close_websocket(websocket)
             return
 
-        while True:
-            event = await queue.get()
-            try:
-                await websocket.send_json(event)
-            except Exception:
-                break
+        await stream_event_queue(
+            websocket,
+            queue,
+            terminal_types={"done", "error"},
+        )
     except WebSocketDisconnect:
         return
     finally:

@@ -182,6 +182,100 @@ async def test_final_worker_persists_before_publishing_terminal_events(
 
 
 @pytest.mark.asyncio
+async def test_final_worker_completes_session_without_detected_speech(
+    monkeypatch,
+) -> None:
+    """A valid recording with no transcript must not become a failed Job."""
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    SQLModel.metadata.create_all(engine)
+    monkeypatch.setattr(final_transcript_worker, "engine", engine)
+    monkeypatch.setattr(
+        final_transcript_worker.asyncio,
+        "to_thread",
+        _run_fake_inference,
+    )
+    source_id, job_id = _create_job(engine)
+
+    class SilentPipeline:
+        def transcribe(self, audio: np.ndarray) -> TranscriptResult:
+            pytest.fail("complete silent coverage must not run full ASR")
+
+        def prepare_realtime_targeted_retranscription(
+            self,
+            audio: np.ndarray,
+            sentences: list[SentenceInfo],
+            vad_segments: list[Any],
+        ) -> list[TargetedSegmentPlan]:
+            assert sentences == []
+            assert vad_segments == []
+            return []
+
+    published: list[dict] = []
+
+    class FakeEventBus:
+        async def publish(self, event_job_id: str, event: Any) -> None:
+            assert event_job_id == job_id
+            published.append(event.model_dump(mode="json"))
+
+    monkeypatch.setattr(final_transcript_worker, "event_bus", FakeEventBus())
+    worker = final_transcript_worker.FinalTranscriptWorker(
+        queue=SimpleNamespace(),
+        pipeline=SilentPipeline(),
+    )
+    coverage = RealtimeCoverageTracker()
+    coverage.mark_flush_completed()
+
+    await worker._process(
+        FinalTranscriptJob(
+            job_id=job_id,
+            audio=np.zeros(1600 * 16, dtype=np.float32),
+            coverage=coverage.snapshot(),
+        )
+    )
+
+    with Session(engine) as db:
+        source = db.get(Source, source_id)
+        job = db.get(Job, job_id)
+        segments = db.exec(
+            select(TranscriptSegment).where(TranscriptSegment.job_id == job_id)
+        ).all()
+        document = db.exec(
+            select(Document)
+            .where(Document.source_id == source_id)
+            .where(Document.mode == DocumentMode.LIVE)
+        ).one()
+
+        assert source is not None
+        assert source.duration == 1.6
+        assert job is not None
+        assert job.status == JobStatus.DONE
+        assert job.progress == 1.0
+        assert job.error is None
+        assert segments == []
+        assert "Không phát hiện lời nói" in document.markdown
+        live_document_id = document.id
+
+    assert [event["type"] for event in published] == [
+        "status",
+        "transcript_snapshot",
+        "status",
+        "doc_delta",
+        "done",
+    ]
+    assert published[-1] == {
+        "type": "done",
+        "duration_ms": 1600,
+        "num_segments": 0,
+        "live_document_id": live_document_id,
+    }
+    engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_final_worker_persists_and_publishes_failure(monkeypatch) -> None:
     engine = create_engine(
         "sqlite://",

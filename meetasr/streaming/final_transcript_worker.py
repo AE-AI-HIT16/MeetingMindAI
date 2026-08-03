@@ -210,7 +210,10 @@ class FinalTranscriptWorker:
                 StatusEvent(stage=JobStage.GENERATING_DOC, progress=0.85),
             )
 
-            live_document, markdown = self._create_live_document(source_id)
+            live_document, markdown = self._create_live_document(
+                source_id,
+                has_transcript=bool(segments),
+            )
             self._update_job(
                 job_id,
                 status=JobStatus.DONE,
@@ -439,11 +442,28 @@ class FinalTranscriptWorker:
             all_payloads.sort(key=lambda item: (item.start_ms, item.id or 0))
             return source.id, all_payloads, new_payloads, speaker_updates
 
-    def _create_live_document(self, source_id: str) -> tuple[Document, str]:
+    def _create_live_document(
+        self,
+        source_id: str,
+        *,
+        has_transcript: bool,
+    ) -> tuple[Document, str]:
         """Create the live transcript document after segments are committed."""
         with Session(engine) as db:
             service = DocumentService(db)
-            transcript = service.build_transcript(source_id)
+            if has_transcript:
+                transcript = service.build_transcript(source_id)
+            else:
+                source = db.get(Source, source_id)
+                if source is None:
+                    raise RuntimeError(f"Source '{source_id}' không tồn tại.")
+                transcript = TranscriptResult(
+                    key=source.filename,
+                    text="",
+                    duration=source.duration or 0.0,
+                    language="vi",
+                    sentence_info=[],
+                )
             markdown = DocumentService.full_text_markdown(transcript)
             document = service.save_live_document(source_id, markdown)
             db.expunge(document)

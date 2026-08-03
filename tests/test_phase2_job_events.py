@@ -1,5 +1,8 @@
 """Replay tests for the Phase 2 Job WebSocket contract."""
 
+import asyncio
+
+import pytest
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine
 
@@ -17,6 +20,53 @@ from meetasr.db.models_phase2 import (
     Source,
     TranscriptSegment,
 )
+
+
+class _FakeEventBus:
+    def __init__(self) -> None:
+        self.queue: asyncio.Queue[dict] = asyncio.Queue()
+        self.unsubscribed = False
+
+    async def subscribe(self, job_id: str) -> asyncio.Queue[dict]:
+        return self.queue
+
+    async def unsubscribe(
+        self,
+        job_id: str,
+        queue: asyncio.Queue[dict],
+    ) -> None:
+        assert queue is self.queue
+        self.unsubscribed = True
+
+
+class _FakeWebSocket:
+    def __init__(
+        self,
+        receive_message: dict | None = None,
+        *,
+        block_close: bool = False,
+    ) -> None:
+        self.receive_message = receive_message
+        self.block_close = block_close
+        self.accepted = False
+        self.sent: list[dict] = []
+        self.close_codes: list[int] = []
+
+    async def accept(self) -> None:
+        self.accepted = True
+
+    async def send_json(self, event: dict) -> None:
+        self.sent.append(event)
+
+    async def receive(self) -> dict:
+        if self.receive_message is None:
+            await asyncio.Future()
+        return self.receive_message
+
+    async def close(self, code: int = 1000) -> None:
+        self.close_codes.append(code)
+        if self.block_close:
+            await asyncio.Future()
 
 
 def test_done_job_snapshot_replays_persisted_state(monkeypatch) -> None:
@@ -101,6 +151,105 @@ def test_missing_job_snapshot_returns_terminal_error(monkeypatch) -> None:
         }
     ]
     engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_done_job_websocket_closes_after_terminal_snapshot(
+    monkeypatch,
+) -> None:
+    bus = _FakeEventBus()
+    websocket = _FakeWebSocket()
+    done = {
+        "type": "done",
+        "duration_ms": 1600,
+        "num_segments": 0,
+        "live_document_id": "document-1",
+    }
+    monkeypatch.setattr(jobs, "event_bus", bus)
+    monkeypatch.setattr(jobs, "_job_snapshot", lambda job_id: [done])
+
+    await asyncio.wait_for(
+        jobs.job_events(websocket, "job-1"),
+        timeout=0.1,
+    )
+
+    assert websocket.accepted is True
+    assert websocket.sent == [done]
+    assert websocket.close_codes == [1000]
+    assert bus.unsubscribed is True
+
+
+@pytest.mark.asyncio
+async def test_done_job_websocket_does_not_wait_forever_for_close_handshake(
+    monkeypatch,
+) -> None:
+    bus = _FakeEventBus()
+    websocket = _FakeWebSocket(block_close=True)
+    done = {
+        "type": "done",
+        "duration_ms": 1600,
+        "num_segments": 0,
+        "live_document_id": "document-1",
+    }
+    monkeypatch.setattr(jobs, "event_bus", bus)
+    monkeypatch.setattr(jobs, "_job_snapshot", lambda job_id: [done])
+
+    await asyncio.wait_for(
+        jobs.job_events(websocket, "job-1"),
+        timeout=0.5,
+    )
+
+    assert websocket.close_codes == [1000]
+    assert bus.unsubscribed is True
+
+
+@pytest.mark.asyncio
+async def test_processing_job_websocket_observes_client_disconnect(
+    monkeypatch,
+) -> None:
+    bus = _FakeEventBus()
+    websocket = _FakeWebSocket(
+        {"type": "websocket.disconnect", "code": 1001}
+    )
+    status = {"type": "status", "stage": "transcribing", "progress": 0.2}
+    monkeypatch.setattr(jobs, "event_bus", bus)
+    monkeypatch.setattr(jobs, "_job_snapshot", lambda job_id: [status])
+
+    await asyncio.wait_for(
+        jobs.job_events(websocket, "job-1"),
+        timeout=0.1,
+    )
+
+    assert websocket.sent == [status]
+    assert websocket.close_codes == []
+    assert bus.unsubscribed is True
+
+
+@pytest.mark.asyncio
+async def test_processing_job_websocket_closes_after_live_terminal_event(
+    monkeypatch,
+) -> None:
+    bus = _FakeEventBus()
+    websocket = _FakeWebSocket()
+    status = {"type": "status", "stage": "transcribing", "progress": 0.2}
+    done = {
+        "type": "done",
+        "duration_ms": 1600,
+        "num_segments": 0,
+        "live_document_id": "document-1",
+    }
+    bus.queue.put_nowait(done)
+    monkeypatch.setattr(jobs, "event_bus", bus)
+    monkeypatch.setattr(jobs, "_job_snapshot", lambda job_id: [status])
+
+    await asyncio.wait_for(
+        jobs.job_events(websocket, "job-1"),
+        timeout=0.1,
+    )
+
+    assert websocket.sent == [status, done]
+    assert websocket.close_codes == [1000]
+    assert bus.unsubscribed is True
 
 
 def test_document_generation_snapshot_replays_processing_and_done(
