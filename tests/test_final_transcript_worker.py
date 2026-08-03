@@ -21,7 +21,12 @@ from meetasr.db.models_phase2 import (
     Source,
     TranscriptSegment,
 )
-from meetasr.schemas import SentenceInfo, TranscriptResult
+from meetasr.schemas import (
+    SentenceInfo,
+    SpeakerTurn,
+    TargetedSegmentPlan,
+    TranscriptResult,
+)
 from meetasr.streaming import final_transcript_worker
 from meetasr.streaming.coverage import RealtimeCoverageTracker
 from meetasr.streaming.final_transcript_queue import FinalTranscriptJob
@@ -239,7 +244,7 @@ async def test_final_worker_persists_and_publishes_failure(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_complete_realtime_coverage_runs_diarization_without_re_asr(
+async def test_complete_coverage_retranscribes_only_mixed_segment(
     monkeypatch,
 ) -> None:
     engine = create_engine(
@@ -276,11 +281,18 @@ async def test_complete_realtime_coverage_runs_diarization_without_re_asr(
             db.refresh(record)
         stable_ids = [record.id for record in records]
 
+    targeted_calls: list[tuple[int, int]] = []
+
     class FakePipeline:
         def transcribe(self, audio: np.ndarray) -> TranscriptResult:
             pytest.fail("complete coverage must not run full ASR")
 
-        def finalize_realtime_transcript(self, audio, sentences, vad_segments):
+        def prepare_realtime_targeted_retranscription(
+            self,
+            audio,
+            sentences,
+            vad_segments,
+        ):
             assert [sentence.text for sentence in sentences] == [
                 "Câu đã chốt.",
                 "Đoạn có lượt nói phụ.",
@@ -289,9 +301,37 @@ async def test_complete_realtime_coverage_runs_diarization_without_re_asr(
                 (0, 1200),
                 (1800, 3000),
             ]
-            sentences[0].speaker = 0
-            sentences[1].speaker = None
-            return sentences
+            return [
+                TargetedSegmentPlan(0, "keep", "single", 4),
+                TargetedSegmentPlan(
+                    1,
+                    "retranscribe",
+                    "mixed",
+                    None,
+                    (
+                        SpeakerTurn(1800, 2300, 4),
+                        SpeakerTurn(2300, 3000, 9),
+                    ),
+                ),
+            ]
+
+        def transcribe_vad_segment(
+            self,
+            audio,
+            segment,
+            language="auto",
+        ):
+            targeted_calls.append((segment.start_ms, segment.end_ms))
+            text = "Phần của người một."
+            if segment.start_ms != 1800:
+                text = "Phần của người hai."
+            return [
+                SentenceInfo(
+                    text=text,
+                    start=segment.start_ms / 1000,
+                    end=segment.end_ms / 1000,
+                )
+            ]
 
     published: list[dict] = []
 
@@ -302,6 +342,11 @@ async def test_complete_realtime_coverage_runs_diarization_without_re_asr(
             if payload["type"] == "speaker_update":
                 with Session(engine) as db:
                     assert db.get(TranscriptSegment, stable_ids[0]).speaker == 0
+                    expected = {"segment_id": stable_ids[0], "speaker": 0}
+                    assert payload["updates"] == [expected]
+            elif payload["type"] == "doc_delta":
+                assert "Phần của người một." in payload["markdown"]
+                assert "Đoạn có lượt nói phụ." not in payload["markdown"]
             published.append(payload)
 
     monkeypatch.setattr(final_transcript_worker, "event_bus", FakeEventBus())
@@ -329,14 +374,16 @@ async def test_complete_realtime_coverage_runs_diarization_without_re_asr(
             .where(TranscriptSegment.job_id == job_id)
             .order_by(TranscriptSegment.start_ms)
         ).all()
-        assert [record.id for record in records] == stable_ids
+        assert records[0].id == stable_ids[0]
         assert [record.text for record in records] == [
             "Câu đã chốt.",
-            "Đoạn có lượt nói phụ.",
+            "Phần của người một.",
+            "Phần của người hai.",
         ]
-        assert [record.speaker for record in records] == [0, None]
+        assert [record.speaker for record in records] == [0, 0, 1]
         assert db.get(Source, source_id).duration == 3.0
 
+    assert targeted_calls == [(1800, 2300), (2300, 3000)]
     assert [event["type"] for event in published] == [
         "status",
         "speaker_update",
@@ -345,6 +392,7 @@ async def test_complete_realtime_coverage_runs_diarization_without_re_asr(
         "done",
     ]
     assert not any(event["type"] == "transcript_delta" for event in published)
+    assert published[-1]["num_segments"] == 3
     engine.dispose()
 
 

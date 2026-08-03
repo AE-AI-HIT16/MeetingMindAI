@@ -29,13 +29,26 @@ from meetasr.db.models_phase2 import (
     TranscriptSegment,
 )
 from meetasr.realtime.events import event_bus
-from meetasr.schemas import Segment, SentenceInfo, TranscriptResult
+from meetasr.schemas import (
+    Segment,
+    SentenceInfo,
+    SpeakerTurn,
+    TargetedRetranscriptionResult,
+    TargetedSegmentPlan,
+    TranscriptResult,
+)
 from meetasr.services.document_service import DocumentService
 from meetasr.services.inference_coordinator import (
     InferenceCoordinator,
     InferenceKind,
 )
+from meetasr.services.targeted_transcript_persistence import (
+    persist_targeted_transcript,
+)
 from meetasr.streaming.final_transcript_queue import FinalTranscriptJob
+from meetasr.utils.targeted_retranscription import (
+    resolve_targeted_retranscription,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -102,27 +115,44 @@ class FinalTranscriptWorker:
             duration_ms = final_job.duration_ms
             if final_job.coverage.complete:
                 source_id, persisted = self._load_persisted(job_id)
-                finalized = await self._run_inference(
+                sentences, plans = await self._run_inference(
                     InferenceKind.FINALIZE,
-                    self._finalize_realtime,
+                    self._prepare_targeted_retranscription,
                     audio,
                     final_job.coverage,
                     persisted,
                 )
-                speaker_updates = self._persist_speakers(
+                finalized = await self._resolve_targeted_retranscription(
+                    audio,
+                    sentences,
+                    plans,
+                )
+                persisted_result = persist_targeted_transcript(
+                    engine,
                     job_id,
+                    persisted,
                     finalized,
                     duration_ms,
                 )
-                await self._publish(
-                    job_id,
-                    SpeakerUpdateEvent(updates=speaker_updates),
-                )
-                segments = self._load_segments(job_id)
+                source_id = persisted_result.source_id
+                segments = persisted_result.segments
+                if persisted_result.speaker_updates:
+                    await self._publish(
+                        job_id,
+                        SpeakerUpdateEvent(
+                            updates=persisted_result.speaker_updates,
+                        ),
+                    )
                 logger.info(
-                    "Finalizer reused realtime transcript job=%s segments=%d",
+                    "Finalizer targeted realtime transcript job=%s "
+                    "segments=%d retried=%d replaced=%d fallback=%d "
+                    "asr_audio_ms=%d",
                     job_id,
                     len(segments),
+                    finalized.stats.targeted_segments,
+                    finalized.stats.replaced_segments,
+                    finalized.stats.fallback_segments,
+                    finalized.stats.asr_audio_ms,
                 )
             else:
                 logger.warning(
@@ -235,12 +265,12 @@ class FinalTranscriptWorker:
     def _load_segments(self, job_id: str) -> list[TranscriptSegmentPayload]:
         return self._load_persisted(job_id)[1]
 
-    def _finalize_realtime(
+    def _prepare_targeted_retranscription(
         self,
         audio: Any,
         coverage: Any,
         persisted: list[TranscriptSegmentPayload],
-    ) -> list[SentenceInfo]:
+    ) -> tuple[list[SentenceInfo], list[TargetedSegmentPlan]]:
         sentences = [
             SentenceInfo(
                 text=item.text,
@@ -254,16 +284,70 @@ class FinalTranscriptWorker:
             Segment(item.start_ms, item.end_ms)
             for item in coverage.speech_ranges
         ]
-        finalized = self.pipeline.finalize_realtime_transcript(
+        plans = self.pipeline.prepare_realtime_targeted_retranscription(
             audio,
             sentences,
             vad_segments,
         )
-        if len(finalized) != len(persisted):
-            raise RuntimeError(
-                "Realtime diarization must preserve persisted segment count."
-            )
-        return finalized
+        if len(plans) != len(persisted):
+            raise RuntimeError("Targeted plan must cover every persisted segment.")
+        return sentences, plans
+
+    async def _resolve_targeted_retranscription(
+        self,
+        audio: Any,
+        sentences: list[SentenceInfo],
+        plans: list[TargetedSegmentPlan],
+    ) -> TargetedRetranscriptionResult:
+        turn_results: dict[int, list[SentenceInfo]] = {}
+        for plan in plans:
+            if plan.action != "retranscribe":
+                continue
+            failed = False
+            for turn in plan.turns:
+                if failed:
+                    turn_results[id(turn)] = []
+                    continue
+                try:
+                    turn_results[id(turn)] = await self._run_inference(
+                        InferenceKind.TARGETED,
+                        self._transcribe_targeted_turn,
+                        audio,
+                        turn,
+                    )
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    failed = True
+                    turn_results[id(turn)] = []
+                    logger.exception(
+                        "Targeted ASR turn failed segment=%d range=%d-%d",
+                        plan.index,
+                        turn.start_ms,
+                        turn.end_ms,
+                    )
+
+        return resolve_targeted_retranscription(
+            sentences,
+            plans,
+            lambda turn: turn_results.get(id(turn), []),
+        )
+
+    def _transcribe_targeted_turn(
+        self,
+        audio: Any,
+        turn: SpeakerTurn,
+    ) -> list[SentenceInfo]:
+        """Decode one diarized turn using the full pipeline ASR model."""
+        return self.pipeline.transcribe_vad_segment(
+            audio,
+            turn.to_segment(),
+            language=getattr(
+                self.pipeline,
+                "transcription_language",
+                "auto",
+            ),
+        )
 
     async def _run_inference(
         self,
@@ -274,40 +358,6 @@ class FinalTranscriptWorker:
         if self.coordinator is not None:
             return await self.coordinator.submit(kind, function, *args)
         return await asyncio.to_thread(function, *args)
-
-    def _persist_speakers(
-        self,
-        job_id: str,
-        finalized: list[SentenceInfo],
-        duration_ms: int,
-    ) -> list[SpeakerAssignment]:
-        """Commit speaker-only updates while preserving text, time and IDs."""
-        with Session(engine) as db:
-            job = db.get(Job, job_id)
-            if job is None:
-                raise RuntimeError(f"Job '{job_id}' không tồn tại.")
-            source = db.get(Source, job.source_id)
-            records = db.exec(
-                select(TranscriptSegment)
-                .where(TranscriptSegment.job_id == job_id)
-                .order_by(TranscriptSegment.start_ms, TranscriptSegment.id)
-            ).all()
-            if source is None or len(records) != len(finalized):
-                raise RuntimeError("Persisted realtime transcript changed during finalization.")
-            updates = []
-            for record, sentence in zip(records, finalized):
-                record.speaker = sentence.speaker
-                db.add(record)
-                updates.append(
-                    SpeakerAssignment(
-                        segment_id=record.id,
-                        speaker=record.speaker,
-                    )
-                )
-            source.duration = max(source.duration or 0.0, duration_ms / 1000)
-            db.add(source)
-            db.commit()
-            return updates
 
     def _merge_fallback_transcript(
         self,

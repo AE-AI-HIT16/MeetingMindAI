@@ -16,6 +16,7 @@ class InferenceKind(str, Enum):
 
     CONFIRMED = "confirmed"
     FALLBACK = "fallback"
+    TARGETED = "targeted"
     UPLOAD = "upload"
     FINALIZE = "finalize"
     PARTIAL = "partial"
@@ -24,6 +25,7 @@ class InferenceKind(str, Enum):
 _PRIORITY = {
     InferenceKind.CONFIRMED: 0,
     InferenceKind.FALLBACK: 5,
+    InferenceKind.TARGETED: 7,
     InferenceKind.UPLOAD: 10,
     InferenceKind.FINALIZE: 15,
     InferenceKind.PARTIAL: 30,

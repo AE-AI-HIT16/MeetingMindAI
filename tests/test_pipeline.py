@@ -295,6 +295,39 @@ def test_realtime_finalize_refreshes_full_file_vad_for_diarization():
     ]
 
 
+def test_targeted_plan_refreshes_vad_and_selects_only_mixed_segment():
+    class FinalVAD:
+        def detect(self, audio):
+            return [Segment(0, 2000), Segment(2000, 6000)]
+
+    pipeline = MeetPipeline(
+        asr_model=FakeASR(),
+        vad_model=FinalVAD(),
+        spk_model=object(),
+    )
+    captured = []
+
+    def diarize(audio, segments):
+        captured.extend(segments)
+        return [[0.0, 2.0, 7], [2.0, 4.0, 7], [4.0, 6.0, 3]]
+
+    pipeline._diarize_segments = diarize
+    plans = pipeline.prepare_realtime_targeted_retranscription(
+        np.zeros(6 * 16000, dtype=np.float32),
+        [
+            SentenceInfo(text="câu sạch", start=0.0, end=2.0),
+            SentenceInfo(text="hai người", start=2.0, end=6.0),
+        ],
+        [Segment(0, 6000)],
+    )
+
+    assert [(item.start_ms, item.end_ms) for item in captured] == [
+        (0, 2000),
+        (2000, 6000),
+    ]
+    assert [plan.action for plan in plans] == ["keep", "retranscribe"]
+
+
 def test_prepare_diarization_first_builds_preassigned_speaker_turns():
     audio = np.zeros(4 * 16000, dtype=np.float32)
     pipeline = MeetPipeline(

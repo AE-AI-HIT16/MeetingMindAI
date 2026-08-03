@@ -101,7 +101,7 @@ Quy ước:
 ## Targeted re-ASR cho đoạn mixed/unknown
 
 - [x] Bước 1: Xây dựng contract/thuật toán targeted re-ASR và unit test.
-- [ ] Bước 2: Tích hợp final worker và cập nhật DB theo transaction.
+- [x] Bước 2: Tích hợp final worker và cập nhật DB theo transaction.
 - [ ] Bước 3: Đồng bộ transcript cuối về frontend.
 - [ ] Bước 4: Kiểm thử tích hợp, đo lượng audio ASR lại và cập nhật tài liệu.
 

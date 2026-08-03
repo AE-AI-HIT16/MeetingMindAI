@@ -157,6 +157,27 @@ async def test_fallback_is_never_dropped_and_is_counted() -> None:
 
 
 @pytest.mark.asyncio
+async def test_targeted_asr_is_counted_without_incrementing_full_fallback() -> None:
+    async def runner(function, *args, **kwargs):
+        return function(*args, **kwargs)
+
+    coordinator = InferenceCoordinator(runner=runner)
+    await coordinator.start()
+
+    result = await coordinator.submit(
+        InferenceKind.TARGETED,
+        lambda: "targeted",
+    )
+
+    assert result == "targeted"
+    metrics = coordinator.snapshot()
+    assert metrics.asr_call_count == 1
+    assert metrics.fallback_count == 0
+    assert metrics.completed_by_kind[InferenceKind.TARGETED] == 1
+    await coordinator.stop()
+
+
+@pytest.mark.asyncio
 async def test_metrics_endpoint_exposes_live_snapshot() -> None:
     async def runner(function, *args, **kwargs):
         return function(*args, **kwargs)

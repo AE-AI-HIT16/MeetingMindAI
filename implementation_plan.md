@@ -311,6 +311,18 @@ speaker turn của câu đó đều ASR thành công. Speaker ID cuối được
 thứ tự xuất hiện. Full-file ASR vẫn chỉ là fallback khi coverage realtime của cả
 phiên không đầy đủ.
 
+Quyết định Bước 2:
+
+- Diarization lập plan trong một `FINALIZE` request, không gọi ASR bên trong.
+- Mỗi speaker turn cần decode được gửi thành một request `TARGETED` riêng để
+  confirmed realtime của phiên khác có thể chen vào giữa các turn.
+- Segment `single` giữ nguyên row/ID và chỉ cập nhật speaker.
+- Segment được thay thế xóa row cũ và insert các speaker turn mới trong cùng một
+  transaction. Validation hoặc insert lỗi sẽ rollback toàn bộ transaction.
+- Live document chỉ được tạo sau khi transaction transcript đã commit.
+- Event snapshot thay thế toàn transcript được để sang Bước 3; DB đã là nguồn
+  dữ liệu chính xác sau Bước 2.
+
 ## 9. Final document và terminal events
 
 Thứ tự finalizer:
