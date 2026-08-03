@@ -292,6 +292,25 @@ cũng giữ `speaker=null`.
 Quyết định Bước 6: log/đếm cả `single`, `mixed`, `uncertain`; selective re-ASR
 vẫn tắt và chỉ được bật sau khi có test chứng minh không làm mất text.
 
+### 8.2 Targeted re-ASR sau nghiệm thu thực tế
+
+Ba bản ghi đối chiếu cho thấy CAM++ vẫn tìm được hai cụm giọng, nhưng các đoạn
+ASR realtime dài có thể chứa nhiều speaker. Vì Qwen tiếng Việt không có timestamp
+từng chữ, finalizer áp dụng policy mới:
+
+```text
+single -> giữ nguyên text, chỉ cập nhật speaker
+mixed/uncertain có diarization coverage an toàn
+       -> ASR lại từng speaker turn trong đúng segment đó
+coverage không đủ hoặc một turn ASR lỗi
+       -> giữ nguyên toàn bộ segment cũ với speaker=null
+```
+
+Replacement là atomic theo từng segment realtime: chỉ thay câu cũ khi tất cả
+speaker turn của câu đó đều ASR thành công. Speaker ID cuối được chuẩn hóa theo
+thứ tự xuất hiện. Full-file ASR vẫn chỉ là fallback khi coverage realtime của cả
+phiên không đầy đủ.
+
 ## 9. Final document và terminal events
 
 Thứ tự finalizer:

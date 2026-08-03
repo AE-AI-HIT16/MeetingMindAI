@@ -98,6 +98,13 @@ Quy ước:
 - [x] Không biến lỗi clustering thành Speaker 0 giả.
 - [x] Chạy 108 backend tests, frontend lint/build và Ruff.
 
+## Targeted re-ASR cho đoạn mixed/unknown
+
+- [x] Bước 1: Xây dựng contract/thuật toán targeted re-ASR và unit test.
+- [ ] Bước 2: Tích hợp final worker và cập nhật DB theo transaction.
+- [ ] Bước 3: Đồng bộ transcript cuối về frontend.
+- [ ] Bước 4: Kiểm thử tích hợp, đo lượng audio ASR lại và cập nhật tài liệu.
+
 ## Bước 8 — Nghiệm thu E2E
 
 - [ ] Chạy backend test suite liên quan.

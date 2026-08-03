@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
 
-SpeakerSegmentKind = Literal["single", "mixed", "uncertain"]
+from meetasr.schemas import SpeakerSegmentKind
 
 
 @dataclass(frozen=True, slots=True)
