@@ -30,6 +30,14 @@ async def inference_metrics(request: Request) -> dict:
         "failure_count": snapshot.failure_count,
         "average_wait_ms": snapshot.average_wait_ms,
         "average_run_ms": snapshot.average_run_ms,
+        "average_wait_ms_by_kind": {
+            kind.value: value
+            for kind, value in snapshot.average_wait_ms_by_kind.items()
+        },
+        "average_run_ms_by_kind": {
+            kind.value: value
+            for kind, value in snapshot.average_run_ms_by_kind.items()
+        },
         "completed_by_kind": {
             kind.value: count
             for kind, count in snapshot.completed_by_kind.items()

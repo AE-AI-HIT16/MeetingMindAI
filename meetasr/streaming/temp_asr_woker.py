@@ -1,6 +1,7 @@
 import asyncio
 import logging
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, field
 
 import numpy as np
 
@@ -21,10 +22,21 @@ class PartialASRRequest:
 
     start_ms: int
     end_ms: int
+    utterance_start_ms: int | None = None
+    requested_at: float = field(
+        default_factory=time.perf_counter,
+        compare=False,
+        repr=False,
+    )
 
     def __post_init__(self) -> None:
         if self.start_ms < 0 or self.end_ms <= self.start_ms:
             raise ValueError("partial request must have a positive time range")
+        if (
+            self.utterance_start_ms is not None
+            and not 0 <= self.utterance_start_ms <= self.start_ms
+        ):
+            raise ValueError("utterance start must not follow partial window start")
 
 
 class TempASRWorker:
@@ -71,11 +83,13 @@ class TempASRWorker:
 
     async def process_request(self, request: PartialASRRequest) -> None:
         """Transcribe one bounded snapshot unless it was already confirmed."""
+        worker_started_at = time.perf_counter()
         snapshot = await self._snapshot(request)
         if snapshot is None:
             return
         audio, start_ms, end_ms = snapshot
         language = getattr(self.pipeline, "transcription_language", "auto")
+        inference_started_at = time.perf_counter()
         try:
             if self.coordinator is not None:
                 results = await self.coordinator.submit(
@@ -96,6 +110,7 @@ class TempASRWorker:
         except PartialInferenceDropped:
             logger.debug("Partial ASR request replaced by a newer snapshot")
             return
+        inference_ms = (time.perf_counter() - inference_started_at) * 1000
         for result in results:
             text = result.get("text", "").strip()
             if not text:
@@ -112,6 +127,88 @@ class TempASRWorker:
                     "segment": segment.model_dump(mode="json"),
                 }
             )
+            self._record_emission(
+                request,
+                worker_started_at=worker_started_at,
+                inference_ms=inference_ms,
+            )
+
+    def _record_emission(
+        self,
+        request: PartialASRRequest,
+        *,
+        worker_started_at: float,
+        inference_ms: float,
+    ) -> None:
+        """Log latency for an emitted preview without changing its contract."""
+        emitted_at = time.perf_counter()
+        first_audio_at = getattr(
+            self.session,
+            "first_audio_received_at",
+            None,
+        )
+        previous_emission = getattr(
+            self.session,
+            "last_partial_utterance_emitted_at",
+            None,
+        )
+        utterance_start_ms = (
+            request.utterance_start_ms
+            if request.utterance_start_ms is not None
+            else request.start_ms
+        )
+        if (
+            getattr(self.session, "partial_utterance_start_ms", None)
+            != utterance_start_ms
+        ):
+            self.session.partial_utterance_start_ms = utterance_start_ms
+            self.session.last_partial_utterance_emitted_at = None
+            self.session.partial_utterance_emitted_count = 0
+            previous_emission = None
+        first_audio_latency_ms = (
+            (emitted_at - first_audio_at) * 1000
+            if first_audio_at is not None
+            else -1.0
+        )
+        update_interval_ms = (
+            (emitted_at - previous_emission) * 1000
+            if previous_emission is not None
+            else -1.0
+        )
+        if getattr(self.session, "first_partial_emitted_at", None) is None:
+            self.session.first_partial_emitted_at = emitted_at
+        self.session.last_partial_emitted_at = emitted_at
+        self.session.last_partial_utterance_emitted_at = emitted_at
+        self.session.partial_emitted_count = (
+            getattr(self.session, "partial_emitted_count", 0) + 1
+        )
+        self.session.partial_utterance_emitted_count = (
+            getattr(self.session, "partial_utterance_emitted_count", 0) + 1
+        )
+        utterance_to_partial_ms = (
+            (emitted_at - first_audio_at) * 1000 - utterance_start_ms
+            if first_audio_at is not None
+            else -1.0
+        )
+        logger.info(
+            "Partial latency job=%s count=%d utterance_count=%d "
+            "utterance_start_ms=%d "
+            "window=%d-%d worker_wait_ms=%.1f inference_ms=%.1f "
+            "request_to_emit_ms=%.1f first_audio_to_partial_ms=%.1f "
+            "utterance_to_partial_ms=%.1f update_interval_ms=%.1f",
+            getattr(self.session, "job_id", "unknown"),
+            self.session.partial_emitted_count,
+            self.session.partial_utterance_emitted_count,
+            utterance_start_ms,
+            request.start_ms,
+            request.end_ms,
+            (worker_started_at - request.requested_at) * 1000,
+            inference_ms,
+            (emitted_at - request.requested_at) * 1000,
+            first_audio_latency_ms,
+            utterance_to_partial_ms,
+            update_interval_ms,
+        )
 
     async def _snapshot(
         self,

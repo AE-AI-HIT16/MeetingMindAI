@@ -452,6 +452,10 @@ Quyết định Bước 7:
 - Metrics live được công bố tại `GET /v1/metrics/inference`: queue depth hiện
   tại/cực đại, average wait/run latency, ASR call count, fallback count,
   partial drop, failure và số hoàn tất theo loại.
+- Baseline partial latency tách average wait/run theo từng inference kind. Mỗi
+  preview phát ra log thêm worker wait, inference time, request-to-emit,
+  first-audio-to-partial, utterance-to-partial và update interval. Bước đo này
+  không thay đổi timing `700/800/5000 ms` hay priority hiện tại.
 
 Hotfix nghiệm thu sau Bước 7:
 

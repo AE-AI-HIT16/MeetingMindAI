@@ -106,6 +106,14 @@ Quy ước:
 - [x] Bước 4: Kiểm thử tích hợp, đo lượng audio ASR lại và cập nhật tài liệu.
 - [x] E2E tab audio 120,4 giây: 2 speaker, 0 unknown, targeted ratio 30,4%.
 
+## Partial realtime nhanh và đầy đủ
+
+- [/] Bước 1: Instrument baseline latency theo inference kind và utterance.
+- [ ] Bước 2: Tích lũy prefix xám và rolling tail.
+- [ ] Bước 3: Tối ưu timing/priority dựa trên baseline.
+- [ ] Bước 4: Frontend thay partial theo utterance.
+- [ ] Bước 5: Nghiệm thu E2E latency và câu nói dài.
+
 ## Bước 8 — Nghiệm thu E2E
 
 - [ ] Chạy backend test suite liên quan.

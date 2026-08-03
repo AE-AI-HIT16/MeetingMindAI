@@ -72,6 +72,8 @@ async def test_confirmed_overtakes_partial_and_calls_stay_sequential() -> None:
     assert metrics.asr_call_count == 3
     assert metrics.max_queue_depth >= 2
     assert metrics.completed_by_kind[InferenceKind.CONFIRMED] == 1
+    assert metrics.average_wait_ms_by_kind[InferenceKind.PARTIAL] >= 0
+    assert metrics.average_run_ms_by_kind[InferenceKind.PARTIAL] >= 0
     await coordinator.stop()
 
 
@@ -197,4 +199,6 @@ async def test_metrics_endpoint_exposes_live_snapshot() -> None:
     assert payload["queue_depth"] == 0
     assert payload["asr_call_count"] == 1
     assert payload["completed_by_kind"] == {"confirmed": 1}
+    assert payload["average_wait_ms_by_kind"]["confirmed"] >= 0
+    assert payload["average_run_ms_by_kind"]["confirmed"] >= 0
     await coordinator.stop()

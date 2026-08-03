@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import time
+
 from meetasr.streaming.validate import validate_audio
 
 
@@ -29,6 +31,8 @@ class AudioReceiver:
         """
 
         audio = validate_audio(audio)
+        if getattr(self.session, "first_audio_received_at", None) is None:
+            self.session.first_audio_received_at = time.perf_counter()
 
         # Ghép frame vào buffer (ring buffer float32 được worker ghi)
         self._buffer.extend(audio)

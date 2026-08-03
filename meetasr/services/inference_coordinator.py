@@ -48,6 +48,8 @@ class InferenceMetricsSnapshot:
     failure_count: int
     average_wait_ms: float
     average_run_ms: float
+    average_wait_ms_by_kind: dict[InferenceKind, float]
+    average_run_ms_by_kind: dict[InferenceKind, float]
     completed_by_kind: dict[InferenceKind, int]
 
 
@@ -86,6 +88,9 @@ class InferenceCoordinator:
         self._failure_count = 0
         self._total_wait_ms = 0.0
         self._total_run_ms = 0.0
+        self._wait_ms_by_kind: Counter[InferenceKind] = Counter()
+        self._run_ms_by_kind: Counter[InferenceKind] = Counter()
+        self._executed_by_kind: Counter[InferenceKind] = Counter()
         self._completed: Counter[InferenceKind] = Counter()
         self._runner = runner or asyncio.to_thread
 
@@ -150,6 +155,16 @@ class InferenceCoordinator:
 
     def snapshot(self) -> InferenceMetricsSnapshot:
         executed = sum(self._completed.values()) + self._failure_count
+        average_wait_by_kind = {
+            kind: self._wait_ms_by_kind[kind] / count
+            for kind, count in self._executed_by_kind.items()
+            if count
+        }
+        average_run_by_kind = {
+            kind: self._run_ms_by_kind[kind] / count
+            for kind, count in self._executed_by_kind.items()
+            if count
+        }
         return InferenceMetricsSnapshot(
             queue_depth=self.queue_depth,
             max_queue_depth=self._max_queue_depth,
@@ -159,6 +174,8 @@ class InferenceCoordinator:
             failure_count=self._failure_count,
             average_wait_ms=self._total_wait_ms / executed if executed else 0.0,
             average_run_ms=self._total_run_ms / executed if executed else 0.0,
+            average_wait_ms_by_kind=average_wait_by_kind,
+            average_run_ms_by_kind=average_run_by_kind,
             completed_by_kind=dict(self._completed),
         )
 
@@ -180,9 +197,11 @@ class InferenceCoordinator:
             )
             return
 
-        self._total_wait_ms += (
+        wait_ms = (
             time.perf_counter() - request.enqueued_at
         ) * 1000
+        self._total_wait_ms += wait_ms
+        self._wait_ms_by_kind[request.kind] += wait_ms
         if request.kind is not InferenceKind.FINALIZE:
             self._asr_call_count += 1
         if request.kind is InferenceKind.FALLBACK:
@@ -203,9 +222,12 @@ class InferenceCoordinator:
             if not request.future.cancelled():
                 request.future.set_result(result)
         finally:
-            self._total_run_ms += (
+            run_ms = (
                 time.perf_counter() - started_at
             ) * 1000
+            self._total_run_ms += run_ms
+            self._run_ms_by_kind[request.kind] += run_ms
+            self._executed_by_kind[request.kind] += 1
 
     def _is_stale_partial(self, request: _InferenceRequest) -> bool:
         return (

@@ -76,6 +76,7 @@ class StreamingProcessor:
         request = PartialASRRequest(
             start_ms=max(utterance_start_ms, now_ms - self.partial_max_audio_ms),
             end_ms=now_ms,
+            utterance_start_ms=utterance_start_ms,
         )
         try:
             if not self.session.temp_asr_queue.empty():

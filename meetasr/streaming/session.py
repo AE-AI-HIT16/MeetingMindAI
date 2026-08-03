@@ -85,6 +85,13 @@ class StreamSession:
 
         # Timeline của lần gần nhất yêu cầu transcript preview.
         self.last_partial_request_ms = 0
+        self.first_audio_received_at = None
+        self.first_partial_emitted_at = None
+        self.last_partial_emitted_at = None
+        self.partial_emitted_count = 0
+        self.partial_utterance_start_ms = None
+        self.last_partial_utterance_emitted_at = None
+        self.partial_utterance_emitted_count = 0
 
         # ==========================================================
         # Transcript
@@ -169,6 +176,13 @@ class StreamSession:
 
         self.confirmed_end_ms = 0
         self.last_partial_request_ms = 0
+        self.first_audio_received_at = None
+        self.first_partial_emitted_at = None
+        self.last_partial_emitted_at = None
+        self.partial_emitted_count = 0
+        self.partial_utterance_start_ms = None
+        self.last_partial_utterance_emitted_at = None
+        self.partial_utterance_emitted_count = 0
 
         self.ready_segments.clear()
 

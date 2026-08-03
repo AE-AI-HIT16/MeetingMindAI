@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+import time
 from types import SimpleNamespace
 
 import numpy as np
@@ -105,6 +107,7 @@ async def test_waiting_partial_request_is_replaced_by_newest() -> None:
 @pytest.mark.asyncio
 async def test_partial_worker_crops_audio_and_forces_configured_language(
     monkeypatch,
+    caplog,
 ) -> None:
     calls: list[tuple[int, str]] = []
 
@@ -126,6 +129,11 @@ async def test_partial_worker_crops_audio_and_forces_configured_language(
         partial_buffer_start_ms=0,
         partial_buffer_lock=asyncio.Lock(),
         websocket=websocket,
+        job_id="job-latency",
+        first_audio_received_at=time.perf_counter() - 1.0,
+        first_partial_emitted_at=None,
+        last_partial_emitted_at=None,
+        partial_emitted_count=0,
     )
     pipeline = SimpleNamespace(
         asr=FakeASR(),
@@ -138,9 +146,22 @@ async def test_partial_worker_crops_audio_and_forces_configured_language(
 
     monkeypatch.setattr(temp_asr_woker.asyncio, "to_thread", run_inline)
 
-    await worker.process_request(PartialASRRequest(start_ms=1000, end_ms=6000))
+    caplog.set_level(logging.INFO, logger="temp_asr")
+    await worker.process_request(
+        PartialASRRequest(
+            start_ms=1000,
+            end_ms=6000,
+            utterance_start_ms=1000,
+            requested_at=time.perf_counter() - 0.1,
+        )
+    )
 
     assert calls == [(16000 * 5, "vi")]
     assert websocket.messages[0]["type"] == "transcript_partial"
     assert websocket.messages[0]["segment"]["start_ms"] == 1000
     assert websocket.messages[0]["segment"]["end_ms"] == 6000
+    assert session.partial_emitted_count == 1
+    assert session.first_partial_emitted_at is not None
+    assert "first_audio_to_partial_ms=" in caplog.text
+    assert "utterance_to_partial_ms=" in caplog.text
+    assert "request_to_emit_ms=" in caplog.text
