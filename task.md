@@ -109,7 +109,8 @@ Quy ước:
 ## Partial realtime nhanh và đầy đủ
 
 - [x] Bước 1: Instrument và đo baseline latency theo inference kind/utterance.
-- [ ] Bước 2: Tích lũy prefix xám và rolling tail.
+- [x] Bước 2A: Sửa fractional resampling phase 48/44,1 kHz → 16 kHz.
+- [ ] Bước 2B: Tích lũy prefix xám và rolling tail.
 - [ ] Bước 3: Tối ưu timing/priority dựa trên baseline.
 - [ ] Bước 4: Frontend thay partial theo utterance.
 - [ ] Bước 5: Nghiệm thu E2E latency và câu nói dài.

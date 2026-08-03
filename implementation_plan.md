@@ -471,6 +471,11 @@ Baseline thực tế 86,1 giây, 18 utterance và 60 partial:
   Baseline quan sát upstream lag tăng từ gần 0 lên khoảng 1,2 giây sau 81 giây,
   phù hợp với sai số này.
 
+Quyết định Bước 2A: AudioWorklet giữ input sample cuối và fractional source
+position qua mỗi callback. Test một giây xác nhận cả 48 kHz và 44,1 kHz đều tạo
+đúng 16.000 mẫu ở output; test ramp xác nhận phase không khởi động lại tại biên
+block 128 mẫu. Thay đổi này sửa timeline drift nhưng chưa hạ timing partial.
+
 Hotfix nghiệm thu sau Bước 7:
 
 - Client gửi JWT trong control frame đầu tiên của WebSocket; backend xác thực

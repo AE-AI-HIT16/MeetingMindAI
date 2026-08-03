@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:pcm": "node --test tests/pcm-processor.test.mjs"
   },
   "dependencies": {
     "next": "16.2.10",
