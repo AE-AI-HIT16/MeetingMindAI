@@ -102,6 +102,20 @@ export function useJobEvents(jobId: string | null): JobEventsState {
           return;
         }
 
+        if (event.type === "transcript_snapshot") {
+          const snapshot = event.segments
+            .map((segment) => ({
+              ...mapTranscriptSegment(segment),
+              _partialType: "delta" as const,
+            }))
+            .sort(
+              (left, right) =>
+                left.startMs - right.startMs || left.endMs - right.endMs,
+            );
+          setSegments(snapshot);
+          return;
+        }
+
         if (event.type === "doc_delta") {
           setSections((current) => {
             const nextSection: DocSection = {

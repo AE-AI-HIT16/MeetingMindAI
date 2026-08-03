@@ -90,6 +90,11 @@ export interface TranscriptPartialJobEvent {
   segment: ApiTranscriptSegment;
 }
 
+export interface TranscriptSnapshotJobEvent {
+  type: "transcript_snapshot";
+  segments: ApiTranscriptSegment[];
+}
+
 export interface DocDeltaJobEvent {
   type: "doc_delta";
   section_id: string;
@@ -121,6 +126,7 @@ export type JobEvent =
   | StatusJobEvent
   | TranscriptDeltaJobEvent
   | TranscriptPartialJobEvent
+  | TranscriptSnapshotJobEvent
   | DocDeltaJobEvent
   | SpeakerUpdateJobEvent
   | DoneJobEvent

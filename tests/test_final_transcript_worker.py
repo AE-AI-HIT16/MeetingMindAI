@@ -344,6 +344,24 @@ async def test_complete_coverage_retranscribes_only_mixed_segment(
                     assert db.get(TranscriptSegment, stable_ids[0]).speaker == 0
                     expected = {"segment_id": stable_ids[0], "speaker": 0}
                     assert payload["updates"] == [expected]
+            elif payload["type"] == "transcript_snapshot":
+                with Session(engine) as db:
+                    records = db.exec(
+                        select(TranscriptSegment)
+                        .where(TranscriptSegment.job_id == job_id)
+                        .order_by(TranscriptSegment.start_ms, TranscriptSegment.id)
+                    ).all()
+                    expected = [
+                        {
+                            "id": record.id,
+                            "start_ms": record.start_ms,
+                            "end_ms": record.end_ms,
+                            "speaker": record.speaker,
+                            "text": record.text,
+                        }
+                        for record in records
+                    ]
+                    assert payload["segments"] == expected
             elif payload["type"] == "doc_delta":
                 assert "Phần của người một." in payload["markdown"]
                 assert "Đoạn có lượt nói phụ." not in payload["markdown"]
@@ -387,11 +405,16 @@ async def test_complete_coverage_retranscribes_only_mixed_segment(
     assert [event["type"] for event in published] == [
         "status",
         "speaker_update",
+        "transcript_snapshot",
         "status",
         "doc_delta",
         "done",
     ]
     assert not any(event["type"] == "transcript_delta" for event in published)
+    snapshot = next(
+        event for event in published if event["type"] == "transcript_snapshot"
+    )
+    assert [segment["speaker"] for segment in snapshot["segments"]] == [0, 0, 1]
     assert published[-1]["num_segments"] == 3
     engine.dispose()
 

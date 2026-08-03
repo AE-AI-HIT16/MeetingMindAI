@@ -11,6 +11,7 @@ from meetasr.api.schemas_phase2 import (
     StatusEvent,
     TranscriptDeltaEvent,
     TranscriptSegmentPayload,
+    TranscriptSnapshotEvent,
 )
 from meetasr.db.models_phase2 import TranscriptSegment
 from meetasr.realtime.events import EventBus
@@ -79,6 +80,10 @@ def test_job_event_contracts_serialize_expected_discriminators() -> None:
     assert TranscriptDeltaEvent(segment=segment).model_dump()["type"] == (
         "transcript_delta"
     )
+    assert TranscriptSnapshotEvent(segments=[segment]).model_dump() == {
+        "type": "transcript_snapshot",
+        "segments": [segment.model_dump()],
+    }
     assert DoneEvent(duration_ms=1000, num_segments=1).model_dump()["type"] == (
         "done"
     )

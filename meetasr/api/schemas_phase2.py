@@ -63,6 +63,13 @@ class TranscriptDeltaEvent(BaseModel):
     segment: TranscriptSegmentPayload
 
 
+class TranscriptSnapshotEvent(BaseModel):
+    """Complete replacement for the canonical persisted transcript."""
+
+    type: Literal["transcript_snapshot"] = "transcript_snapshot"
+    segments: list[TranscriptSegmentPayload]
+
+
 class DocDeltaEvent(BaseModel):
     """A complete replacement for one live-document section."""
 

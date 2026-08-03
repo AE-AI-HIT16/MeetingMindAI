@@ -18,6 +18,7 @@ from meetasr.api.schemas_phase2 import (
     StatusEvent,
     TranscriptDeltaEvent,
     TranscriptSegmentPayload,
+    TranscriptSnapshotEvent,
 )
 from meetasr.db.connection import engine
 from meetasr.db.models_phase2 import (
@@ -143,6 +144,10 @@ class FinalTranscriptWorker:
                             updates=persisted_result.speaker_updates,
                         ),
                     )
+                await self._publish(
+                    job_id,
+                    TranscriptSnapshotEvent(segments=segments),
+                )
                 logger.info(
                     "Finalizer targeted realtime transcript job=%s "
                     "segments=%d retried=%d replaced=%d fallback=%d "

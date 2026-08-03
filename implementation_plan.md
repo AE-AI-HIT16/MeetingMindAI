@@ -320,8 +320,11 @@ Quyết định Bước 2:
 - Segment được thay thế xóa row cũ và insert các speaker turn mới trong cùng một
   transaction. Validation hoặc insert lỗi sẽ rollback toàn bộ transaction.
 - Live document chỉ được tạo sau khi transaction transcript đã commit.
-- Event snapshot thay thế toàn transcript được để sang Bước 3; DB đã là nguồn
-  dữ liệu chính xác sau Bước 2.
+- Sau transaction commit, finalizer phát `transcript_snapshot` chứa toàn bộ
+  transcript chính thức. Frontend thay toàn bộ state hiện tại bằng snapshot để
+  xóa row mixed cũ, partial cũ và nhận các speaker turn mới.
+- `speaker_update` vẫn được giữ để tương thích với client cũ; snapshot là nguồn
+  đồng bộ cuối cùng cho client đã cập nhật.
 
 ## 9. Final document và terminal events
 
@@ -331,6 +334,7 @@ Thứ tự finalizer:
 status(transcribing/finalizing)
   -> update speakers
   -> publish speaker_update
+  -> publish transcript_snapshot
   -> status(generating_doc)
   -> create/update live document
   -> commit document and source duration
