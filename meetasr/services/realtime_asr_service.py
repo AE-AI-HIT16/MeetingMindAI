@@ -5,6 +5,10 @@ from typing import Any
 
 from meetasr.api.schemas_phase2 import TranscriptSegmentPayload
 from meetasr.services.asr_service import ASRServiceResult
+from meetasr.services.inference_coordinator import (
+    InferenceCoordinator,
+    InferenceKind,
+)
 
 
 class RealtimeASRService:
@@ -25,6 +29,7 @@ class RealtimeASRService:
     def __init__(
         self,
         pipeline: Any,
+        coordinator: InferenceCoordinator | None = None,
     ):
         if pipeline is None:
             raise ValueError(
@@ -32,6 +37,7 @@ class RealtimeASRService:
             )
 
         self.pipeline = pipeline
+        self.coordinator = coordinator
 
         self._lock = asyncio.Lock()
 
@@ -46,26 +52,32 @@ class RealtimeASRService:
     ) -> ASRServiceResult:
 
 
-        async with self._lock:
-
-            result = await asyncio.to_thread(
+        if self.coordinator is not None:
+            result = await self.coordinator.submit(
+                InferenceKind.CONFIRMED,
                 self.pipeline.transcribe,
                 audio,
                 key=key,
+                language=getattr(
+                    self.pipeline,
+                    "transcription_language",
+                    "auto",
+                ),
+                skip_vad=True,
             )
-
-            print(
-                "DEBUG PIPELINE RESULT",
-                [
-                    {
-                        "text": s.text,
-                        "start": s.start,
-                        "end": s.end,
-                    }
-                    for s in result.sentence_info
-                ]
-            )
-
+        else:
+            async with self._lock:
+                result = await asyncio.to_thread(
+                    self.pipeline.transcribe,
+                    audio,
+                    key=key,
+                    language=getattr(
+                        self.pipeline,
+                        "transcription_language",
+                        "auto",
+                    ),
+                    skip_vad=True,
+                )
 
         segments = []
 
@@ -91,15 +103,6 @@ class RealtimeASRService:
 
                     text=sentence.text.strip(),
                 )
-            )
-
-            print(
-                "DEBUG PAYLOAD",
-                {
-                    "start": sentence.start,
-                    "end": sentence.end,
-                    "text": sentence.text,
-                }
             )
 
         duration_ms = max(

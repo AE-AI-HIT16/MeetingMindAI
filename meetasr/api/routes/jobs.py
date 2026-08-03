@@ -14,9 +14,14 @@ from meetasr.api.schemas_phase2 import (
     TranscriptSegmentPayload,
 )
 from meetasr.db.connection import engine
-from meetasr.db.models_phase2 import Document, DocumentMode, Job, JobStatus, TranscriptSegment
+from meetasr.db.models_phase2 import (
+    Document,
+    DocumentMode,
+    Job,
+    JobStatus,
+    TranscriptSegment,
+)
 from meetasr.realtime.events import event_bus
-
 
 router = APIRouter(prefix="/v1/jobs", tags=["jobs"])
 
@@ -45,7 +50,7 @@ def _job_snapshot(job_id: str) -> list[dict]:
         segments = db.exec(
             select(TranscriptSegment)
             .where(TranscriptSegment.job_id == job_id)
-            .order_by(TranscriptSegment.id)
+            .order_by(TranscriptSegment.start_ms, TranscriptSegment.id)
         ).all()
         events.extend(
             TranscriptDeltaEvent(

@@ -7,6 +7,7 @@ from types import ModuleType
 
 import numpy as np
 import pytest
+import torch
 
 from meetasr.api import dependencies
 from meetasr.api.routes.health import health
@@ -147,6 +148,38 @@ def test_model_is_lazy_loaded_once_from_official_package(monkeypatch) -> None:
 
     assert vad._model is fake_model
     assert calls == [{"onnx": True, "opset_version": 16}]
+
+
+def test_streaming_predictors_keep_independent_recurrent_state() -> None:
+    class FakeStatefulModel:
+        def __init__(self) -> None:
+            self.reset_states()
+
+        def reset_states(self) -> None:
+            self._state = torch.zeros(1)
+            self._context = torch.zeros(1)
+            self._last_sr = 0
+            self._last_batch_size = 0
+
+        def __call__(self, audio: torch.Tensor, sample_rate: int) -> torch.Tensor:
+            assert audio.shape == (512,)
+            self._state += 0.1
+            self._last_sr = sample_rate
+            self._last_batch_size = 1
+            return self._state.clone()
+
+    vad = SileroVAD()
+    vad._model = FakeStatefulModel()
+    first = vad.create_streaming_predictor()
+    second = vad.create_streaming_predictor()
+    frame = np.zeros(512, dtype=np.float32)
+
+    assert first.predict(frame) == pytest.approx(0.1)
+    assert first.predict(frame) == pytest.approx(0.2)
+    assert second.predict(frame) == pytest.approx(0.1)
+
+    first.reset()
+    assert first.predict(frame) == pytest.approx(0.1)
 
 
 @pytest.mark.parametrize(

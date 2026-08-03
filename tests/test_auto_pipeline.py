@@ -68,3 +68,20 @@ def test_diarization_first_settings_are_loaded_from_config(monkeypatch):
     assert pipeline.speaker_turn_max_chunk_ms == 18000
     assert pipeline.speaker_turn_boundary_search_ms == 2500
     assert pipeline.speaker_turn_min_chunk_ms == 1200
+
+
+def test_realtime_vad_settings_are_retained_from_config(monkeypatch):
+    _patch_asr_model(monkeypatch)
+    realtime = {
+        "vad": {"min_silence_ms": 700, "pre_roll_ms": 250},
+        "asr": {"max_utterance_ms": 12000},
+    }
+
+    pipeline = AutoPipeline.from_config(
+        {
+            "asr": {"model": "fake-asr"},
+            "realtime": realtime,
+        }
+    )
+
+    assert pipeline.realtime_config == realtime

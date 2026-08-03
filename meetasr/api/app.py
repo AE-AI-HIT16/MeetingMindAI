@@ -9,9 +9,9 @@ CORS middleware, and global exception handler.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
-import asyncio
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
@@ -42,14 +42,14 @@ from meetasr.api.routes import (
 )
 from meetasr.auto.auto_pipeline import AutoPipeline
 from meetasr.db.connection import init_db
+from meetasr.pipeline_realtime import ASRPipeline
 from meetasr.realtime.document_generation import document_generation_queue
 from meetasr.realtime.job_worker import job_queue
 from meetasr.services.asr_service import ASRService
+from meetasr.services.inference_coordinator import InferenceCoordinator
 from meetasr.services.realtime_asr_service import RealtimeASRService
-from meetasr.pipeline_realtime import ASRPipeline
 from meetasr.streaming.final_transcript_queue import FinalTranscriptQueue
 from meetasr.streaming.final_transcript_worker import FinalTranscriptWorker
-
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -70,6 +70,7 @@ async def lifespan(app: FastAPI):
 
     app.state.asr_service = None
     app.state.realtime_asr_service = None
+    app.state.inference_coordinator = None
     app.state.final_transcript_queue = None
     app.state.final_transcript_worker = None
     app.state.final_transcript_task = None
@@ -87,6 +88,12 @@ async def lifespan(app: FastAPI):
         # ASR + VAD + Punctuation + Speaker + LLM + Document planner
         pipeline = AutoPipeline.from_yaml(CONFIG_PATH)
 
+        warm_up = getattr(pipeline.asr, "warm_up", None)
+        if callable(warm_up):
+            logger.info("Warming up ASR model before accepting realtime audio...")
+            await asyncio.to_thread(warm_up)
+            logger.info("ASR model warm-up complete.")
+
         # Lightweight realtime pipeline:
         # ASR + VAD only
         # Reuse loaded model instances from full pipeline
@@ -94,6 +101,8 @@ async def lifespan(app: FastAPI):
             asr_model=pipeline.asr,
             vad_model=pipeline.vad,
             device=pipeline.device,
+            realtime_config=pipeline.realtime_config,
+            transcription_language=pipeline.transcription_language,
         )
 
         # Keep global full pipeline reference
@@ -101,6 +110,9 @@ async def lifespan(app: FastAPI):
 
         app.state.pipeline = pipeline
         app.state.realtime_pipeline = realtime_pipeline
+        coordinator = InferenceCoordinator()
+        await coordinator.start()
+        app.state.inference_coordinator = coordinator
 
         # ----------------------------------------------------------
         # Create independent services
@@ -109,13 +121,15 @@ async def lifespan(app: FastAPI):
         # Full processing service:
         # Used by upload jobs / transcription APIs
         app.state.asr_service = ASRService(
-            pipeline
+            pipeline,
+            coordinator=coordinator,
         )
 
         # Realtime websocket service:
         # Used by realtime streaming workers
         app.state.realtime_asr_service = RealtimeASRService(
-            realtime_pipeline
+            realtime_pipeline,
+            coordinator=coordinator,
         )
 
         logger.info("Full ASR pipeline ready.")
@@ -130,6 +144,7 @@ async def lifespan(app: FastAPI):
         app.state.final_transcript_worker = FinalTranscriptWorker(
             queue=app.state.final_transcript_queue,
             pipeline=pipeline,
+            coordinator=coordinator,
         )
 
         app.state.final_transcript_task = asyncio.create_task(
@@ -159,9 +174,6 @@ async def lifespan(app: FastAPI):
             None,
         )
     )
-
-    print(logger.level)
-    print(logger.getEffectiveLevel())
 
     yield
 
@@ -201,9 +213,15 @@ async def lifespan(app: FastAPI):
     if app.state.final_transcript_queue:
         await app.state.final_transcript_queue.clear()
 
+    if app.state.inference_coordinator:
+        metrics = app.state.inference_coordinator.snapshot()
+        await app.state.inference_coordinator.stop()
+        logger.info("Inference metrics at shutdown: %s", metrics)
+
     app.state.final_transcript_worker = None
     app.state.final_transcript_queue = None
     app.state.final_transcript_task = None
+    app.state.inference_coordinator = None
 
 # Set log cho api realtime
 

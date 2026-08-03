@@ -10,6 +10,10 @@ import numpy as np
 
 from meetasr.api.schemas_phase2 import TranscriptSegmentPayload
 from meetasr.schemas import Segment, SentenceInfo, SpeakerTurn
+from meetasr.services.inference_coordinator import (
+    InferenceCoordinator,
+    InferenceKind,
+)
 
 
 @dataclass(frozen=True)
@@ -34,10 +38,15 @@ class PreparedTranscription:
 class ASRService:
     """Run one shared pipeline off the event loop and normalize its result."""
 
-    def __init__(self, pipeline: Any) -> None:
+    def __init__(
+        self,
+        pipeline: Any,
+        coordinator: InferenceCoordinator | None = None,
+    ) -> None:
         if pipeline is None:
             raise ValueError("pipeline is required")
         self.pipeline = pipeline
+        self.coordinator = coordinator
         self._transcribe_lock = asyncio.Lock()
 
     async def transcribe(
@@ -49,12 +58,12 @@ class ASRService:
     ) -> ASRServiceResult:
         # Upload jobs and live-mic sessions share this service. Serialize access
         # because the underlying pipeline/GPU is not safe to run concurrently.
-        async with self._transcribe_lock:
-            result = await asyncio.to_thread(
-                self.pipeline.transcribe,
-                audio_source,
-                key=key,
-            )
+        result = await self._run(
+            InferenceKind.UPLOAD,
+            self.pipeline.transcribe,
+            audio_source,
+            key=key,
+        )
 
         segments = [
             TranscriptSegmentPayload(
@@ -89,23 +98,24 @@ class ASRService:
         audio_source: Any,
     ) -> PreparedTranscription:
         """Decode audio and optionally build diarization-first ASR turns."""
-        async with self._transcribe_lock:
-            if getattr(self.pipeline, "diarization_first", False):
-                (
-                    audio,
-                    vad_segments,
-                    speaker_turns,
-                    duration_ms,
-                ) = await asyncio.to_thread(
-                    self.pipeline.prepare_diarization_first_transcription,
-                    audio_source,
-                )
-            else:
-                audio, vad_segments, duration_ms = await asyncio.to_thread(
-                    self.pipeline.prepare_incremental_transcription,
-                    audio_source,
-                )
-                speaker_turns = None
+        if getattr(self.pipeline, "diarization_first", False):
+            (
+                audio,
+                vad_segments,
+                speaker_turns,
+                duration_ms,
+            ) = await self._run(
+                InferenceKind.FINALIZE,
+                self.pipeline.prepare_diarization_first_transcription,
+                audio_source,
+            )
+        else:
+            audio, vad_segments, duration_ms = await self._run(
+                InferenceKind.FINALIZE,
+                self.pipeline.prepare_incremental_transcription,
+                audio_source,
+            )
+            speaker_turns = None
         return PreparedTranscription(
             audio=audio,
             vad_segments=vad_segments,
@@ -128,14 +138,14 @@ class ASRService:
             if language == "auto"
             else language
         )
-        async with self._transcribe_lock:
-            return await asyncio.to_thread(
-                self.pipeline.transcribe_vad_segment,
-                prepared.audio,
-                segment,
-                effective_language,
-                **kwargs,
-            )
+        return await self._run(
+            InferenceKind.UPLOAD,
+            self.pipeline.transcribe_vad_segment,
+            prepared.audio,
+            segment,
+            effective_language,
+            **kwargs,
+        )
 
     async def finalize_incremental(
         self,
@@ -143,15 +153,33 @@ class ASRService:
         sentences: list[SentenceInfo],
     ) -> list[SentenceInfo]:
         """Finalize preassigned turns or run legacy ASR-first diarization."""
-        async with self._transcribe_lock:
-            if prepared.speaker_turns is not None:
-                return await asyncio.to_thread(
-                    self.pipeline.finalize_preassigned_transcript,
-                    sentences,
-                )
-            return await asyncio.to_thread(
-                self.pipeline.finalize_incremental_transcript,
-                prepared.audio,
+        if prepared.speaker_turns is not None:
+            return await self._run(
+                InferenceKind.FINALIZE,
+                self.pipeline.finalize_preassigned_transcript,
                 sentences,
-                prepared.vad_segments,
             )
+        return await self._run(
+            InferenceKind.FINALIZE,
+            self.pipeline.finalize_incremental_transcript,
+            prepared.audio,
+            sentences,
+            prepared.vad_segments,
+        )
+
+    async def _run(
+        self,
+        kind: InferenceKind,
+        function: Any,
+        *args: Any,
+        **kwargs: Any,
+    ) -> Any:
+        if self.coordinator is not None:
+            return await self.coordinator.submit(
+                kind,
+                function,
+                *args,
+                **kwargs,
+            )
+        async with self._transcribe_lock:
+            return await asyncio.to_thread(function, *args, **kwargs)

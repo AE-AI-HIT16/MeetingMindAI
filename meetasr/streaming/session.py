@@ -1,11 +1,11 @@
-from collections import deque
 import asyncio
-import time
+from collections import deque
 
 import numpy as np
 
-from meetasr.streaming.audio_queue import AudioQueue
 from meetasr.streaming.audio_archive import AudioArchive
+from meetasr.streaming.audio_queue import AudioQueue
+from meetasr.streaming.coverage import RealtimeCoverageTracker
 
 
 class StreamSession:
@@ -41,7 +41,8 @@ class StreamSession:
         self.partial_cut_queue = asyncio.Queue(maxsize=20)
 
         # Chứa các đoạn audio để xử lý trước, đưa ngay kết quả cho fe
-        self.temp_asr_queue = asyncio.Queue(maxsize=20)
+        # Preview is disposable: keep only the newest pending request.
+        self.temp_asr_queue = asyncio.Queue(maxsize=1)
 
         # ==========================================================
         # Raw audio
@@ -66,6 +67,7 @@ class StreamSession:
         self.partial_buffer_start_ms = 0
 
         self.audio_archive = AudioArchive()
+        self.coverage = RealtimeCoverageTracker()
 
         # ==========================================================
         # VAD
@@ -74,27 +76,15 @@ class StreamSession:
         # State nội bộ của Streaming VAD
         self.vad_state = None
 
-        # Các speech segment đã hoàn chỉnh
-        # mỗi phần tử là np.ndarray
+        # Các SpeechUtterance đã được VAD chốt.
         self.ready_segments = deque()
 
         # ==========================================================
         # ASR
         # ==========================================================
 
-        # Window tối đa
-        self.max_window_seconds = 30.0
-
-        # Window tối thiểu để bắt đầu infer
-        self.min_window_seconds = 4.0
-
-        # Chu kỳ infer
-        self.infer_interval = 0.5
-
-        # Thời điểm infer gần nhất
-        self.last_infer_time = time.monotonic()
-
-        self.asr_task = None
+        # Timeline của lần gần nhất yêu cầu transcript preview.
+        self.last_partial_request_ms = 0
 
         # ==========================================================
         # Transcript
@@ -178,6 +168,7 @@ class StreamSession:
         self.partial_buffer_start_ms = 0
 
         self.confirmed_end_ms = 0
+        self.last_partial_request_ms = 0
 
         self.ready_segments.clear()
 

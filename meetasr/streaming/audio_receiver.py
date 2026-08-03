@@ -38,7 +38,11 @@ class AudioReceiver:
             chunk = bytes(self._buffer[: self.chunk_size])
             del self._buffer[: self.chunk_size]
 
-            await self.session.audio_queue.put(chunk)
+            accepted = await self.session.audio_queue.put(chunk)
+            if accepted is False:
+                coverage = getattr(self.session, "coverage", None)
+                if coverage is not None:
+                    coverage.record_audio_drop()
 
     async def flush(self) -> None:
         """
@@ -46,7 +50,11 @@ class AudioReceiver:
         """
 
         if self._buffer:
-            await self.session.audio_queue.put(bytes(self._buffer))
+            accepted = await self.session.audio_queue.put(bytes(self._buffer))
+            if accepted is False:
+                coverage = getattr(self.session, "coverage", None)
+                if coverage is not None:
+                    coverage.record_audio_drop()
             self._buffer.clear()
 
     def reset(self) -> None:

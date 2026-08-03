@@ -236,6 +236,65 @@ def test_incremental_finalize_preserves_sentence_count_and_assigns_speakers():
     assert [sentence.text for sentence in finalized] == ["câu một", "câu hai"]
 
 
+def test_realtime_finalize_keeps_text_whole_for_meaningful_second_speaker():
+    pipeline = MeetPipeline(
+        asr_model=FakeASR(),
+        spk_model=object(),
+    )
+    original = [
+        SentenceInfo(
+            text="người một nói và người hai đáp dạ",
+            start=0.0,
+            end=10.0,
+        )
+    ]
+    pipeline._diarize_segments = lambda audio, segments: [
+        [0.0, 4.8, 0],
+        [4.8, 5.2, 1],
+        [5.2, 10.0, 0],
+    ]
+
+    finalized = pipeline.finalize_realtime_transcript(
+        np.zeros(10 * 16000, dtype=np.float32),
+        original,
+        [Segment(0, 10000)],
+    )
+
+    assert len(finalized) == 1
+    assert finalized[0].text == original[0].text
+    assert finalized[0].speaker is None
+
+
+def test_realtime_finalize_refreshes_full_file_vad_for_diarization():
+    class FinalVAD:
+        def detect(self, audio):
+            return [Segment(100, 900), Segment(1200, 2000)]
+
+    pipeline = MeetPipeline(
+        asr_model=FakeASR(),
+        vad_model=FinalVAD(),
+        spk_model=object(),
+    )
+    captured = []
+
+    def diarize(audio, segments):
+        captured.extend(segments)
+        return [[0.1, 0.9, 0], [1.2, 2.0, 1]]
+
+    pipeline._diarize_segments = diarize
+
+    pipeline.finalize_realtime_transcript(
+        np.zeros(2 * 16000, dtype=np.float32),
+        [SentenceInfo(text="một", start=0.1, end=0.9)],
+        [Segment(0, 2000)],
+    )
+
+    assert [(item.start_ms, item.end_ms) for item in captured] == [
+        (100, 900),
+        (1200, 2000),
+    ]
+
+
 def test_prepare_diarization_first_builds_preassigned_speaker_turns():
     audio = np.zeros(4 * 16000, dtype=np.float32)
     pipeline = MeetPipeline(

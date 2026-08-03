@@ -1,12 +1,40 @@
 """Health check endpoint — GET /v1/health."""
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 
 from meetasr import __version__
 from meetasr.api import dependencies
 
 router = APIRouter(tags=["System"])
+
+
+@router.get("/v1/metrics/inference")
+async def inference_metrics(request: Request) -> dict:
+    """Expose bounded, non-sensitive scheduling metrics for operations."""
+    coordinator = getattr(
+        request.app.state,
+        "inference_coordinator",
+        None,
+    )
+    if coordinator is None:
+        return {"available": False}
+    snapshot = coordinator.snapshot()
+    return {
+        "available": True,
+        "queue_depth": snapshot.queue_depth,
+        "max_queue_depth": snapshot.max_queue_depth,
+        "asr_call_count": snapshot.asr_call_count,
+        "fallback_count": snapshot.fallback_count,
+        "partial_drop_count": snapshot.partial_drop_count,
+        "failure_count": snapshot.failure_count,
+        "average_wait_ms": snapshot.average_wait_ms,
+        "average_run_ms": snapshot.average_run_ms,
+        "completed_by_kind": {
+            kind.value: count
+            for kind, count in snapshot.completed_by_kind.items()
+        },
+    }
 
 
 @router.get("/v1/health")

@@ -1,7 +1,10 @@
-import logging
 import asyncio
-import traceback
+import logging
 
+from meetasr.services.realtime_transcript_service import (
+    RealtimeTranscriptService,
+)
+from meetasr.streaming.window_builder import ASRWindow
 
 logger = logging.getLogger(
     "asr"
@@ -16,7 +19,7 @@ class ASRWorker:
         session.asr_queue
 
     Output:
-        websocket transcript_delta
+        persisted transcript_delta -> recording WebSocket + Job EventBus
     """
 
 
@@ -24,90 +27,53 @@ class ASRWorker:
         self,
         session,
         asr_service,
+        transcript_service=None,
     ):
         self.session = session
         self.asr_service = asr_service
-        self.offset_ms = 0
-
+        self.transcript_service = (
+            transcript_service or RealtimeTranscriptService()
+        )
     async def run(self):
-        print("ASR worker started")
-
-        try:
-            while True:
-                print("Waiting for audio...")
-
-                audio = await self.session.asr_queue.get()
-
-                print(f"Got audio, queue={self.session.asr_queue.qsize()}")
-
-                try:
-                    duration_s = len(audio) / 16000.0
-                    print(
-                        f"ASR: start transcribe "
-                        f"window={duration_s:.2f}s "
-                        f"asr_q={self.session.asr_queue.qsize()}"
-                    )
-
-                    try:
-                        result = await self._transcribe(audio)
-                        print("DEBUG: _transcribe() OK")
-                    except Exception:
-                        print("DEBUG: _transcribe() FAILED")
-                        traceback.print_exc()
-                        raise
-
-                    print(f"ASR: done text_len={len(result.text)}")
-
-                    try:
-                        await self._send_result(result)
-                        print("DEBUG: _send_result() OK")
-                    except Exception:
-                        print("DEBUG: _send_result() FAILED")
-                        traceback.print_exc()
-                        raise
-
-                    try:
-                        await self._publish_cut_event(result)
-                        print("DEBUG: _publish_cut_event() OK")
-                    except Exception:
-                        print("DEBUG: _publish_cut_event() FAILED")
-                        traceback.print_exc()
-                        raise
-
-                finally:
-                    try:
-                        self.session.asr_queue.task_done()
-                        print("DEBUG: task_done() OK")
-                    except Exception:
-                        print("DEBUG: task_done() FAILED")
-                        traceback.print_exc()
-                        raise
-
-        except asyncio.CancelledError:
-            print("ASR worker cancelled")
-            raise
-
-        except Exception as e:
-            print("=" * 80)
-            print(f"ASR worker crashed: {type(e).__name__}: {e}")
-            traceback.print_exc()
-            print("=" * 80)
-            raise
+        logger.info("Confirmed ASR worker started")
+        while True:
+            window = await self.session.asr_queue.get()
+            try:
+                result = await self._transcribe(window)
+                persisted = await self._send_result(result)
+                if not persisted:
+                    raise RuntimeError("Confirmed ASR returned no usable text")
+                coverage = getattr(self.session, "coverage", None)
+                if coverage is not None:
+                    coverage.record_confirmed(window.start_ms, window.end_ms)
+                await self._publish_cut_event(window)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                coverage = getattr(self.session, "coverage", None)
+                if coverage is not None:
+                    coverage.record_asr_failure()
+                logger.exception(
+                    "Confirmed ASR failed range=%s-%sms; finalizer will fallback",
+                    window.start_ms,
+                    window.end_ms,
+                )
+            finally:
+                self.session.asr_queue.task_done()
 
 
     async def _transcribe(
         self,
-        audio,
+        window: ASRWindow,
     ):
         """
         Gọi MeetPipeline.
         Nếu model sync thì chạy executor.
         """
         result = await self.asr_service.transcribe(
-            audio,
-            offset_ms=self.offset_ms,
+            window.audio,
+            offset_ms=window.start_ms,
         )
-        self.offset_ms += result.duration_ms
         return result
 
 
@@ -116,37 +82,33 @@ class ASRWorker:
         result,
     ):
         """
-        Stream transcript lên FE.
+        Persist and publish confirmed transcript through the canonical service.
         """
-        print("====================================================================================================")
-        print(result)
-        print("====================================================================================================")
-
+        persisted = []
         for segment in result.segments:
-            await self.session.websocket.send_json(
-                {
-                    "type": "transcript_delta",
-                    "segment": segment.model_dump(mode="json"),
-                }
+            persisted.append(
+                await self.transcript_service.persist_and_publish(
+                    self.session.job_id,
+                    segment,
+                    self.session.websocket,
+                )
             )
+        return persisted
 
     async def _publish_cut_event(
             self,
-            result,
+            window: ASRWindow,
     ):
         """
         Thông báo transcript đã được xác nhận
         đến một timeline tuyệt đối.
         """
 
-        absolute_end_ms = (
-                self.session.confirmed_end_ms
-                + result.duration_ms
+        absolute_end_ms = max(
+            self.session.confirmed_end_ms,
+            window.end_ms,
         )
-
-        self.session.confirmed_end_ms = (
-            absolute_end_ms
-        )
+        self.session.confirmed_end_ms = absolute_end_ms
 
         await self.session.partial_cut_queue.put(
             absolute_end_ms

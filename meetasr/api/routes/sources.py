@@ -21,9 +21,11 @@ from fastapi.responses import RedirectResponse, StreamingResponse
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
+from meetasr.api.auth_deps import get_current_user
 from meetasr.api.schemas_phase2 import CreateSourceResponse
 from meetasr.db.connection import get_db
 from meetasr.db.models_phase2 import DocumentMode, Job, JobStatus, MediaType, Source
+from meetasr.db.user_model import User
 from meetasr.realtime.job_worker import job_queue
 from meetasr.storage import get_storage
 from meetasr.storage.backend import StorageBackend
@@ -119,9 +121,6 @@ class SourceResponse(BaseModel):
 # ---------------------------------------------------------------------------
 # GET /v1/sources — danh sách tất cả Source (trang Library)
 # ---------------------------------------------------------------------------
-
-from meetasr.api.auth_deps import get_current_user
-from meetasr.db.user_model import User
 
 @router.get("", response_model=List[SourceResponse])
 def list_sources(
@@ -275,6 +274,11 @@ async def stream_media(
     if source is None:
         raise HTTPException(
             status_code=404, detail=f"Source '{source_id}' khong ton tai."
+        )
+    if not source.storage_path:
+        raise HTTPException(
+            status_code=404,
+            detail="Source chua co file media de phat.",
         )
 
     # --- S3/MinIO: redirect sang presigned URL ---

@@ -10,6 +10,21 @@ pipeline:
     boundary_search_ms: 2000
     min_chunk_ms: 1000
 
+realtime:
+  vad:
+    frame_ms: 32
+    start_threshold: 0.50
+    end_threshold: 0.35
+    min_speech_ms: 250
+    min_silence_ms: 600
+    pre_roll_ms: 300
+    post_roll_ms: 100
+  asr:
+    partial_interval_ms: 800
+    partial_min_audio_ms: 700
+    partial_max_audio_ms: 5000
+    max_utterance_ms: 15000
+
 asr:
   model: qwen3-asr
   hub: none
