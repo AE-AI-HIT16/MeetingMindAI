@@ -246,7 +246,9 @@ async def test_final_worker_persists_and_publishes_failure(monkeypatch) -> None:
 @pytest.mark.asyncio
 async def test_complete_coverage_retranscribes_only_mixed_segment(
     monkeypatch,
+    caplog,
 ) -> None:
+    caplog.set_level("INFO", logger=final_transcript_worker.__name__)
     engine = create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},
@@ -402,6 +404,7 @@ async def test_complete_coverage_retranscribes_only_mixed_segment(
         assert db.get(Source, source_id).duration == 3.0
 
     assert targeted_calls == [(1800, 2300), (2300, 3000)]
+    assert "asr_audio_ms=1200 asr_audio_ratio=0.400" in caplog.text
     assert [event["type"] for event in published] == [
         "status",
         "speaker_update",

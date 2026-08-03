@@ -151,13 +151,18 @@ class FinalTranscriptWorker:
                 logger.info(
                     "Finalizer targeted realtime transcript job=%s "
                     "segments=%d retried=%d replaced=%d fallback=%d "
-                    "asr_audio_ms=%d",
+                    "asr_audio_ms=%d asr_audio_ratio=%.3f",
                     job_id,
                     len(segments),
                     finalized.stats.targeted_segments,
                     finalized.stats.replaced_segments,
                     finalized.stats.fallback_segments,
                     finalized.stats.asr_audio_ms,
+                    (
+                        finalized.stats.asr_audio_ms / duration_ms
+                        if duration_ms
+                        else 0.0
+                    ),
                 )
             else:
                 logger.warning(

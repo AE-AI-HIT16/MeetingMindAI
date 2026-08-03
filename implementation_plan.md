@@ -326,6 +326,22 @@ Quyết định Bước 2:
 - `speaker_update` vẫn được giữ để tương thích với client cũ; snapshot là nguồn
   đồng bộ cuối cùng cho client đã cập nhật.
 
+Quyết định và kết quả Bước 4:
+
+- Log finalizer ghi cả `asr_audio_ms` và `asr_audio_ratio`; tỷ lệ này chỉ tính
+  các speaker turn thực sự gửi lại vào ASR, không tính VAD/diarization.
+- Integration test 3.000 ms chỉ ASR lại hai turn `1.800-2.300` và
+  `2.300-3.000`: tổng 1.200 ms, tương đương `0.400` (40% audio). Full-file ASR
+  không được gọi khi coverage realtime đầy đủ.
+- Smoke run thực tế `realtime_2026-08-03T09:50:00.949101.wav` dài 141,4 giây
+  hoàn tất với 18 segment: 15 speaker 0, 1 speaker 1 và 2 unknown. Một segment
+  realtime đã được thay bằng ba targeted rows, xác nhận transaction và snapshot
+  hoạt động trên runtime thật.
+- Hai segment unknown được giữ có chủ đích khi diarization coverage không đủ
+  hoặc targeted ASR không tạo được replacement an toàn. DB không lưu metric của
+  lượt chạy cũ, nên không suy diễn tỷ lệ ASR chính xác từ duration của output;
+  các lượt chạy sau đọc trực tiếp tỷ lệ từ log finalizer.
+
 ## 9. Final document và terminal events
 
 Thứ tự finalizer:
