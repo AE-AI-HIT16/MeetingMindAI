@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:pcm": "node --test tests/pcm-processor.test.mjs"
+    "test:pcm": "node --test tests/pcm-processor.test.mjs",
+    "test:realtime-state": "node --test tests/realtime-transcript-state.test.mjs"
   },
   "dependencies": {
     "next": "16.2.10",

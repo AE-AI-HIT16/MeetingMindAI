@@ -3,31 +3,18 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getSession } from "next-auth/react";
 import { mapTranscriptSegment } from "./mappers";
+import { reduceRealtimeTranscripts } from "./realtimeTranscriptState";
+import type {
+  RealtimeTranscriptType,
+  TranscriptDelta,
+} from "./realtimeTranscriptState";
 import type { ApiTranscriptSegment } from "./types";
+
+export type { SentenceInfo, TranscriptDelta } from "./realtimeTranscriptState";
 
 // ----------------------------------------------------------------
 // Types
 // ----------------------------------------------------------------
-
-export interface TranscriptDelta {
-  text: string;
-  sentenceInfo: SentenceInfo[];
-  receivedAt: number;
-
-  startMs: number;
-  endMs: number;
-  speaker: number | null;
-
-  // thêm để biết loại transcript
-  type: "transcript_delta" | "transcript_partial";
-}
-
-export interface SentenceInfo {
-  text: string;
-  start: number;
-  end: number;
-  speaker: string | number | null;
-}
 
 export type AudioSource = "microphone" | "tab";
 
@@ -267,96 +254,19 @@ export function useRealtimeStream(): RealtimeStreamState &
             return;
           }
 
-          if (data.type === "transcript_delta" && segment) {
+          if (
+            (data.type === "transcript_delta" ||
+              data.type === "transcript_partial") &&
+            segment
+          ) {
             const mapped = mapTranscriptSegment(segment);
-
-            setTranscripts((prev) => {
-              const item: TranscriptDelta = {
-                text: mapped.text,
-                sentenceInfo: [
-                  {
-                    text: mapped.text,
-                    start: mapped.startMs / 1000,
-                    end: mapped.endMs / 1000,
-                    speaker: mapped.speaker,
-                  },
-                ],
+            setTranscripts((prev) =>
+              reduceRealtimeTranscripts(prev, {
+                type: data.type as RealtimeTranscriptType,
                 receivedAt: Date.now(),
-                startMs: mapped.startMs,
-                endMs: mapped.endMs,
-                speaker: mapped.speaker,
-                type: "transcript_delta",
-              };
-
-              // Find if delta already exists for this exact startMs
-              const deltaIndex = prev.findIndex(
-                (t) => t.type === "transcript_delta" && t.startMs === mapped.startMs,
-              );
-
-              let next: TranscriptDelta[];
-              if (deltaIndex !== -1) {
-                next = [...prev];
-                next[deltaIndex] = item;
-              } else {
-                next = [...prev, item];
-              }
-
-              // Remove only partial segments whose startMs <= this delta's endMs.
-              // These partials are now confirmed/superseded by the delta.
-              // Partials that start AFTER the delta are still in-progress and should remain.
-              next = next.filter(
-                (t) => t.type !== "transcript_partial" || t.startMs > mapped.endMs,
-              );
-
-              next.sort((a, b) => a.startMs - b.startMs);
-              return next;
-            });
-          }
-
-          if (data.type === "transcript_partial" && segment) {
-            const mapped = mapTranscriptSegment(segment);
-
-            setTranscripts((prev) => {
-              // Get max endMs of confirmed transcript_delta segments
-              const maxDeltaEndMs = prev.reduce(
-                (max, t) =>
-                  t.type === "transcript_delta" ? Math.max(max, t.endMs) : max,
-                0,
-              );
-
-              // Ignore stale partials belonging to an already confirmed delta timeframe
-              if (mapped.startMs < maxDeltaEndMs) {
-                return prev;
-              }
-
-              const item: TranscriptDelta = {
-                text: mapped.text,
-                sentenceInfo: [
-                  {
-                    text: mapped.text,
-                    start: mapped.startMs / 1000,
-                    end: mapped.endMs / 1000,
-                    speaker: mapped.speaker,
-                  },
-                ],
-                receivedAt: Date.now(),
-                startMs: mapped.startMs,
-                endMs: mapped.endMs,
-                speaker: mapped.speaker,
-                type: "transcript_partial",
-              };
-
-              // A session has one active preview. Its start can move when the
-              // backend bounds ASR work to a rolling audio window, so replace
-              // the previous preview regardless of its old start timestamp.
-              const next = [
-                ...prev.filter((t) => t.type !== "transcript_partial"),
-                item,
-              ];
-
-              next.sort((a, b) => a.startMs - b.startMs);
-              return next;
-            });
+                segment: mapped,
+              }),
+            );
           }
         } catch {
           // ignore non-JSON
