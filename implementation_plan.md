@@ -342,6 +342,22 @@ Quyết định và kết quả Bước 4:
   lượt chạy cũ, nên không suy diễn tỷ lệ ASR chính xác từ duration của output;
   các lượt chạy sau đọc trực tiếp tỷ lệ từ log finalizer.
 
+Nghiệm thu E2E tab audio sau khi restart backend bằng code mới:
+
+- Input WAV dài 120,4 giây, PCM16 mono 16 kHz; media endpoint trả partial content
+  và Job hoàn tất không lỗi.
+- Realtime tạo 23 confirmed segment. Finalizer giữ 15 segment `single`, chọn 8
+  segment để targeted re-ASR và tạo 20 speaker turn thay thế.
+- Transcript cuối có 35 segment: speaker 0 có 15 segment/41.346 ms speech,
+  speaker 1 có 20 segment/37.978 ms speech, không còn segment unknown.
+- Targeted ASR xử lý 36.544 ms, bằng 30,4% thời lượng file. Coordinator ghi nhận
+  20 request `targeted`, 0 full fallback và 0 inference failure.
+- Transcript snapshot, live document và full-text document đều được tạo sau khi
+  transaction transcript hoàn tất.
+- Kết luận: luồng hybrid hoạt động đúng và không chạy lại ASR toàn file. Chất
+  lượng ranh giới speaker vẫn chưa tuyệt đối; một số lượt ngắn làm câu bị vụn,
+  nên cần đánh giá bằng ground truth nếu muốn tối ưu threshold tiếp theo.
+
 ## 9. Final document và terminal events
 
 Thứ tự finalizer:

@@ -104,12 +104,13 @@ Quy ước:
 - [x] Bước 2: Tích hợp final worker và cập nhật DB theo transaction.
 - [x] Bước 3: Đồng bộ transcript cuối về frontend.
 - [x] Bước 4: Kiểm thử tích hợp, đo lượng audio ASR lại và cập nhật tài liệu.
+- [x] E2E tab audio 120,4 giây: 2 speaker, 0 unknown, targeted ratio 30,4%.
 
 ## Bước 8 — Nghiệm thu E2E
 
 - [ ] Chạy backend test suite liên quan.
 - [ ] Chạy frontend lint và build.
-- [ ] Chạy live smoke test khi môi trường model cho phép.
+- [x] Chạy live smoke test khi môi trường model cho phép.
 - [ ] Đo first partial latency, confirmed latency, RTF và memory.
 - [ ] Xác nhận phiên ngắn/dài/silence/noise/disconnect không treo.
 - [ ] Xác nhận frontend luôn nhận `done` hoặc `error`.
