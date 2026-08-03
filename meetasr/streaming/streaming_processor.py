@@ -32,8 +32,8 @@ class StreamingProcessor:
     def __init__(self, session: Any, pipeline: Any) -> None:
         self.session = session
         self.pipeline = pipeline
-        self.partial_interval_ms = 800
-        self.partial_min_audio_ms = 700
+        self.partial_interval_ms = 600
+        self.partial_min_audio_ms = 400
         self.partial_max_audio_ms = 5000
         config = self._build_config()
         predictor = self._build_predictor()
@@ -47,9 +47,7 @@ class StreamingProcessor:
         audio = self.session.pending_audio.copy()
         self.session.pending_audio = self.session.pending_audio[:0]
         self.session.ready_segments.extend(self.detector.process(audio))
-        self.session.vad_state = (
-            "speaking" if self.detector.is_speaking else "idle"
-        )
+        self.session.vad_state = "speaking" if self.detector.is_speaking else "idle"
 
     def flush(self) -> None:
         """Finalize the detector's partial frame and in-progress utterance."""
@@ -93,9 +91,7 @@ class StreamingProcessor:
             return AlwaysSpeechPredictor()
         factory = getattr(vad, "create_streaming_predictor", None)
         if not callable(factory):
-            raise ValueError(
-                f"{type(vad).__name__} does not support streaming probabilities"
-            )
+            raise ValueError(f"{type(vad).__name__} does not support streaming probabilities")
         return factory()
 
     def _build_config(self) -> StreamingVADConfig:
@@ -103,27 +99,17 @@ class StreamingProcessor:
         realtime = getattr(self.pipeline, "realtime_config", {}) or {}
         vad_config = realtime.get("vad", {}) or {}
         asr_config = realtime.get("asr", {}) or {}
-        self.partial_interval_ms = int(
-            asr_config.get("partial_interval_ms", 800)
-        )
-        self.partial_min_audio_ms = int(
-            asr_config.get("partial_min_audio_ms", 700)
-        )
-        self.partial_max_audio_ms = int(
-            asr_config.get("partial_max_audio_ms", 5000)
-        )
+        self.partial_interval_ms = int(asr_config.get("partial_interval_ms", 600))
+        self.partial_min_audio_ms = int(asr_config.get("partial_min_audio_ms", 400))
+        self.partial_max_audio_ms = int(asr_config.get("partial_max_audio_ms", 5000))
         if self.partial_interval_ms <= 0:
             raise ValueError("partial_interval_ms must be positive")
         if self.partial_min_audio_ms <= 0:
             raise ValueError("partial_min_audio_ms must be positive")
         if self.partial_max_audio_ms < self.partial_min_audio_ms:
-            raise ValueError(
-                "partial_max_audio_ms must be at least partial_min_audio_ms"
-            )
+            raise ValueError("partial_max_audio_ms must be at least partial_min_audio_ms")
 
-        start_threshold = float(
-            vad_config.get("start_threshold", getattr(vad, "threshold", 0.5))
-        )
+        start_threshold = float(vad_config.get("start_threshold", getattr(vad, "threshold", 0.5)))
         configured_end = getattr(vad, "neg_threshold", None)
         default_end = (
             float(configured_end)
@@ -133,9 +119,7 @@ class StreamingProcessor:
         return StreamingVADConfig(
             frame_ms=int(vad_config.get("frame_ms", 32)),
             start_threshold=start_threshold,
-            end_threshold=float(
-                vad_config.get("end_threshold", default_end)
-            ),
+            end_threshold=float(vad_config.get("end_threshold", default_end)),
             min_speech_ms=int(
                 vad_config.get(
                     "min_speech_ms",
@@ -145,7 +129,5 @@ class StreamingProcessor:
             min_silence_ms=int(vad_config.get("min_silence_ms", 600)),
             pre_roll_ms=int(vad_config.get("pre_roll_ms", 300)),
             post_roll_ms=int(vad_config.get("post_roll_ms", 100)),
-            max_utterance_ms=int(
-                asr_config.get("max_utterance_ms", 15000)
-            ),
+            max_utterance_ms=int(asr_config.get("max_utterance_ms", 15000)),
         )

@@ -24,11 +24,11 @@ class InferenceKind(str, Enum):
 
 _PRIORITY = {
     InferenceKind.CONFIRMED: 0,
+    InferenceKind.PARTIAL: 4,
     InferenceKind.FALLBACK: 5,
     InferenceKind.TARGETED: 7,
     InferenceKind.UPLOAD: 10,
     InferenceKind.FINALIZE: 15,
-    InferenceKind.PARTIAL: 30,
 }
 
 
@@ -68,15 +68,13 @@ class _InferenceRequest:
 
 
 class InferenceCoordinator:
-    """Run shared-model work sequentially with confirmed-first priority."""
+    """Run shared-model work sequentially, prioritizing live over offline work."""
 
     def __init__(
         self,
         runner: Callable[..., Awaitable[Any]] | None = None,
     ) -> None:
-        self._queue: asyncio.PriorityQueue[_InferenceRequest] = (
-            asyncio.PriorityQueue()
-        )
+        self._queue: asyncio.PriorityQueue[_InferenceRequest] = asyncio.PriorityQueue()
         self._sequence = itertools.count()
         self._worker_task: asyncio.Task[None] | None = None
         self._accepting = False
@@ -197,9 +195,7 @@ class InferenceCoordinator:
             )
             return
 
-        wait_ms = (
-            time.perf_counter() - request.enqueued_at
-        ) * 1000
+        wait_ms = (time.perf_counter() - request.enqueued_at) * 1000
         self._total_wait_ms += wait_ms
         self._wait_ms_by_kind[request.kind] += wait_ms
         if request.kind is not InferenceKind.FINALIZE:
@@ -222,9 +218,7 @@ class InferenceCoordinator:
             if not request.future.cancelled():
                 request.future.set_result(result)
         finally:
-            run_ms = (
-                time.perf_counter() - started_at
-            ) * 1000
+            run_ms = (time.perf_counter() - started_at) * 1000
             self._total_run_ms += run_ms
             self._run_ms_by_kind[request.kind] += run_ms
             self._executed_by_kind[request.kind] += 1
@@ -233,6 +227,5 @@ class InferenceCoordinator:
         return (
             request.kind is InferenceKind.PARTIAL
             and request.partial_key is not None
-            and self._partial_generations.get(request.partial_key)
-            != request.partial_generation
+            and self._partial_generations.get(request.partial_key) != request.partial_generation
         )

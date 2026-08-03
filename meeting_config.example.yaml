@@ -20,8 +20,8 @@ realtime:
     pre_roll_ms: 300
     post_roll_ms: 100
   asr:
-    partial_interval_ms: 800
-    partial_min_audio_ms: 700
+    partial_interval_ms: 600
+    partial_min_audio_ms: 400
     partial_max_audio_ms: 5000
     max_utterance_ms: 15000
 
