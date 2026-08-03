@@ -50,6 +50,43 @@ def test_plan_falls_back_when_diarization_coverage_is_too_low() -> None:
     assert plans[0].turns == ()
 
 
+def test_plan_merges_same_speaker_silence_without_swallowing_backchannel() -> None:
+    sentences = [
+        SentenceInfo(text="có khoảng lặng và backchannel", start=0.0, end=3.0),
+    ]
+    diar_segments = [
+        [0.0, 1.0, 0],
+        [1.45, 2.0, 0],
+        [2.0, 2.4, 1],
+        [2.4, 3.0, 0],
+    ]
+
+    plans = build_targeted_retranscription_plan(
+        sentences,
+        diar_segments,
+    )
+
+    assert plans[0].action == "retranscribe"
+    assert [
+        (turn.start_ms, turn.end_ms, turn.speaker)
+        for turn in plans[0].turns
+    ] == [
+        (0, 2000, 0),
+        (2000, 2400, 1),
+        (2400, 3000, 0),
+    ]
+
+
+def test_merged_silence_does_not_inflate_diarization_coverage() -> None:
+    plans = build_targeted_retranscription_plan(
+        [SentenceInfo(text="coverage thấp", start=0.0, end=4.0)],
+        [[0.0, 1.0, 0], [1.59, 2.0, 0]],
+    )
+
+    assert plans[0].action == "fallback"
+    assert plans[0].turns == ()
+
+
 def test_resolve_replaces_only_targeted_segment_and_remaps_speakers() -> None:
     sentences = [
         SentenceInfo(text="giữ nguyên", start=0.0, end=2.0),

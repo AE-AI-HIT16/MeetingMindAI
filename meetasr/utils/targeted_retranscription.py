@@ -26,12 +26,15 @@ def build_targeted_retranscription_plan(
     *,
     minimum_coverage_ratio: float = 0.50,
     minimum_turn_ms: int = 150,
+    same_speaker_merge_gap_ms: int = 600,
 ) -> list[TargetedSegmentPlan]:
     """Choose which realtime segments are safe to keep or retranscribe."""
     if not 0.0 <= minimum_coverage_ratio <= 1.0:
         raise ValueError("minimum_coverage_ratio must be between 0 and 1")
     if minimum_turn_ms <= 0:
         raise ValueError("minimum_turn_ms must be positive")
+    if same_speaker_merge_gap_ms < 0:
+        raise ValueError("same_speaker_merge_gap_ms must be non-negative")
 
     plans: list[TargetedSegmentPlan] = []
     for index, sentence in enumerate(sentence_info):
@@ -46,13 +49,13 @@ def build_targeted_retranscription_plan(
             plans.append(TargetedSegmentPlan(index, "keep", decision.kind, decision.speaker))
             continue
 
-        turns = _intersect_speaker_turns(
+        turns, covered_ms = _intersect_speaker_turns(
             start_ms,
             end_ms,
             diar_segments,
             minimum_turn_ms=minimum_turn_ms,
+            same_speaker_merge_gap_ms=same_speaker_merge_gap_ms,
         )
-        covered_ms = sum(turn.duration_ms for turn in turns)
         coverage_ratio = covered_ms / (end_ms - start_ms)
         action: TargetedAction = (
             "retranscribe" if turns and coverage_ratio >= minimum_coverage_ratio else "fallback"
@@ -151,7 +154,8 @@ def _intersect_speaker_turns(
     diar_segments: list[list],
     *,
     minimum_turn_ms: int,
-) -> list[SpeakerTurn]:
+    same_speaker_merge_gap_ms: int,
+) -> tuple[list[SpeakerTurn], int]:
     turns: list[SpeakerTurn] = []
     for raw_start_s, raw_end_s, raw_speaker in diar_segments:
         turn_start_ms = max(start_ms, round(float(raw_start_s) * 1000))
@@ -159,7 +163,24 @@ def _intersect_speaker_turns(
         if turn_end_ms - turn_start_ms < minimum_turn_ms:
             continue
         turns.append(SpeakerTurn(turn_start_ms, turn_end_ms, int(raw_speaker)))
-    return sorted(turns, key=lambda turn: (turn.start_ms, turn.end_ms))
+    covered_ms = sum(turn.duration_ms for turn in turns)
+    turns.sort(key=lambda turn: (turn.start_ms, turn.end_ms))
+    merged: list[SpeakerTurn] = []
+    for turn in turns:
+        if (
+            merged
+            and merged[-1].speaker == turn.speaker
+            and turn.start_ms - merged[-1].end_ms <= same_speaker_merge_gap_ms
+        ):
+            previous = merged[-1]
+            merged[-1] = SpeakerTurn(
+                previous.start_ms,
+                max(previous.end_ms, turn.end_ms),
+                previous.speaker,
+            )
+        else:
+            merged.append(turn)
+    return merged, covered_ms
 
 
 def _unknown_copy(sentence: SentenceInfo) -> SentenceInfo:
