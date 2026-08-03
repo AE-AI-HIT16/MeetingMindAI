@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Literal
 
 from sqlmodel import Session, select
@@ -16,8 +17,18 @@ from meetasr.db.models_phase2 import (
     Source,
     TranscriptSegment,
 )
-from meetasr.export import ExportArtifact, ExportService, create_export_service
+from meetasr.db.user_model import User
+from meetasr.export import (
+    ExportArtifact,
+    ExportService,
+    create_export_service,
+)
+from meetasr.export.markdown_parser import strip_leading_document_heading
 from meetasr.schemas import SentenceInfo, TranscriptResult
+from meetasr.utils.document_naming import (
+    export_title,
+    source_document_label,
+)
 
 FinalDocumentMode = Literal["summary", "full_text"]
 
@@ -149,7 +160,16 @@ class DocumentService:
 
         transcript = self.build_transcript(live_document.source_id)
         if mode == DocumentMode.FULL_TEXT:
-            markdown = self.full_text_markdown(transcript)
+            source = self.db.get(Source, live_document.source_id)
+            source_label = (
+                source_document_label(source.filename, source.created_at)
+                if source is not None
+                else None
+            )
+            markdown = self.full_text_markdown(
+                transcript,
+                source_label=source_label,
+            )
         else:
             if self.planner is None:
                 raise PlannerUnavailableError(
@@ -227,22 +247,51 @@ class DocumentService:
         self,
         document_id: str,
         format: Literal["md", "docx", "pdf"],
+        preset: str | None = None,
     ) -> ExportArtifact:
         """Convert a persisted canonical Markdown document into a file."""
         document = self.get_document(document_id)
         source = self.db.get(Source, document.source_id)
-        title = source.filename if source is not None else "document"
+        title = export_title(
+            source.filename if source is not None else None,
+            source.created_at if source is not None else None,
+            document.mode,
+        )
+        author = "MeetingMind AI"
+        if source is not None and source.user_id is not None:
+            owner = self.db.get(User, source.user_id)
+            if owner is not None and owner.name.strip():
+                author = owner.name.strip()
+        markdown = document.markdown
+        if document.mode == DocumentMode.FULL_TEXT:
+            body = strip_leading_document_heading(markdown)
+            if source is not None:
+                source_note = (
+                    f"_Nguồn: {source_document_label(source.filename, source.created_at)}_"
+                )
+                if not body.startswith("_Nguồn:"):
+                    body = f"{source_note}\n\n{body}" if body else source_note
+            markdown = "# Toàn văn cuộc họp"
+            if body:
+                markdown = f"{markdown}\n\n{body}"
         export_service = self.export_service or create_export_service()
         return export_service.export(
-            document.markdown,
+            markdown,
             format,
             title=title,
+            preset=preset,
+            context={"author": author},
         )
 
     @staticmethod
-    def full_text_markdown(transcript: TranscriptResult) -> str:
+    def full_text_markdown(
+        transcript: TranscriptResult,
+        *,
+        source_label: str | None = None,
+    ) -> str:
         """Render a readable transcript without invoking an LLM."""
-        lines = [f"# Toàn văn: {transcript.key}", ""]
+        label = source_label or Path(transcript.key).stem or "Tài liệu"
+        lines = ["# Toàn văn cuộc họp", "", f"_Nguồn: {label}_", ""]
         if not transcript.sentence_info:
             lines.append("_Không phát hiện lời nói trong bản ghi âm._")
         for sentence in transcript.sentence_info:

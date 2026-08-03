@@ -8,6 +8,11 @@ export type SourceStatus = "processing" | "done" | "failed";
 
 export type DocMode = "live" | "summary" | "full_text";
 
+export type ExportFormat = "md" | "docx" | "pdf";
+export type PdfExportPreset = "minimal" | "blue_modern";
+export type DocxExportPreset = "minimal" | "modern";
+export type ExportPreset = PdfExportPreset | DocxExportPreset;
+
 /** Response returned after a Source and its processing Job are created. */
 export interface CreateSourceResponse {
   sourceId: string;
