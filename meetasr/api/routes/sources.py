@@ -29,6 +29,7 @@ from meetasr.db.user_model import User
 from meetasr.realtime.job_worker import job_queue
 from meetasr.storage import get_storage
 from meetasr.storage.backend import StorageBackend
+from meetasr.utils.document_naming import source_display_name
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +104,7 @@ class SourceResponse(BaseModel):
 
         return cls(
             id=source.id,
-            title=source.filename,
+            title=source_display_name(source.filename, source.created_at),
             mediaType=source.media_type,
             durationMs=(
                 int(source.duration * 1000)

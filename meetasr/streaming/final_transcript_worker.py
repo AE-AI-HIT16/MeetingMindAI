@@ -47,6 +47,7 @@ from meetasr.services.targeted_transcript_persistence import (
     persist_targeted_transcript,
 )
 from meetasr.streaming.final_transcript_queue import FinalTranscriptJob
+from meetasr.utils.document_naming import source_document_label
 from meetasr.utils.targeted_retranscription import (
     resolve_targeted_retranscription,
 )
@@ -451,12 +452,12 @@ class FinalTranscriptWorker:
         """Create the live transcript document after segments are committed."""
         with Session(engine) as db:
             service = DocumentService(db)
+            source = db.get(Source, source_id)
+            if source is None:
+                raise RuntimeError(f"Source '{source_id}' không tồn tại.")
             if has_transcript:
                 transcript = service.build_transcript(source_id)
             else:
-                source = db.get(Source, source_id)
-                if source is None:
-                    raise RuntimeError(f"Source '{source_id}' không tồn tại.")
                 transcript = TranscriptResult(
                     key=source.filename,
                     text="",
@@ -464,7 +465,13 @@ class FinalTranscriptWorker:
                     language="vi",
                     sentence_info=[],
                 )
-            markdown = DocumentService.full_text_markdown(transcript)
+            markdown = DocumentService.full_text_markdown(
+                transcript,
+                source_label=source_document_label(
+                    source.filename,
+                    source.created_at,
+                ),
+            )
             document = service.save_live_document(source_id, markdown)
             db.expunge(document)
             return document, markdown

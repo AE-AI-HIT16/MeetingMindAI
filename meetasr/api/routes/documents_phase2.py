@@ -17,6 +17,7 @@ from meetasr.db.connection import get_db
 from meetasr.export import (
     MissingExportDependency,
     UnsupportedExportFormat,
+    UnsupportedExportPreset,
 )
 from meetasr.realtime.document_generation import document_generation_queue
 from meetasr.services.document_service import (
@@ -108,17 +109,19 @@ async def finalize_document(
 def export_document(
     document_id: str,
     db: Annotated[Session, Depends(get_db)],
-    format: Literal["md", "docx", "pdf"] = Query(default="md"),
+    format: Annotated[Literal["md", "docx", "pdf"], Query()] = "md",
+    preset: Annotated[str | None, Query()] = None,
 ) -> Response:
     """Download a persisted document in a supported format."""
     try:
         artifact = DocumentService(db).export_document(
             document_id,
             format,
+            preset,
         )
     except DocumentNotFoundError as exc:
         _raise_service_http_error(exc)
-    except UnsupportedExportFormat as exc:
+    except (UnsupportedExportFormat, UnsupportedExportPreset) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except MissingExportDependency as exc:
         raise HTTPException(

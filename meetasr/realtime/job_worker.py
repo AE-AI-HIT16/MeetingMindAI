@@ -224,7 +224,7 @@ class JobQueue:
                 JobStage.GENERATING_DOC,
                 0.85,
             )
-            markdown = _transcript_markdown(source.filename, finalized)
+            markdown = _transcript_markdown(finalized)
             live_document = self._save_live_document(source.id, markdown)
             await event_bus.publish(
                 job_id,
@@ -418,10 +418,9 @@ class JobQueue:
 
 
 def _transcript_markdown(
-    filename: str,
     segments: list[TranscriptSegmentPayload],
 ) -> str:
-    lines = [f"# Bản ghi: {filename}", ""]
+    lines = ["# Bản ghi cuộc họp", ""]
     for segment in segments:
         minutes, seconds = divmod(segment.start_ms // 1000, 60)
         speaker = (

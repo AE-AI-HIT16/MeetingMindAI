@@ -15,6 +15,8 @@ import type {
   DocMode,
   DocumentData,
   DocumentGeneration,
+  ExportFormat,
+  ExportPreset,
   Source,
 } from "./types";
 
@@ -237,7 +239,10 @@ export async function getDocumentGeneration(
 
 export function documentExportUrl(
   documentId: string,
-  format: "md" | "docx" | "pdf",
+  format: ExportFormat,
+  preset?: ExportPreset,
 ): string {
-  return `/v1/documents/${documentId}/export?format=${format}`;
+  const params = new URLSearchParams({ format });
+  if (preset) params.set("preset", preset);
+  return `/v1/documents/${documentId}/export?${params.toString()}`;
 }
