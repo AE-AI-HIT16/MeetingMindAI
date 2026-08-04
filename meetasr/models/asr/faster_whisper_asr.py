@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 import os
 import site
-from pathlib import PurePath, PureWindowsPath
+from pathlib import Path, PurePath, PureWindowsPath
 
 import numpy as np
 
@@ -39,27 +39,36 @@ _LONG_FORM_OPTIONS = (
 _CUDA_DLL_DIRECTORIES = []
 _CUDA_DLL_DIRECTORIES_CONFIGURED = False
 
-
 def _configure_windows_cuda_runtime() -> None:
     """Expose pip-installed NVIDIA DLLs before CTranslate2 is imported."""
     global _CUDA_DLL_DIRECTORIES_CONFIGURED
+
     if os.name != "nt" or _CUDA_DLL_DIRECTORIES_CONFIGURED:
         return
 
     _CUDA_DLL_DIRECTORIES_CONFIGURED = True
     dll_paths = []
+
     for site_package in site.getsitepackages():
         if os.name == "nt":
-            root = PureWindowsPath(site_package) / "nvidia"
+            root = str(PureWindowsPath(site_package) / "nvidia")
         else:
-            root = PurePath(site_package) / "nvidia"
+            root = str(Path(site_package) / "nvidia")
+
         for package in ("cublas", "cudnn", "cuda_nvrtc"):
-            dll_directory = root / package / "bin"
-            if dll_directory.is_dir():
-                dll_paths.append(str(dll_directory))
-                _CUDA_DLL_DIRECTORIES.append(
-                    os.add_dll_directory(str(dll_directory))
-                )
+            dll_directory = os.path.join(
+                root,
+                package,
+                "bin",
+            )
+
+            if os.path.isdir(dll_directory):
+                dll_paths.append(dll_directory)
+
+                if hasattr(os, "add_dll_directory"):
+                    _CUDA_DLL_DIRECTORIES.append(
+                        os.add_dll_directory(dll_directory)
+                    )
 
     if dll_paths:
         os.environ["PATH"] = os.pathsep.join(

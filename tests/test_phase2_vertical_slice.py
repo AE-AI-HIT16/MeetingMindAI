@@ -210,7 +210,10 @@ async def test_upload_to_pdf_and_reopen_from_library(
     # This is the backend data used by listSources()/getSource(): it now carries
     # the real Document ID, so SourceCard can reopen the finalized document.
     with Session(test_engine) as db:
-        library = sources.list_sources(db)
+        library = sources.list_sources(
+            db,
+            fake_user,
+        )
         detail = sources.get_source(created.sourceId, db)
         summary_ref = next(
             document
