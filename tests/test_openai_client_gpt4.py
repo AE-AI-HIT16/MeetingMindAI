@@ -15,7 +15,7 @@ def test_openai_basic_chat(mock_chat):
 - A phụ trách backend.
 """
 
-    path_prompt = "meetasr/llm/prompts/decisions_meeting_vi.txt"
+    path_prompt = "meetasr/llm/prompts/decisions_vi/decisions_meeting_vi.txt"
     path_transcript = "tests/test_llm_transcrip_example/test_01.txt"
 
     prompt = read_txt(path_prompt)

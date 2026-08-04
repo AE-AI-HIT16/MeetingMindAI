@@ -112,6 +112,13 @@ async def test_upload_to_pdf_and_reopen_from_library(
             ]
 
     bus = EventBus(max_queue_size=50)
+
+    monkeypatch.setattr(
+        job_worker,
+        "event_bus",
+        bus,
+    )
+
     fake_queue = CapturingQueue()
 
     monkeypatch.setattr(

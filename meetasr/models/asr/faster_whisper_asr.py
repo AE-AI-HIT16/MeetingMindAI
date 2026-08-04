@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 import os
 import site
-from pathlib import Path
+from pathlib import PurePath, PureWindowsPath
 
 import numpy as np
 
@@ -49,7 +49,10 @@ def _configure_windows_cuda_runtime() -> None:
     _CUDA_DLL_DIRECTORIES_CONFIGURED = True
     dll_paths = []
     for site_package in site.getsitepackages():
-        root = Path(site_package) / "nvidia"
+        if os.name == "nt":
+            root = PureWindowsPath(site_package) / "nvidia"
+        else:
+            root = PurePath(site_package) / "nvidia"
         for package in ("cublas", "cudnn", "cuda_nvrtc"):
             dll_directory = root / package / "bin"
             if dll_directory.is_dir():
