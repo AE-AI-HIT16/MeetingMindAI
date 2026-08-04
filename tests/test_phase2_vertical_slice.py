@@ -27,6 +27,7 @@ from meetasr.services import asr_service, document_service
 from meetasr.services.asr_service import ASRService
 from meetasr.services.document_service import DocumentService
 from meetasr.storage.local import LocalStorage
+from types import SimpleNamespace
 
 
 def _short_wav() -> bytes:
@@ -78,8 +79,17 @@ async def test_upload_to_pdf_and_reopen_from_library(
         filename="vertical-slice.wav",
         headers=Headers({"content-type": "audio/wav"}),
     )
+    fake_user = SimpleNamespace(
+        id="test-user-id",
+    )
+
     with Session(test_engine) as db:
-        created = await sources.create_source(upload, db, storage)
+        created = await sources.create_source(
+            upload,
+            db,
+            storage,
+            fake_user,
+        )
 
     assert created.status == JobStatus.QUEUED
     assert enqueued_job_ids == [created.jobId]
@@ -102,7 +112,18 @@ async def test_upload_to_pdf_and_reopen_from_library(
             ]
 
     bus = EventBus(max_queue_size=50)
-    monkeypatch.setattr(job_worker, "event_bus", bus)
+    fake_queue = CapturingQueue()
+
+    monkeypatch.setattr(
+        sources,
+        "job_queue",
+        fake_queue,
+    )
+    monkeypatch.setattr(
+        job_worker,
+        "job_queue",
+        fake_queue,
+    )
     subscriber = await bus.subscribe(created.jobId)
     worker = job_worker.JobQueue()
     worker._storage = storage
