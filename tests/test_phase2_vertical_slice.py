@@ -214,7 +214,7 @@ async def test_upload_to_pdf_and_reopen_from_library(
             db,
             fake_user,
         )
-        detail = sources.get_source(created.sourceId, db)
+        detail = sources.get_source(created.sourceId, db, fake_user)
         summary_ref = next(
             document
             for document in detail.documents
