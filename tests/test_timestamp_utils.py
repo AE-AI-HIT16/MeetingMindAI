@@ -1,16 +1,15 @@
 """Tests for timestamp utilities."""
 
-import pytest
+from meetasr.schemas import Segment, SentenceInfo
 from meetasr.utils.timestamp import (
-    merge_vad_segments,
+    align_timestamps_to_global,
+    build_sentence_info,
     clip_sentence_to_range,
     find_speech_gaps,
     merge_rescued_sentences,
-    align_timestamps_to_global,
-    build_sentence_info,
+    merge_vad_segments,
     split_punctuated_sentence_info,
 )
-from meetasr.schemas import Segment, SentenceInfo
 
 
 class TestMergeVadSegments:

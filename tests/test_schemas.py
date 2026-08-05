@@ -1,9 +1,15 @@
 """Tests for schemas serialization."""
 
 import json
+
 from meetasr.schemas import (
-    Segment, SentenceInfo, TranscriptResult,
-    Topic, ActionItem, Decision, MeetingReport
+    ActionItem,
+    Decision,
+    MeetingReport,
+    Segment,
+    SentenceInfo,
+    Topic,
+    TranscriptResult,
 )
 
 

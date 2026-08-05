@@ -10,8 +10,6 @@ import numpy as np
 
 from meetasr.schemas import Segment, SentenceInfo, TranscriptResult
 from meetasr.utils.audio import load_audio
-from meetasr.utils.timestamp import merge_vad_segments
-
 
 VAD_PADDING_MS = 100
 SAMPLE_RATE = 16000

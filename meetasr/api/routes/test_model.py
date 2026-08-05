@@ -1,9 +1,9 @@
-from fastapi import APIRouter, UploadFile, File, Request
 import logging
 
-from meetasr.api.dependencies import save_upload, safe_remove
-from meetasr.utils.audio import load_audio
+from fastapi import APIRouter, File, Request, UploadFile
 
+from meetasr.api.dependencies import safe_remove, save_upload
+from meetasr.utils.audio import load_audio
 
 logger = logging.getLogger(__name__)
 

@@ -1,6 +1,5 @@
 """Tests for audio loading utilities."""
 
-import io
 import subprocess
 import sys
 from types import SimpleNamespace

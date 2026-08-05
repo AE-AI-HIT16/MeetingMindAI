@@ -15,13 +15,12 @@ from __future__ import annotations
 import logging
 import os
 import site
-from pathlib import Path, PurePath, PureWindowsPath
+from pathlib import Path, PureWindowsPath
 
 import numpy as np
 
-from meetasr.register import tables
 from meetasr.models.abs_models import AbsASR
-
+from meetasr.register import tables
 
 _DECODE_OPTIONS = (
     "beam_size",

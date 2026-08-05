@@ -1,11 +1,10 @@
+from pathlib import PureWindowsPath
 from types import SimpleNamespace
 
 import numpy as np
 
 from meetasr.models.asr import faster_whisper_asr
 from meetasr.models.asr.faster_whisper_asr import FasterWhisperASR
-from pathlib import PureWindowsPath
-
 
 
 class _FakeWhisperModel:

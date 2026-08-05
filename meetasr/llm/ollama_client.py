@@ -1,7 +1,8 @@
 """Ollama client — local LLM via OpenAI-compatible API."""
 
-from meetasr.register import tables
 from meetasr.llm.openai_client import OpenAIClient
+from meetasr.register import tables
+
 
 @tables.register("llm_classes", key="ollama")
 class OllamaClient(OpenAIClient):

@@ -1,10 +1,9 @@
+import asyncio
 import logging
 
 import numpy as np
 
 from meetasr.schemas import Segment
-import asyncio
-
 
 SAMPLE_RATE = 16000
 SECOND = 1

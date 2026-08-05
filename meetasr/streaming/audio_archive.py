@@ -1,5 +1,6 @@
 import numpy as np
 
+
 class AudioArchive:
 
     def __init__(self):

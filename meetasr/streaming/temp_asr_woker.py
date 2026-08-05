@@ -3,7 +3,6 @@ import logging
 
 from meetasr.api.schemas_phase2 import TranscriptSegmentPayload
 
-
 logger = logging.getLogger("temp_asr")
 
 

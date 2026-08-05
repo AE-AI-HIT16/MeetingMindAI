@@ -17,17 +17,14 @@ What it does:
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import sys
-import time
 
 # Add project root to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from meetasr.schemas import TranscriptResult, SentenceInfo
-from meetasr.schemas_doc import DocumentReport
+from meetasr.schemas import SentenceInfo, TranscriptResult
 
 logging.basicConfig(
     level=logging.INFO,

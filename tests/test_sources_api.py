@@ -12,13 +12,12 @@ from fastapi.testclient import TestClient
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine, select
 
-from meetasr.api.routes import sources
 from meetasr.api.auth_deps import get_current_user
+from meetasr.api.routes import sources
 from meetasr.db.connection import get_db
 from meetasr.db.models_phase2 import Job, JobStatus, MediaType, Source
 from meetasr.db.user_model import User
 from meetasr.storage.backend import StorageBackend
-
 
 # ============================================================
 # Fake storage

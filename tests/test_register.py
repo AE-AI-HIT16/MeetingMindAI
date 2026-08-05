@@ -1,6 +1,7 @@
 """Tests for RegisterTables registry system."""
 
 import pytest
+
 from meetasr.register import RegisterTables
 
 

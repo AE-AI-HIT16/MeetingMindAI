@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import wave
+from types import SimpleNamespace
 
 import pytest
 from fastapi import UploadFile
@@ -27,7 +28,6 @@ from meetasr.services import asr_service, document_service
 from meetasr.services.asr_service import ASRService
 from meetasr.services.document_service import DocumentService
 from meetasr.storage.local import LocalStorage
-from types import SimpleNamespace
 
 
 def _short_wav() -> bytes:

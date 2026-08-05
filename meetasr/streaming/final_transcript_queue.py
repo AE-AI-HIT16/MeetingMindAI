@@ -1,8 +1,8 @@
 import asyncio
 import logging
-import numpy as np
-
 from dataclasses import dataclass
+
+import numpy as np
 
 logger = logging.getLogger(__name__)
 

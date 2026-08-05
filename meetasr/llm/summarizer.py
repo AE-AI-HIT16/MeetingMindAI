@@ -4,19 +4,17 @@ from __future__ import annotations
 
 import json
 import logging
-import os
-import time
-from dataclasses import asdict
 import re
+import time
 from typing import Optional
 
 from meetasr.llm.abs_llm import AbsLLMClient
 from meetasr.schemas import (
-    TranscriptResult,
-    MeetingReport,
-    Topic,
     ActionItem,
     Decision,
+    MeetingReport,
+    Topic,
+    TranscriptResult,
 )
 
 # Max characters in a single LLM call. Transcripts longer than this
@@ -188,7 +186,7 @@ class MeetingSummarizer:
                     temperature=self.temperature,
                     max_tokens=self.max_tokens,
                 ).strip()
-                
+
                 # Extract markdown code fence if present
                 match = re.search(r"```(?:json)?(.*?)```", raw, re.DOTALL | re.IGNORECASE)
                 if match:
@@ -199,7 +197,7 @@ class MeetingSummarizer:
                     end = raw.rfind(']')
                     if start != -1 and end != -1:
                         raw = raw[start:end+1]
-                        
+
                 parsed = json.loads(raw)
                 if isinstance(parsed, list):
                     return parsed

@@ -1,5 +1,5 @@
-from typing import TypedDict, List, Optional
 from copy import deepcopy
+from typing import List, Optional, TypedDict
 
 
 class SentenceInfo(TypedDict):

@@ -3,12 +3,10 @@
 
 from __future__ import annotations
 
-
 import re
 import unicodedata
 from dataclasses import dataclass
 from typing import Callable, Literal
-
 
 ExportFormat = Literal["md","docx","pdf"]
 
@@ -54,17 +52,17 @@ class ExportService:
 
     def __init__(self) -> None:
         self._exporters: dict[str, Exporter] = {}
-    
+
     def register(self, format_name: str, exprorter: Exporter) -> None:
         key = format_name.strip().lower()
         if not key:
             raise ValueError("format name must not be empty")
         self._exporters[key] = exprorter
-    
+
     @property
     def supported_formats(self) -> tuple[str, ...]:
         return tuple(sorted(self._exporters))
-    
+
     def export(
         self,
         markdown: str,

@@ -17,10 +17,10 @@ from typing import Annotated, Optional
 import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlmodel import Session
 
 from meetasr.db.connection import get_db
 from meetasr.db.user_model import User
-from sqlmodel import Session, select
 
 logger = logging.getLogger(__name__)
 

@@ -15,7 +15,6 @@ from meetasr.export.markdown_parser import (
 )
 from meetasr.export.service import ExportArtifact, MissingExportDependency
 
-
 DocxTemplateName = Literal["minimal", "modern"]
 
 _DOCX_MEDIA_TYPE = (

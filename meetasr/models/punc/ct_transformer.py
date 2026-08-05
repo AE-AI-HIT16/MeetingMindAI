@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import logging
 
-from meetasr.register import tables
 from meetasr.models.abs_models import AbsPunc
+from meetasr.register import tables
 
 
 @tables.register("model_classes", key="ct-punc")

@@ -17,7 +17,6 @@ from meetasr.db.connection import engine
 from meetasr.db.models_phase2 import Document, DocumentMode, Job, JobStatus, TranscriptSegment
 from meetasr.realtime.events import event_bus
 
-
 router = APIRouter(prefix="/v1/jobs", tags=["jobs"])
 
 

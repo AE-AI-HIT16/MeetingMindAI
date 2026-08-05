@@ -1,10 +1,10 @@
 """VAD timestamp utilities — merge and align segment timestamps."""
 
 from __future__ import annotations
+
 import re
 
 from meetasr.schemas import Segment, SentenceInfo
-
 
 _SENTENCE_END_RE = re.compile(r"[^.!?。！？…]+(?:[.!?。！？…]+|$)")
 _BOUNDARY_DEDUP_MS = 250
@@ -272,7 +272,7 @@ def align_punctuated_timestamps(
 
     matcher = difflib.SequenceMatcher(None, raw_text, punc_text)
     aligned_ts = []
-    
+
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
         if tag == "equal" or tag == "replace":
             # Map exactly 1-to-1 or replace (e.g., lower to upper case)

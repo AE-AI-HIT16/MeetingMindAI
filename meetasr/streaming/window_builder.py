@@ -2,7 +2,6 @@ import logging
 
 import numpy as np
 
-
 SAMPLE_RATE = 16000
 
 MIN_WINDOW_SECONDS = 1

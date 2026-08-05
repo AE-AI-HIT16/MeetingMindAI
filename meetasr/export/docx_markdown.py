@@ -14,7 +14,6 @@ from markdown_it.token import Token
 
 from meetasr.export.markdown_parser import parse_markdown
 
-
 _SAFE_HYPERLINK_SCHEMES = frozenset({"http", "https", "mailto"})
 
 

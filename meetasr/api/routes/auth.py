@@ -19,7 +19,6 @@ import os
 from datetime import datetime, timedelta
 from typing import Annotated
 
-import httpx
 import jwt
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel

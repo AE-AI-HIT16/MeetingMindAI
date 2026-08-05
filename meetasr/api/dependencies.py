@@ -1,12 +1,14 @@
 """Shared dependencies for API routes."""
 from __future__ import annotations
+
+import logging
 import os
 import tempfile
-import logging
 from typing import Optional
-from fastapi import HTTPException, UploadFile, status
-from meetasr.pipeline import MeetPipeline
 
+from fastapi import HTTPException, UploadFile, status
+
+from meetasr.pipeline import MeetPipeline
 
 SUPPORTED_FORMATS = {".wav", ".mp3", ".m4a", ".mp4", ".flac", ".ogg", ".webm"}
 MAX_FILE_BYTES = 500 * 1024 * 1024  # 500 MB

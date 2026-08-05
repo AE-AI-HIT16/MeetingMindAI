@@ -8,9 +8,8 @@ from sqlmodel import Session
 from meetasr.db.connection import engine
 from meetasr.db.models_phase2 import (
     Job,
-    Source,
-    JobStatus,
     JobStage,
+    JobStatus,
     TranscriptSegment,
 )
 

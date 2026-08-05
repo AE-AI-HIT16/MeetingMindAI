@@ -7,10 +7,9 @@ import logging
 
 import numpy as np
 
+from meetasr.models.abs_models import AbsVAD
 from meetasr.register import tables
 from meetasr.schemas import Segment
-from meetasr.models.abs_models import AbsVAD
-
 
 _MODEL_METADATA_OPTIONS = frozenset({
     "encoder",
@@ -67,14 +66,17 @@ class FsmnVAD(AbsVAD):
             return
         try:
             import os
-            import torch
-            from omegaconf import OmegaConf
-            from funasr.frontends.wav_frontend import WavFrontendOnline
+
             import funasr.models.fsmn_vad_streaming.encoder  # noqa: F401
+            import torch
+            from funasr.frontends.wav_frontend import WavFrontendOnline
             from funasr.models.fsmn_vad_streaming.model import (
                 FsmnVADStreaming as _FsmnVAD,
+            )
+            from funasr.models.fsmn_vad_streaming.model import (
                 VADXOptions,
             )
+            from omegaconf import OmegaConf
 
             config_path = os.path.join(self.model_path, "config.yaml")
             cfg = OmegaConf.load(config_path)

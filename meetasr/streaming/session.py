@@ -1,11 +1,11 @@
-from collections import deque
 import asyncio
 import time
+from collections import deque
 
 import numpy as np
 
-from meetasr.streaming.audio_queue import AudioQueue
 from meetasr.streaming.audio_archive import AudioArchive
+from meetasr.streaming.audio_queue import AudioQueue
 
 
 class StreamSession:

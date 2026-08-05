@@ -1,4 +1,3 @@
-import asyncio
 
 SAMPLE_RATE = 16000
 

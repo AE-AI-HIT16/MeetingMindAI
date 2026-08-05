@@ -16,7 +16,6 @@ from meetasr.export.docx_exporter import (
 )
 from meetasr.export.service import MissingExportDependency
 
-
 docx = pytest.importorskip("docx")
 pytest.importorskip("docxtpl")
 pytest.importorskip("docxcompose")

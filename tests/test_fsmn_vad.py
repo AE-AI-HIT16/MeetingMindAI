@@ -128,9 +128,9 @@ def test_ensure_loaded_applies_only_supported_vad_overrides(
     caplog,
 ):
     """Wrapper config should override YAML without forwarding unknown options."""
-    import torch
     import funasr.frontends.wav_frontend as frontend_module
     import funasr.models.fsmn_vad_streaming.model as vad_module
+    import torch
 
     (tmp_path / "config.yaml").write_text(
         "\n".join([

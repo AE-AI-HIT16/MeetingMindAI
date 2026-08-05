@@ -1,20 +1,22 @@
 """Database repository for CRUD operations on Meeting data."""
 
-import logging
 import json
-from typing import Optional, List
+import logging
+from typing import List, Optional
+
 from sqlmodel import Session, select
-from meetasr.db.models import Meeting, Transcript, Sentence, Report, Topic, ActionItem, Decision
+
+from meetasr.db.models import ActionItem, Decision, Meeting, Report, Sentence, Topic, Transcript
 from meetasr.schemas import MeetingReport
 
 logger = logging.getLogger(__name__)
 
 def create_meeting(
-    db: Session, 
-    id: str, 
-    title: str, 
-    audio_path: str, 
-    asr_model: Optional[str] = None, 
+    db: Session,
+    id: str,
+    title: str,
+    audio_path: str,
+    asr_model: Optional[str] = None,
     llm_model: Optional[str] = None,
     duration: float = 0.0
 ) -> Meeting:

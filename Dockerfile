@@ -30,7 +30,7 @@ COPY meetasr ./meetasr
 # Install project
 # =========================
 RUN pip install --upgrade pip setuptools wheel && \
-    pip install .
+    pip install ".[s3,export]"
 
 # =========================
 # Expose API

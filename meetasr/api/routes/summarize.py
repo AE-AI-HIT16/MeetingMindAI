@@ -11,17 +11,23 @@ from __future__ import annotations
 
 import logging
 import uuid
-from typing import Any
 
 from fastapi import (
-    APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, status
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    UploadFile,
+    status,
 )
 from pydantic import BaseModel, Field, ValidationError
 from sqlmodel import Session
 
 from meetasr.api.dependencies import get_pipeline, safe_remove, save_upload
-from meetasr.db.connection import engine, get_db
 from meetasr.db import repository
+from meetasr.db.connection import engine, get_db
 from meetasr.schemas import SentenceInfo, TranscriptResult
 
 logger = logging.getLogger(__name__)
@@ -29,9 +35,9 @@ router = APIRouter(tags=["Meeting"])
 
 
 def _process_meeting(
-    meeting_id: str, 
-    audio_path: str, 
-    language: str, 
+    meeting_id: str,
+    audio_path: str,
+    language: str,
     include_flags: dict[str, bool]
 ) -> None:
     """Background worker: run full ASR + LLM pipeline.
@@ -40,17 +46,17 @@ def _process_meeting(
     with Session(engine) as db:
         try:
             repository.update_meeting_status(db, meeting_id, "processing")
-            
+
             pipeline = get_pipeline()
             report = pipeline.summarize_meeting(
-                audio_path, 
+                audio_path,
                 language=language
             )
-            
+
             # Save results to DB
             repository.save_meeting_result(db, meeting_id, report)
             repository.update_meeting_status(db, meeting_id, "completed")
-            
+
             logger.info(f"Meeting {meeting_id} processed successfully and saved to DB.")
         except Exception as e:
             logger.error(f"Meeting {meeting_id} failed during processing: {e}", exc_info=True)
@@ -64,33 +70,33 @@ def _process_meeting(
 
 
 def _process_text_meeting(
-    meeting_id: str, 
-    transcript_result: TranscriptResult, 
-    language: str, 
+    meeting_id: str,
+    transcript_result: TranscriptResult,
+    language: str,
     include_flags: dict[str, bool]
 ) -> None:
     """Background worker: run LLM pipeline directly from a validated TranscriptResult."""
     with Session(engine) as db:
         try:
             repository.update_meeting_status(db, meeting_id, "processing")
-            
+
             pipeline = get_pipeline()
-            
+
             # Chạy summarizer trực tiếp
             report = pipeline.summarizer.summarize(transcript_result)
-            
+
             # Lưu kết quả
             repository.save_meeting_result(db, meeting_id, report)
-            
+
             # Cập nhật thời lượng (duration) ngược lại cho meeting record vì ta không chạy qua ASR
             meeting = repository.get_meeting(db, meeting_id)
             if meeting and transcript_result.duration > 0:
                 meeting.duration = transcript_result.duration
                 db.add(meeting)
                 db.commit()
-                
+
             repository.update_meeting_status(db, meeting_id, "completed")
-            
+
             logger.info(f"Text Meeting {meeting_id} processed successfully.")
         except Exception as e:
             logger.error(f"Text Meeting {meeting_id} failed: {e}", exc_info=True)
@@ -124,7 +130,7 @@ async def summarize_meeting(
                 }
             },
         )
-        
+
     audio_path = await save_upload(file)
     meeting_id = str(uuid.uuid4())
     flags = {
@@ -133,7 +139,7 @@ async def summarize_meeting(
         "actions": include_actions,
         "decisions": include_decisions,
     }
-    
+
     try:
         repository.create_meeting(
             db=db,
@@ -148,12 +154,12 @@ async def summarize_meeting(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={"error": {"code": "db_error", "message": "Failed to create meeting record"}}
         )
-        
+
     background_tasks.add_task(
-        _process_meeting, 
-        meeting_id, 
-        audio_path, 
-        language, 
+        _process_meeting,
+        meeting_id,
+        audio_path,
+        language,
         flags
     )
     return {"meeting_id": meeting_id, "status": "pending"}
@@ -173,7 +179,7 @@ async def get_status(meeting_id: str, db: Session = Depends(get_db)) -> dict:
                 }
             },
         )
-        
+
     return {
         "id": meeting.id,
         "title": meeting.title,
@@ -209,7 +215,7 @@ async def summarize_meeting_text(
         )
 
     # 1. PARSE & VALIDATE JSON NGAY TẠI ROUTE SYNCHRONOUSLY
-    # Nếu payload JSON gửi lên bị sai form (thiếu key, sai kiểu dữ liệu), 
+    # Nếu payload JSON gửi lên bị sai form (thiếu key, sai kiểu dữ liệu),
     # API sẽ trả về lỗi HTTP 400 Bad Request ngay lập tức cho client biết!
     try:
         t_data = request.transcript_data
@@ -234,7 +240,7 @@ async def summarize_meeting_text(
         "actions": request.include_actions,
         "decisions": request.include_decisions,
     }
-    
+
     try:
         repository.create_meeting(
             db=db,
@@ -249,13 +255,13 @@ async def summarize_meeting_text(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={"error": {"code": "db_error", "message": "Failed to create meeting record"}}
         )
-    
+
     background_tasks.add_task(
-        _process_text_meeting, 
-        meeting_id, 
-        transcript_result, 
-        request.language, 
+        _process_text_meeting,
+        meeting_id,
+        transcript_result,
+        request.language,
         flags
     )
-    
+
     return {"meeting_id": meeting_id, "status": "pending"}

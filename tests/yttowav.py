@@ -1,5 +1,5 @@
 import yt_dlp
-from yt_dlp.utils import download_range_func # Bắt buộc import thêm hàm này
+from yt_dlp.utils import download_range_func  # Bắt buộc import thêm hàm này
 
 # Cấu hình tải và cắt
 ydl_opts = {

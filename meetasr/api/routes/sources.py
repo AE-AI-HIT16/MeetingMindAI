@@ -123,6 +123,7 @@ class SourceResponse(BaseModel):
 from meetasr.api.auth_deps import get_current_user
 from meetasr.db.user_model import User
 
+
 @router.get("", response_model=List[SourceResponse])
 def list_sources(
     db: Annotated[Session, Depends(get_db)],

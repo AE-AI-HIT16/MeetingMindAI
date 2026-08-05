@@ -3,9 +3,10 @@ Temporary implementation — will be replaced by real DB (SQLModel)
 when the Data Engineer completes the database layer.
 """
 from __future__ import annotations
+
 import logging
-from typing import Optional
 from datetime import datetime
+from typing import Optional
 
 _logger = logging.getLogger(__name__)
 

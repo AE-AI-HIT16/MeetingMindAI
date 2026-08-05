@@ -25,7 +25,10 @@ services:
       DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres_db:5432/${POSTGRES_DB}
 
       # ===== LLM =====
-      GROQ_API_KEY: ${GROQ_API_KEY}
+      GROQ_API_KEYS: ${GROQ_API_KEYS}
+
+      # ===== Storage =====
+      STORAGE_BACKEND: s3
 
       # ===== MinIO =====
       MINIO_ENDPOINT: http://minio_storage:9000

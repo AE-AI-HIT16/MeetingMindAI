@@ -8,7 +8,6 @@ import pytest
 
 from meetasr.export.pdf_exporter import _extract_sections, export_pdf
 
-
 pytest.importorskip("jinja2")
 pytest.importorskip("weasyprint")
 

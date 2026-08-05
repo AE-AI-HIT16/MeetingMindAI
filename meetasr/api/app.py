@@ -9,9 +9,9 @@ CORS middleware, and global exception handler.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
-import asyncio
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
@@ -42,14 +42,13 @@ from meetasr.api.routes import (
 )
 from meetasr.auto.auto_pipeline import AutoPipeline
 from meetasr.db.connection import init_db
+from meetasr.pipeline_realtime import ASRPipeline
 from meetasr.realtime.document_generation import document_generation_queue
 from meetasr.realtime.job_worker import job_queue
 from meetasr.services.asr_service import ASRService
 from meetasr.services.realtime_asr_service import RealtimeASRService
-from meetasr.pipeline_realtime import ASRPipeline
 from meetasr.streaming.final_transcript_queue import FinalTranscriptQueue
 from meetasr.streaming.final_transcript_worker import FinalTranscriptWorker
-
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

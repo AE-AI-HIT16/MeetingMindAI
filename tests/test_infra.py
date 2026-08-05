@@ -1,12 +1,14 @@
 """Script to test PostgreSQL and MinIO connections."""
 
 import os
+
 import boto3
 from botocore.exceptions import ClientError
 from dotenv import load_dotenv
 
 # Import SQLAlchemy components (used by SQLModel under the hood)
 from sqlalchemy import create_engine, text
+
 
 def test_postgres():
     print("\n--- Testing PostgreSQL Connection ---")
@@ -15,7 +17,7 @@ def test_postgres():
     if not db_url:
         print("[FAIL] MinIO credentials not found in .env file.")
         return False
-        
+
     print(f"Attempting to connect to: {db_url}")
     try:
         engine = create_engine(db_url)
@@ -34,10 +36,10 @@ def test_minio():
     load_dotenv()
     minio_user = os.environ.get("MINIO_ROOT_USER", "admin")
     minio_password = os.environ.get("MINIO_ROOT_PASSWORD", "password123")
-    
+
     endpoint_url = "http://localhost:9000"
     print(f"Attempting to connect to MinIO at: {endpoint_url}")
-    
+
     try:
         s3 = boto3.client(
             's3',
@@ -47,12 +49,12 @@ def test_minio():
             # Bỏ qua SSL/TLS signature version 4 lỗi của boto3 khi dùng với minio
             region_name="us-east-1"
         )
-        
+
         # Test 1: List buckets
         response = s3.list_buckets()
-        print(f"[OK] Successfully connected to MinIO!")
+        print("[OK] Successfully connected to MinIO!")
         print(f"   Current buckets: {[bucket['Name'] for bucket in response.get('Buckets', [])]}")
-        
+
         # Test 2: Try creating a test bucket
         bucket_name = "test-bucket"
         try:
@@ -63,7 +65,7 @@ def test_minio():
                 print(f"[OK] Test bucket '{bucket_name}' already exists.")
             else:
                 print(f"[WARN] Could not create bucket: {e}")
-                
+
         return True
     except Exception as e:
         print(f"[FAIL] Failed to connect to MinIO: {e}")
@@ -73,7 +75,7 @@ if __name__ == "__main__":
     print("Starting Infrastructure Tests...")
     pg_ok = test_postgres()
     minio_ok = test_minio()
-    
+
     print("\n================ SUMMARY ================")
     if pg_ok and minio_ok:
         print(">>> ALL SYSTEMS GO! PostgreSQL and MinIO are perfectly set up.")

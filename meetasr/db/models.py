@@ -1,13 +1,13 @@
 
 from datetime import datetime
-from typing import Optional, List
+from typing import List, Optional
 
-from sqlmodel import SQLModel, Field, Relationship
+from sqlmodel import Field, Relationship, SQLModel
 
 
 class Transcript(SQLModel, table=True):
     __tablename__ = "transcripts"
-    
+
     meeting_id: str = Field(primary_key=True, foreign_key="meetings.id")
     text: str
     duration: float
@@ -17,12 +17,12 @@ class Transcript(SQLModel, table=True):
 
 class Sentence(SQLModel, table=True):
     __tablename__ = "sentences"
-    
+
     id: Optional[int] = Field(default=None, primary_key=True)
     meeting_id: str = Field(foreign_key="meetings.id")
     text: str
     start: float
-    end: float 
+    end: float
     speaker: Optional[int] = None
     char_timestamps: Optional[str] = None
 
@@ -31,14 +31,14 @@ class Sentence(SQLModel, table=True):
 
 class Report(SQLModel, table=True):
     __tablename__ = "reports"
-    
+
     meeting_id: str = Field(primary_key=True, foreign_key="meetings.id")
     summary: str
     processing_time: float
-    
+
     #lưu trữ cấu hình model llm
     llm_model: Optional[str] = Field(default=None)
-    
+
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
     meeting: Optional["Meeting"] = Relationship(back_populates="report")
@@ -46,7 +46,7 @@ class Report(SQLModel, table=True):
 
 class Topic(SQLModel, table=True):
     __tablename__ = "topics"
-    
+
     id: Optional[int] = Field(default=None, primary_key=True)
     meeting_id: str = Field(foreign_key="meetings.id")
     title: str
@@ -59,7 +59,7 @@ class Topic(SQLModel, table=True):
 
 class ActionItem(SQLModel, table=True):
     __tablename__ = "action_items"
-    
+
     id: Optional[int] = Field(default=None, primary_key=True)
     meeting_id: str = Field(foreign_key="meetings.id")
     task: str
@@ -74,7 +74,7 @@ class ActionItem(SQLModel, table=True):
 
 class Decision(SQLModel, table=True):
     __tablename__ = "decisions"
-    
+
     id: Optional[int] = Field(default=None, primary_key=True)
     meeting_id: str = Field(foreign_key="meetings.id")
     content: str
@@ -100,26 +100,26 @@ class Meeting(SQLModel, table=True):
 
     #relationships
     transcript: Optional[Transcript] = Relationship(
-        back_populates="meeting", 
+        back_populates="meeting",
         sa_relationship_kwargs={"uselist": False, "cascade": "all, delete-orphan"}
     )
     report: Optional[Report] = Relationship(
-        back_populates="meeting", 
+        back_populates="meeting",
         sa_relationship_kwargs={"uselist": False, "cascade": "all, delete-orphan"}
     )
     sentences: List[Sentence] = Relationship(
-        back_populates="meeting", 
+        back_populates="meeting",
         sa_relationship_kwargs={"cascade": "all, delete-orphan"}
     )
     topics: List[Topic] = Relationship(
-        back_populates="meeting", 
+        back_populates="meeting",
         sa_relationship_kwargs={"cascade": "all, delete-orphan"}
     )
     action_items: List[ActionItem] = Relationship(
-        back_populates="meeting", 
+        back_populates="meeting",
         sa_relationship_kwargs={"cascade": "all, delete-orphan"}
     )
     decisions: List[Decision] = Relationship(
-        back_populates="meeting", 
+        back_populates="meeting",
         sa_relationship_kwargs={"cascade": "all, delete-orphan"}
     )

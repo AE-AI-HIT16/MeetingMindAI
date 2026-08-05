@@ -15,8 +15,8 @@ from pydantic import BaseModel, Field, model_validator
 from sqlmodel import Session
 
 from meetasr.api.dependencies import get_pipeline
-from meetasr.db.connection import engine, get_db
 from meetasr.db import repository
+from meetasr.db.connection import engine, get_db
 from meetasr.schemas import SentenceInfo, TranscriptResult
 
 logger = logging.getLogger(__name__)

@@ -118,6 +118,7 @@ def _load_with_ffmpeg(path: str, target_sr: int) -> np.ndarray:
 def _load_from_bytes(data: bytes, target_sr: int) -> np.ndarray:
     """Load audio from raw bytes."""
     import io
+
     import soundfile as sf
     audio, sr = sf.read(io.BytesIO(data), dtype="float32", always_2d=False)
     return _postprocess(audio, sr, target_sr)
@@ -125,7 +126,6 @@ def _load_from_bytes(data: bytes, target_sr: int) -> np.ndarray:
 
 def _load_from_url(url: str, target_sr: int) -> np.ndarray:
     """Download audio from URL then load."""
-    import io
     import urllib.request
     logging.info(f"Downloading audio from URL: {url}")
     with urllib.request.urlopen(url) as resp:

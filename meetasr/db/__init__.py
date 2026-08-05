@@ -20,10 +20,10 @@ from meetasr.db.models import (
 )
 from meetasr.db.models_phase2 import (
     Document,
-    Job,
-    JobStatus,
-    JobStage,
     DocumentMode,
+    Job,
+    JobStage,
+    JobStatus,
     MediaType,
     Source,
     TranscriptSegment,

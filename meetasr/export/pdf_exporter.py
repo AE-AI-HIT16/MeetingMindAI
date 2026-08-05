@@ -25,7 +25,6 @@ from meetasr.export.service import (
     UnsafeExportResource,
 )
 
-
 PdfTemplateName = Literal["minimal", "blue_modern"]
 
 _PDF_MEDIA_TYPE = "application/pdf"

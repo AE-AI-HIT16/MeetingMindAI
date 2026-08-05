@@ -2,15 +2,14 @@
 
 from datetime import datetime
 from typing import List, Optional
-from pydantic import BaseModel
+
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlmodel import Session
 
-from meetasr.db.connection import get_db
 from meetasr.db import repository
-from meetasr.db.models import (
-    Meeting, Transcript, Report, Sentence, Topic, ActionItem, Decision
-)
+from meetasr.db.connection import get_db
+from meetasr.db.models import ActionItem, Decision, Meeting, Report, Sentence, Topic, Transcript
 
 router = APIRouter(tags=["Database"])
 
@@ -25,7 +24,7 @@ class MeetingReportResponse(BaseModel):
     audio_path: str
     created_at: datetime
     updated_at: datetime
-    
+
     transcript: Optional[Transcript] = None
     sentences: List[Sentence] = []
     report: Optional[Report] = None
@@ -50,7 +49,7 @@ def get_meeting_report(meeting_id: str, db: Session = Depends(get_db)) -> Meetin
     meeting = repository.get_meeting(db, meeting_id)
     if not meeting:
         raise HTTPException(status_code=404, detail="Meeting not found")
-    
+
     return meeting
 
 

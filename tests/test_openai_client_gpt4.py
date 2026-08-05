@@ -2,7 +2,6 @@ from unittest.mock import patch
 
 from meetasr.llm.openai_client import OpenAIClient
 from meetasr.utils.io import read_txt
-from types import SimpleNamespace
 
 
 @patch.object(OpenAIClient, "chat")

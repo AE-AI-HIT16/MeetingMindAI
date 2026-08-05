@@ -9,7 +9,6 @@ from typing import Any
 
 from pydantic import BaseModel
 
-
 EventPayload = dict[str, Any]
 
 

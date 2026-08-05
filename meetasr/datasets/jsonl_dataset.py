@@ -34,10 +34,10 @@ class JSONLDataset(Dataset):
             with open(self.jsonl_path, "r", encoding="utf-8") as f:
                 for line_idx, line in enumerate(f):
                     line = line.strip()
-                    
+
                     if not line:
                         continue
-                        
+
                     try:
                         # Chuyển đổi chuỗi văn bản thành Python Dictionary
                         obj = json.loads(line)
@@ -45,7 +45,7 @@ class JSONLDataset(Dataset):
                     except json.JSONDecodeError as e:
                         # Ghi nhận cảnh báo nếu có dòng lỗi cú pháp thay vì dừng toàn bộ quá trình nạp
                         logger.warning(f"Không thể phân tích cú pháp dòng {line_idx+1} trong {self.jsonl_path}: {e}")
-            
+
             logger.info(f"Đã nạp thành công {len(self.data)} đối tượng JSON từ {self.jsonl_path}")
         except Exception as e:
             logger.error(f"Lỗi khi đọc tệp JSONL {self.jsonl_path}: {e}")

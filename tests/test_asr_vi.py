@@ -24,7 +24,6 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
-from pathlib import Path
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
@@ -33,11 +32,8 @@ SAMPLE_RATE = 16000
 
 def run(asr_model_name: str, audio_path: str) -> None:
     import meetasr  # noqa: F401 — trigger registration of all models
-
     from meetasr.auto.auto_pipeline import AutoPipeline
-    from meetasr.auto.auto_model import AutoModel
     from meetasr.utils.audio import load_audio
-    from meetasr.utils.timestamp import merge_vad_segments, build_sentence_info
 
     # ── Build config cho từng hướng ──
     if asr_model_name == "faster-whisper":
@@ -144,7 +140,7 @@ def run(asr_model_name: str, audio_path: str) -> None:
 
     # ── Tổng kết ──
     print(f"{'='*70}")
-    print(f"  TỔNG KẾT")
+    print("  TỔNG KẾT")
     print(f"{'='*70}")
     print(f"  Số câu          : {len(result.sentence_info)}")
     print(f"  Tổng ký tự (raw): {total_chars_raw}")
@@ -156,7 +152,7 @@ def run(asr_model_name: str, audio_path: str) -> None:
     print(f"  Số speakers     : {len(speakers_found)} {sorted(speakers_found)}")
 
     # ── Kiểm tra tự động ──
-    print(f"\n  CHECK:")
+    print("\n  CHECK:")
 
     ok_text = len(result.sentence_info) > 0
     ok_ts = ts_count_total > 0

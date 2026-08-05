@@ -14,8 +14,8 @@ Cách chạy:
 
 from __future__ import annotations
 
-import sys
 import logging
+import sys
 import time
 
 import numpy as np
@@ -25,11 +25,11 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
 
 # ──────────────────────────────────────────────────────────────────
-# CONFIG 
+# CONFIG
 # ──────────────────────────────────────────────────────────────────
 VAD_MODEL    = "fsmn-vad"
 SPK_MODEL    = "cam++"
-DEVICE       = "cpu"        
+DEVICE       = "cpu"
 HUB          = "ms"         # ModelScope
 SAMPLE_RATE  = 16000
 # ──────────────────────────────────────────────────────────────────

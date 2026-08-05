@@ -8,4 +8,3 @@ def export_markdown(markdown: str, title: str) -> ExportArtifact:
         media_type="text/markdown; charset=utf-8",
         filename=f"{title}.md"
     )
-    

@@ -1,9 +1,12 @@
 """Transcription endpoint — POST /v1/audio/transcriptions."""
 from __future__ import annotations
+
 import logging
+
 from fastapi import APIRouter, Depends, File, Form, UploadFile, status
 from fastapi.responses import JSONResponse, PlainTextResponse
-from meetasr.api.dependencies import get_pipeline, save_upload, safe_remove
+
+from meetasr.api.dependencies import get_pipeline, safe_remove, save_upload
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["ASR"])

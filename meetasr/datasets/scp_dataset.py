@@ -1,10 +1,11 @@
 """Dataset loader SCP cho các tệp wav.scp theo chuẩn Kaldi/FunASR."""
 
 import logging
-from typing import Any, Dict, Iterator, List, Tuple, Optional
+from typing import Any, Dict, Iterator, List, Optional, Tuple
+
 import numpy as np
 
-#thử nạp thư viện PyTorch. 
+#thử nạp thư viện PyTorch.
 # Nếu không có sẵn thì sẽ tự động chuyển sang chế độ dự phòng dùng numpy
 try:
     import torch
@@ -14,7 +15,7 @@ except ImportError:
     Dataset = object
     HAS_TORCH = False
 
-from meetasr.utils.audio import load_audio, SAMPLE_RATE
+from meetasr.utils.audio import SAMPLE_RATE, load_audio
 
 logger = logging.getLogger(__name__)
 
@@ -27,9 +28,9 @@ class SCPDataset(Dataset):
     """
 
     def __init__(
-        self, 
-        scp_path: str, 
-        target_sr: int = SAMPLE_RATE, 
+        self,
+        scp_path: str,
+        target_sr: int = SAMPLE_RATE,
         frontend: Optional[Any] = None
     ):
         """Khởi tạo đối tượng SCPDataset.
@@ -53,16 +54,16 @@ class SCPDataset(Dataset):
                 for line in f:
                     # Loại bỏ khoảng trắng thừa hoặc ký tự xuống dòng
                     line = line.strip()
-                    
+
                     # Bỏ qua các dòng trống rỗng
                     if not line:
                         continue
-                        
+
                     # Tách dòng thành 2 phần: Mã ID và Đường dẫn (chỉ cắt ở khoảng trắng đầu tiên)
                     parts = line.split(maxsplit=1)
                     if len(parts) == 2:
                         self.data.append((parts[0], parts[1]))
-                        
+
             logger.info(f"Đã nạp thành công {len(self.data)} bản ghi từ {self.scp_path}")
         except Exception as e:
             logger.error(f"Lỗi khi đọc tệp scp {self.scp_path}: {e}")
@@ -85,13 +86,13 @@ class SCPDataset(Dataset):
         try:
             # Tải âm thanh và tự động ép về tần số lấy mẫu mục tiêu (16kHz)
             waveform = load_audio(audio_path, target_sr=self.target_sr)
-            
+
             # Nếu có bộ tiền xử lý (frontend), thực hiện trích xuất đặc trưng ngay lập tức
             if self.frontend is not None:
                 speech = self.frontend.forward(waveform)
             else:
                 speech = waveform
-                
+
         except Exception as e:
             # Ghi nhận lỗi nhưng không làm sập luồng, trả về mảng rỗng để tiếp tục xử lý
             logger.warning(f"Không thể tải tệp âm thanh {audio_path} cho ID {utt_id}: {e}")
@@ -117,14 +118,14 @@ def collate_fn_speech(batch: List[Dict[str, Any]]) -> Dict[str, Any]:
     Hỗ trợ linh hoạt cả PyTorch và NumPy (nếu PyTorch không được cài đặt).
     """
     keys = [item["key"] for item in batch]
-    
+
     if HAS_TORCH:
 
         # Triển khai bằng PyTorch (Tối ưu cho việc huấn luyện GPU)
         speeches = [torch.tensor(item["speech"]) for item in batch]
         # Ghi nhận lại độ dài thực tế của từng chuỗi trước khi padding
         lengths = torch.tensor([s.size(0) for s in speeches], dtype=torch.int32)
-        
+
         # Hàm pad_sequence sẽ tự động đệm số 0 vào các tensor ngắn
         padded_speeches = torch.nn.utils.rnn.pad_sequence(
             speeches, batch_first=True, padding_value=0.0
@@ -136,11 +137,11 @@ def collate_fn_speech(batch: List[Dict[str, Any]]) -> Dict[str, Any]:
         }
     else:
         # Triển khai dự phòng bằng NumPy (Dành cho môi trường API)
-        
+
         speeches = [item["speech"] for item in batch]
         lengths = np.array([s.shape[0] for s in speeches], dtype=np.int32)
         max_len = lengths.max()
-        
+
         # Xác định hình dạng mảng: 1D cho âm thanh thô, 2D cho đặc trưng Fbank
         if speeches[0].ndim == 1:
             padded_speeches = np.zeros((len(batch), max_len), dtype=np.float32)
@@ -151,7 +152,7 @@ def collate_fn_speech(batch: List[Dict[str, Any]]) -> Dict[str, Any]:
             padded_speeches = np.zeros((len(batch), max_len, feat_dim), dtype=np.float32)
             for i, s in enumerate(speeches):
                 padded_speeches[i, :s.shape[0], :] = s
-                
+
         return {
             "keys": keys,
             "speech": padded_speeches,

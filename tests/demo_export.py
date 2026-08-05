@@ -6,7 +6,6 @@ from meetasr.export import create_export_service
 from meetasr.export.docx_exporter import DocxTemplateName, export_docx
 from meetasr.export.pdf_exporter import PdfTemplateName, export_pdf
 
-
 markdown = (
     Path(__file__).resolve().parent
     / "data"

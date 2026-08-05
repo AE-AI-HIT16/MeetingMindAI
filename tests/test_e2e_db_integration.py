@@ -5,7 +5,7 @@ from typing import Any
 from unittest.mock import MagicMock
 
 from fastapi.testclient import TestClient
-from sqlmodel import SQLModel, Session, create_engine
+from sqlmodel import Session, SQLModel, create_engine
 
 from meetasr.api.app import app
 from meetasr.api.dependencies import get_pipeline
