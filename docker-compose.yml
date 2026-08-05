@@ -5,9 +5,7 @@ services:
   # BACKEND
   # =========================
   meetasr_backend:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: khanhsayhi/meetasr-backend:latest
 
     container_name: meetasr_backend
 
@@ -71,6 +69,7 @@ services:
               count: all
               capabilities: [gpu]
 
+
   # =========================
   # POSTGRESQL
   # =========================
@@ -98,6 +97,7 @@ services:
       timeout: 5s
       retries: 5
 
+
   # =========================
   # MINIO
   # =========================
@@ -120,6 +120,7 @@ services:
 
     volumes:
       - minio_data:/data
+
 
 volumes:
   postgres_data:
