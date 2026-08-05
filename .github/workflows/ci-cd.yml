@@ -38,6 +38,39 @@ jobs:
         run: |
           pytest
 
+      - name: Free disk space
+        run: |
+          echo "========== BEFORE CLEANUP =========="
+          df -h
+
+          echo "Cleaning Docker..."
+          docker system prune -af --volumes || true
+          docker builder prune -af || true
+
+          echo "Cleaning pip cache..."
+          pip cache purge || true
+
+          echo "Cleaning apt cache..."
+          sudo apt-get clean
+          sudo rm -rf /var/lib/apt/lists/*
+
+          echo "Removing unused SDKs..."
+
+          # ~8-10GB
+          sudo rm -rf /usr/share/dotnet
+
+          # ~2-3GB
+          sudo rm -rf /opt/ghc
+
+          # ~6-12GB
+          sudo rm -rf /usr/local/lib/android
+
+          # ~2GB
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+
+          echo "========== AFTER CLEANUP =========="
+          df -h
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -55,9 +88,8 @@ jobs:
 
           push: true
 
+          no-cache: true
+
           tags: |
             ${{ env.IMAGE_NAME }}:latest
             ${{ env.IMAGE_NAME }}:${{ github.sha }}
-
-          cache-from: type=gha
-          cache-to: type=gha,mode=max

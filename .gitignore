@@ -25,8 +25,6 @@ env/
 # Môi trường và Cấu hình cá nhân
 .env
 .env.local
-meeting_config.yaml
-meeting_config.*.yaml
 !meeting_config.example.yaml
 
 # IDEs / Editors
