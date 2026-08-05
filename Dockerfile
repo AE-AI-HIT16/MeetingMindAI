@@ -30,7 +30,7 @@ COPY meetasr ./meetasr
 # Install project
 # =========================
 RUN pip install --upgrade pip setuptools wheel && \
-    pip install .
+    pip install --no-cache-dir . --extra-index-url https://download.pytorch.org/whl/cpu
 
 # =========================
 # Expose API

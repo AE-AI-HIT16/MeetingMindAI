@@ -41,32 +41,32 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-          cache: 'pip'
-          cache-dependency-path: 'pyproject.toml'
+          cache: pip
+          cache-dependency-path: pyproject.toml
 
 
 
       # =========================
-      # Install system dependencies
+      # System dependencies
       # =========================
 
       - name: Install FFmpeg
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg
+          sudo apt-get install -y --no-install-recommends ffmpeg
+          sudo rm -rf /var/lib/apt/lists/*
 
 
 
       # =========================
-      # Install Python dependencies
+      # Install dependencies
       # =========================
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip setuptools wheel
-          # Install CPU-only torch & torchaudio to prevent downloading heavy CUDA/NVIDIA runtimes (e.g. cuBLAS, cuDNN, NCCL, Triton)
-          pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
-          pip install ".[dev,export,s3]"
+
+          pip install --no-cache-dir ".[dev,export,s3]"
 
 
 
@@ -77,6 +77,24 @@ jobs:
       - name: Run tests
         run: |
           pytest
+
+
+
+      # =========================
+      # Cleanup before docker build
+      # =========================
+
+      - name: Cleanup runner disk
+        run: |
+          echo "===== DISK BEFORE ====="
+          df -h
+
+          docker system prune -af || true
+
+          pip cache purge || true
+
+          echo "===== DISK AFTER ====="
+          df -h
 
 
 
@@ -105,13 +123,12 @@ jobs:
         uses: docker/build-push-action@v6
 
         with:
-
           context: .
-
           file: ./Dockerfile
 
           push: true
 
+          # Không dùng docker layer cache
           no-cache: true
 
           tags: |
@@ -155,43 +172,25 @@ jobs:
             set -e
 
 
-            echo "========== BASIC INFO =========="
+            echo "========== SERVER INFO =========="
 
             whoami
             hostname
-            pwd
-
-
-
-            echo "========== SERVER INFO =========="
-
             uname -a
             df -h
 
 
 
-            echo "========== CHECK DOCKER =========="
+            echo "========== DOCKER INFO =========="
 
             docker --version
             docker compose version
 
 
 
-            echo "========== DOCKER SERVICE =========="
-
-            sudo systemctl status docker --no-pager || true
-
-
-
-            echo "========== MOVE TO PROJECT =========="
+            echo "========== MOVE PROJECT =========="
 
             cd /home/ubuntu/Backend
-
-
-
-            echo "========== PROJECT FILES =========="
-
-            ls -la
 
 
 
@@ -201,7 +200,7 @@ jobs:
 
 
 
-            echo "========== PULL NEW IMAGE =========="
+            echo "========== PULL IMAGE =========="
 
             docker compose pull meetasr_backend
 
@@ -213,13 +212,13 @@ jobs:
 
 
 
-            echo "========== CONTAINER STATUS =========="
+            echo "========== STATUS =========="
 
             docker ps -a
 
 
 
-            echo "========== CONTAINER LOG =========="
+            echo "========== LOG =========="
 
             docker logs --tail=100 meetasr_backend || true
 
