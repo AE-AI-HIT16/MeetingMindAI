@@ -5,17 +5,23 @@ on:
     branches:
       - develop
 
+  workflow_dispatch:
+
 env:
   IMAGE_NAME: khanhsayhi/meetasr-backend
 
+
 jobs:
+
   test-build-push:
+
     runs-on: ubuntu-latest
 
     permissions:
       contents: read
 
     steps:
+
       - name: Checkout source
         uses: actions/checkout@v4
 
@@ -48,29 +54,17 @@ jobs:
           echo "========== BEFORE CLEANUP =========="
           df -h
 
-          echo "Cleaning Docker..."
           docker system prune -af --volumes || true
           docker builder prune -af || true
 
-          echo "Cleaning pip cache..."
           pip cache purge || true
 
-          echo "Cleaning apt cache..."
           sudo apt-get clean
           sudo rm -rf /var/lib/apt/lists/*
 
-          echo "Removing unused SDKs..."
-
-          # ~8-10GB
           sudo rm -rf /usr/share/dotnet
-
-          # ~2-3GB
           sudo rm -rf /opt/ghc
-
-          # ~6-12GB
           sudo rm -rf /usr/local/lib/android
-
-          # ~2GB
           sudo rm -rf /opt/hostedtoolcache/CodeQL
 
           echo "========== AFTER CLEANUP =========="
@@ -103,21 +97,129 @@ jobs:
             ${{ env.IMAGE_NAME }}:${{ github.sha }}
 
 
+      # Kiểm tra image vừa push có pull được không
+      - name: Verify Docker image
+        run: |
+          docker pull ${{ env.IMAGE_NAME }}:latest
+
+
       # =========================
       # CD - Deploy to EC2
       # =========================
+
       - name: Deploy to EC2
-        uses: appleboy/ssh-action@v1.0.3
+        uses: appleboy/ssh-action@v1
+
         with:
+
           host: ${{ secrets.EC2_HOST }}
+
           username: ${{ secrets.EC2_USERNAME }}
+
           key: ${{ secrets.EC2_SSH_KEY }}
 
+          timeout: 60s
+
+          command_timeout: 15m
+
+
           script: |
-            cd Backend
+
+            set -e
+
+
+            echo "========== BASIC INFO =========="
+
+            whoami
+
+            hostname
+
+            pwd
+
+
+
+            echo "========== SERVER INFO =========="
+
+            uname -a
+
+            df -h
+
+
+
+            echo "========== CHECK HOME =========="
+
+            ls -la /home/ubuntu
+
+
+
+            echo "========== CHECK BACKEND DIRECTORY =========="
+
+            ls -la /home/ubuntu/Backend
+
+
+
+            echo "========== CHECK DOCKER =========="
+
+            docker --version
+
+            docker compose version
+
+
+
+            echo "========== DOCKER SERVICE =========="
+
+            sudo systemctl status docker --no-pager || true
+
+
+
+            echo "========== MOVE TO PROJECT =========="
+
+            cd /home/ubuntu/Backend
+
+
+
+            echo "========== LIST PROJECT FILES =========="
+
+            ls -la
+
+
+
+            echo "========== SHOW COMPOSE FILE =========="
+
+            cat docker-compose.yml
+
+
+
+            echo "========== VALIDATE COMPOSE =========="
+
+            docker compose config
+
+
+
+            echo "========== PULL IMAGE =========="
 
             docker compose pull meetasr_backend
 
+
+
+            echo "========== START SERVICE =========="
+
             docker compose up -d meetasr_backend
+
+
+
+            echo "========== CONTAINER STATUS =========="
+
+            docker ps -a
+
+
+
+            echo "========== CONTAINER LOG =========="
+
+            docker logs --tail=100 meetasr_backend || true
+
+
+
+            echo "========== CLEAN UNUSED IMAGE =========="
 
             docker image prune -f
