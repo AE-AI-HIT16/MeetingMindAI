@@ -56,11 +56,20 @@ def _configure_windows_cuda_runtime() -> None:
             root = str(Path(site_package) / "nvidia")
 
         for package in ("cublas", "cudnn", "cuda_nvrtc"):
-            dll_directory = os.path.join(
-                root,
-                package,
-                "bin",
-            )
+            if os.name == "nt":
+                dll_directory = str(
+                    PureWindowsPath(site_package)
+                    / "nvidia"
+                    / package
+                    / "bin"
+                )
+            else:
+                dll_directory = str(
+                    Path(site_package)
+                    / "nvidia"
+                    / package
+                    / "bin"
+                )
 
             if os.path.isdir(dll_directory):
                 dll_paths.append(dll_directory)
