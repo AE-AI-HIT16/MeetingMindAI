@@ -1,23 +1,71 @@
-.venv
+# =========================
+# Git & IDE
+# =========================
 .git
+.gitignore
 .idea
-.pytest_cache
+.vscode
+.ruff_cache
+
+# =========================
+# Python cache
+# =========================
+.venv
 __pycache__
 *.pyc
 *.pyo
-
-frontend-next
-tests
-build
+*.pyd
+.pytest_cache
+*.egg-info
 meetasr.egg-info
-meet_docs
-data
 
+# =========================
+# Build artifacts
+# =========================
 build
+dist
 
+# =========================
+# Frontend (container riêng)
+# =========================
+frontend-next
+
+# =========================
+# Test & dev files
+# =========================
+tests
+docs
+scripts
+meet_docs
+*.m4a
+*.wav
+*.mp3
+*.mp4
+
+# =========================
+# Database local
+# =========================
+*.db
+
+# =========================
+# Model cache — RẤT NẶNG (~5GB+)
+# Được mount vào container qua Docker volume khi chạy
+# KHÔNG bao giờ bake vào image
+# =========================
+model_cache/
+
+# =========================
+# Data & media
+# =========================
+data/
+
+# =========================
+# Secrets — KHÔNG BAO GIỜ vào image
+# =========================
 .env
 .env.*
 
-data
-
-*.db
+# =========================
+# Config local (chứa secret, dùng volume mount khi chạy)
+# =========================
+meeting_config.yaml

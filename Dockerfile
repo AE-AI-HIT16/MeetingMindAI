@@ -16,6 +16,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     git \
     build-essential \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # =========================
@@ -23,7 +24,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # =========================
 COPY pyproject.toml .
 COPY README.md .
-COPY meeting_config.yaml .
 COPY meetasr ./meetasr
 
 # =========================
@@ -36,6 +36,16 @@ RUN pip install --upgrade pip setuptools wheel && \
 # Expose API
 # =========================
 EXPOSE 8000
+
+# =========================
+# Health check
+# =========================
+# interval: hỏi mỗi 30 giây
+# timeout: chờ tối đa 10 giây
+# start-period: chờ 2 phút sau khởi động (load model AI mất thời gian)
+# retries: fail 3 lần liên tiếp mới báo "unhealthy"
+HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
+    CMD curl -f http://localhost:8000/v1/health || exit 1
 
 # =========================
 # Start server

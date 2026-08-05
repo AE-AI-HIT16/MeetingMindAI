@@ -150,6 +150,10 @@ class AutoPipeline:
             key_val = client_kwargs["api_key"]
             if isinstance(key_val, str) and key_val.startswith("${"):
                 client_kwargs["api_key"] = os.environ.get(key_val[2:-1], "")
+        # Ưu tiên GROQ_API_KEYS (nhiều key, cách nhau dấu phẩy) hơn api_key đơn lẻ
+        multi_keys = os.environ.get("GROQ_API_KEYS", "").strip()
+        if multi_keys:
+            client_kwargs["api_key"] = multi_keys
 
         client = llm_class(**client_kwargs)
         return DocumentPlanner(
@@ -187,6 +191,10 @@ class AutoPipeline:
             if isinstance(key_val, str) and key_val.startswith("${"):
                 env_name = key_val[2:-1]
                 client_kwargs["api_key"] = os.environ.get(env_name, "")
+        # Ưu tiên GROQ_API_KEYS (nhiều key, cách nhau dấu phẩy) hơn api_key đơn lẻ
+        multi_keys = os.environ.get("GROQ_API_KEYS", "").strip()
+        if multi_keys:
+            client_kwargs["api_key"] = multi_keys
 
         client = llm_class(**client_kwargs)
 

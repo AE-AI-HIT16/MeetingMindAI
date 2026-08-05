@@ -222,10 +222,19 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Allow all origins for local dev — restrict origins on production
+# Đọc danh sách origin được phép từ env var ALLOWED_ORIGINS (phân cách bằng dấu phẩy)
+# Local dev: để trống → mở hết (*)
+# Production: ALLOWED_ORIGINS=https://your-frontend.com,https://other.com
+_raw_origins = os.environ.get("ALLOWED_ORIGINS", "").strip()
+_allowed_origins: list[str] = (
+    [o.strip() for o in _raw_origins.split(",") if o.strip()]
+    if _raw_origins
+    else ["*"]
+)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # TODO: restrict to actual domain on production
+    allow_origins=_allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
