@@ -7,6 +7,7 @@ on:
 
   workflow_dispatch:
 
+
 env:
   IMAGE_NAME: khanhsayhi/meetasr-backend
 
@@ -20,11 +21,21 @@ jobs:
     permissions:
       contents: read
 
+
     steps:
+
+      # =========================
+      # Checkout
+      # =========================
 
       - name: Checkout source
         uses: actions/checkout@v4
 
+
+
+      # =========================
+      # Python setup
+      # =========================
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -32,11 +43,21 @@ jobs:
           python-version: "3.12"
 
 
+
+      # =========================
+      # Install system dependencies
+      # =========================
+
       - name: Install FFmpeg
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg
 
+
+
+      # =========================
+      # Install Python dependencies
+      # =========================
 
       - name: Install dependencies
         run: |
@@ -44,35 +65,24 @@ jobs:
           pip install ".[dev,export,s3]"
 
 
+
+      # =========================
+      # Test
+      # =========================
+
       - name: Run tests
         run: |
           pytest
 
 
-      - name: Free disk space
-        run: |
-          echo "========== BEFORE CLEANUP =========="
-          df -h
 
-          docker system prune -af --volumes || true
-          docker builder prune -af || true
-
-          pip cache purge || true
-
-          sudo apt-get clean
-          sudo rm -rf /var/lib/apt/lists/*
-
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /opt/ghc
-          sudo rm -rf /usr/local/lib/android
-          sudo rm -rf /opt/hostedtoolcache/CodeQL
-
-          echo "========== AFTER CLEANUP =========="
-          df -h
-
+      # =========================
+      # Docker
+      # =========================
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+
 
 
       - name: Login to Docker Hub
@@ -82,10 +92,18 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
 
+
+      # =========================
+      # Build and push
+      # =========================
+
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
+
         with:
+
           context: .
+
           file: ./Dockerfile
 
           push: true
@@ -97,14 +115,19 @@ jobs:
             ${{ env.IMAGE_NAME }}:${{ github.sha }}
 
 
-      # Kiểm tra image vừa push có pull được không
+
+      # =========================
+      # Verify image
+      # =========================
+
       - name: Verify Docker image
         run: |
           docker pull ${{ env.IMAGE_NAME }}:latest
 
 
+
       # =========================
-      # CD - Deploy to EC2
+      # Deploy EC2
       # =========================
 
       - name: Deploy to EC2
@@ -131,9 +154,7 @@ jobs:
             echo "========== BASIC INFO =========="
 
             whoami
-
             hostname
-
             pwd
 
 
@@ -141,27 +162,13 @@ jobs:
             echo "========== SERVER INFO =========="
 
             uname -a
-
             df -h
-
-
-
-            echo "========== CHECK HOME =========="
-
-            ls -la /home/ubuntu
-
-
-
-            echo "========== CHECK BACKEND DIRECTORY =========="
-
-            ls -la /home/ubuntu/Backend
 
 
 
             echo "========== CHECK DOCKER =========="
 
             docker --version
-
             docker compose version
 
 
@@ -178,31 +185,25 @@ jobs:
 
 
 
-            echo "========== LIST PROJECT FILES =========="
+            echo "========== PROJECT FILES =========="
 
             ls -la
 
 
 
-            echo "========== SHOW COMPOSE FILE =========="
-
-            cat docker-compose.yml
-
-
-
-            echo "========== VALIDATE COMPOSE =========="
+            echo "========== COMPOSE CONFIG =========="
 
             docker compose config
 
 
 
-            echo "========== PULL IMAGE =========="
+            echo "========== PULL NEW IMAGE =========="
 
             docker compose pull meetasr_backend
 
 
 
-            echo "========== START SERVICE =========="
+            echo "========== RESTART SERVICE =========="
 
             docker compose up -d meetasr_backend
 
@@ -220,6 +221,6 @@ jobs:
 
 
 
-            echo "========== CLEAN UNUSED IMAGE =========="
+            echo "========== CLEAN OLD IMAGES =========="
 
-            docker image prune -f
+            docker image prune -af
