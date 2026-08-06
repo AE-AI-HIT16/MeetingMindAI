@@ -1,12 +1,13 @@
 [build-system]
 requires = ["setuptools>=68", "wheel"]
-build-backend = "setuptools.backends.legacy:build"
+#build-backend = "setuptools.backends.legacy:build"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "meetasr"
 version = "0.1.0"
 description = "Meeting Speech Recognition + LLM Summarization — rebuilt from FunASR"
-readme = "README_meetasr.md"
+readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [{ name = "MeetASR Contributors" }]
@@ -15,16 +16,17 @@ keywords = ["speech-recognition", "asr", "meeting", "llm", "summarization", "spe
 dependencies = [
     # Audio
     "torch>=2.0",
-    "torchaudio",
     "librosa",
     "soundfile>=0.12.1",
     "numpy",
     "scipy>=1.4.1",
     # Config
     "omegaconf>=2.0",
-    # Model download
+    # Model download & Utilities
     "modelscope",
     "huggingface_hub",
+    "filelock",
+    "python-dotenv",
     # ASR tokenizers
     "transformers",
     "sentencepiece",
@@ -33,16 +35,31 @@ dependencies = [
     "uvicorn[standard]",
     "python-multipart",
     "pydantic>=2.0",
+    # Database
+    "sqlmodel>=0.0.14",
+    "sqlalchemy",
     # LLM
     "openai>=1.0",
     # FunASR (for model weight reuse)
     "funasr",
+    # Production multilingual ASR backend
+    "faster-whisper>=1.2,<2",
+    # Vietnamese ASR backend
+    "sherpa-onnx",
+    # Speaker clustering (3D-Speaker port)
+    "fastcluster>=1.2.6",
+    "scikit-learn",
+    # NLP & Embeddings
+    "sentence-transformers",
+    "tiktoken",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0",
+    "pytest-asyncio",
     "pytest-cov",
+    "httpx",
     "black",
     "isort",
     "ruff",

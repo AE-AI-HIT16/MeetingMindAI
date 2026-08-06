@@ -1,0 +1,75 @@
+.venv/
+# Python / Cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+*.egg-info/
+build/
+dist/
+/models/
+
+.idea/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Môi trường ảo (Virtual Environments)
+venv/
+env/
+.env/
+.venv/
+09_llm_docs_summary.md
+
+# Môi trường và Cấu hình cá nhân
+.env
+.env.local
+!meeting_config.example.yaml
+
+# IDEs / Editors
+.vscode/
+*.swp
+*.swo
+
+# AI / Machine Learning Models (Tránh push nhầm model nặng lên GitHub)
+*.pt
+*.onnx
+*.safetensors
+/models/
+/checkpoints/
+
+# OS generated files
+.DS_Store
+Thumbs.db
+*.db
+
+# File âm thanh / upload test / outputs
+*.wav
+*.mp3
+*.m4a
+*.flac
+temp/
+tmp/
+output/
+reports/
+
+FunASR/
+
+__pycache__/
+*.pyc
+
+debug_audio/
+test_fe.html
+frontend-next/.pnpm-store/
+
+.pnpm-store/
+
+# Environment files � chua credentials, TUYET DOI khong commit
+.env
+.env.local
+.env.*.local
+*.env
+
+node_modules/
+package-lock.json

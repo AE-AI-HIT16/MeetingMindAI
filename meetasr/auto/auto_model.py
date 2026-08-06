@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 from meetasr.register import tables
 from meetasr.utils.download import download_model as _download
@@ -16,7 +15,7 @@ class AutoModel:
     looks up the model class in the registry, and returns an instance.
 
     Example:
-        >>> vad = AutoModel(model="fsmn-vad", device="cpu")
+        >>> vad = AutoModel(model="silero-vad", device="cpu")
         >>> asr = AutoModel(model="sensevoice-small", device="cuda:0")
         >>> asr.recognize("audio.wav")
     """
@@ -25,7 +24,7 @@ class AutoModel:
         """Build and return the model instance (not an AutoModel wrapper).
 
         Args:
-            model: Model name (e.g. "fsmn-vad") or full ID or local path.
+            model: Model name (e.g. "silero-vad") or full ID or local path.
             hub: "ms" (ModelScope) or "hf" (HuggingFace).
             device: Torch device string.
             **kwargs: Config overrides (merged with config.yaml values).
@@ -41,6 +40,9 @@ class AutoModel:
         config["device"] = device
 
         model_key = config.get("model", model)
+        if model_key not in tables.model_classes:
+            model_key = model
+
         model_class = tables.model_classes.get(model_key)
 
         if model_class is None:

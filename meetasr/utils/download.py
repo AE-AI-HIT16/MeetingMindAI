@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import os
-from pathlib import Path
 from typing import Any
 
 from omegaconf import OmegaConf
@@ -30,8 +29,20 @@ def download_model(
     Raises:
         RuntimeError: If model cannot be found or downloaded.
     """
+    # Some wrappers ship versioned assets inside their Python dependency and
+    # must not be looked up on ModelScope/HuggingFace.
+    if model in _PACKAGE_MODELS and not os.path.isdir(model):
+        return {
+            "model": model,
+            "model_path": "",
+            "hub": "package",
+        }
+
     model_path = _resolve_model_path(model, hub, model_revision)
-    config = _load_config(model_path)
+    try:
+        config = _load_config(model_path)
+    except FileNotFoundError:
+        config = {"model": model}
     config["model_path"] = model_path
     config["hub"] = hub
     return config
@@ -48,8 +59,10 @@ def _resolve_model_path(model: str, hub: str, revision: str) -> str:
         return _download_from_modelscope(model, revision)
     elif hub == "hf":
         return _download_from_huggingface(model, revision)
+    elif hub == "none" or not hub:
+        return model
     else:
-        raise ValueError(f"Unknown hub '{hub}'. Expected 'ms' or 'hf'.")
+        raise ValueError(f"Unknown hub '{hub}'. Expected 'ms', 'hf', or 'none'.")
 
 
 def _download_from_modelscope(model_id: str, revision: str) -> str:
@@ -73,8 +86,10 @@ def _download_from_huggingface(model_id: str, revision: str) -> str:
     try:
         from huggingface_hub import snapshot_download
         model_id = _resolve_model_alias(model_id, hub="hf")
-        logging.info(f"Downloading '{model_id}' from HuggingFace (revision={revision})")
-        return snapshot_download(model_id, revision=revision)
+        # HuggingFace defaults to 'main', while ModelScope uses 'master'
+        hf_revision = "main" if revision == "master" else revision
+        logging.info(f"Downloading '{model_id}' from HuggingFace (revision={hf_revision})")
+        return snapshot_download(model_id, revision=hf_revision)
     except ImportError:
         raise RuntimeError(
             "huggingface_hub is not installed. Run: pip install huggingface_hub"
@@ -95,9 +110,11 @@ def _load_config(model_path: str) -> dict:
 
 
 # Shorthand aliases — same as FunASR for compatibility
+_PACKAGE_MODELS = frozenset({"silero-vad"})
+
 _MS_ALIASES = {
     "fsmn-vad": "damo/speech_fsmn_vad_zh-cn-16k-common-pytorch",
-    "ct-punc": "damo/punc_ct-transformer_cn-en-common-vocab471067-large",
+    "ct-punc": "iic/punc_ct-transformer_cn-en-common-vocab471067-large",
     "cam++": "iic/speech_campplus_sv_zh-cn_16k-common",
     "paraformer-zh": "damo/speech_paraformer-large-vad-punc_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
     "paraformer-zh-streaming": "damo/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-online",
@@ -110,6 +127,9 @@ _HF_ALIASES = {
     "cam++": "funasr/campplus",
     "paraformer-zh": "funasr/paraformer-zh",
     "sensevoice-small": "FunAudioLLM/SenseVoiceSmall",
+    "zipformer-vi": "hynt/Zipformer-30M-RNNT-6000h",
+    "vibert-capu": "dragonSwing/vibert-capu",
+    "qwen3-asr": "Qwen/Qwen3-ASR-1.7B",
 }
 
 
