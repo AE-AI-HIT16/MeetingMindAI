@@ -21,18 +21,9 @@ export interface JobEventsState {
 }
 
 async function jobEventsUrl(jobId: string): Promise<string> {
-  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  try {
-    const res = await fetch("/api/ws-info");
-    const data = await res.json();
-    if (data.host && data.token) {
-      return `wss://${data.host}/v1/jobs/${jobId}/events?api_key=${data.token}`;
-    }
-  } catch (e) {
-    // Fallback
-  }
-  const host = process.env.NEXT_PUBLIC_WS_HOST ?? "127.0.0.1:8000";
-  return `${protocol}//${host}/v1/jobs/${jobId}/events`;
+  const apiBase = process.env.NEXT_PUBLIC_MEETASR_API || process.env.MEETASR_API || "http://127.0.0.1:8000";
+  const wsBase = apiBase.replace(/^http/, "ws");
+  return `${wsBase}/v1/jobs/${jobId}/events`;
 }
 
 export function useJobEvents(jobId: string | null): JobEventsState {

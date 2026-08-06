@@ -54,20 +54,15 @@ export interface RealtimeStreamActions {
 // Constants
 // ----------------------------------------------------------------
 
-/** Build the WebSocket URL based on the current page location. */
+/** Build the WebSocket URL based on the unified API base URL. */
 async function buildWsUrl(): Promise<string> {
-  const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-  try {
-    const res = await fetch("/api/ws-info");
-    const data = await res.json();
-    if (data.host && data.token) {
-      return `wss://${data.host}/v1/realtime/stream?api_key=${data.token}`;
-    }
-  } catch (e) {
-    // Fallback
-  }
-  const host = process.env.NEXT_PUBLIC_WS_HOST ?? "127.0.0.1:8000";
-  return `${proto}//${host}/v1/realtime/stream`;
+  // Use the same environment variable as the REST API to ensure they always point to the same backend.
+  const apiBase = process.env.NEXT_PUBLIC_MEETASR_API || process.env.MEETASR_API || "http://127.0.0.1:8000";
+  
+  // Convert http/https to ws/wss
+  const wsBase = apiBase.replace(/^http/, "ws");
+  
+  return `${wsBase}/v1/realtime/stream`;
 }
 
 // ----------------------------------------------------------------
