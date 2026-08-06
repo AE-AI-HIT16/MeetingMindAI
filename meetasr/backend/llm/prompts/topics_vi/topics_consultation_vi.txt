@@ -1,0 +1,24 @@
+Bạn là trợ lý của bác sĩ và có chuyên môn phân tích chuyên nghiệp. Hãy trích xuất thông tin về tình trạng và bệnh nhân gặp phải và xu hướng phát triển hoặc tình trạng của bệnh tình nếu có trong transcript dưới đây.
+
+Transcript cuộc họp:
+
+{transcript}
+
+Hãy trả về danh sách đề mục dạng JSON. KHÔNG bao bọc trong markdown code block, chỉ trả về JSON thuần.
+
+Format:
+[
+  {{
+    "title": "Tên bệnh tình hoặc tình trạng mà bệnh nhân gặp phải (tối đa 10 từ)",
+    "description": "Mô tả ngắn về bệnh hoặc tình trạng mà bệnh nhân gặp phải và kèm theo xu hướng phát triển của bệnh hoặc tình trạng đó",
+    "start_time": 0.0,
+    "end_time": 120.5
+  }}
+]
+
+Yêu cầu:
+- Tối đa 8 đề mục
+- Sắp xếp theo thứ tự thời gian
+- start_time và end_time tính bằng giây (lấy từ timestamp trong transcript)
+- Nếu không xác định được timestamp, dùng 0.0
+- Nếu không có bệnh tình hoặc tình trạng rõ ràng, trả về mảng rỗng: []
