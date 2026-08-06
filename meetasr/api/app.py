@@ -70,9 +70,6 @@ async def lifespan(app: FastAPI):
 
     app.state.asr_service = None
     app.state.realtime_asr_service = None
-    app.state.final_transcript_queue = None
-    app.state.final_transcript_worker = None
-    app.state.final_transcript_task = None
 
     init_db()
     logger.info("Database tables initialized.")
@@ -121,44 +118,11 @@ async def lifespan(app: FastAPI):
         logger.info("Full ASR pipeline ready.")
         logger.info("Realtime ASR pipeline ready.")
 
-        # ----------------------------------------------------------
-        # Final transcript worker
-        # ----------------------------------------------------------
-
-        app.state.final_transcript_queue = FinalTranscriptQueue()
-
-        app.state.final_transcript_worker = FinalTranscriptWorker(
-            queue=app.state.final_transcript_queue,
-            pipeline=pipeline,
-        )
-
-        app.state.final_transcript_task = asyncio.create_task(
-            app.state.final_transcript_worker.run()
-        )
-
-        logger.info("Final transcript worker started.")
-
     else:
         logger.warning(
             f"Config '{CONFIG_PATH}' not found. "
             "Server starts without pipeline."
         )
-
-    # --------------------------------------------------------------
-    # Start background workers
-    # --------------------------------------------------------------
-    await job_queue.start(
-        app.state.asr_service,
-        sources.get_storage_backend(),
-    )
-
-    await document_generation_queue.start(
-        getattr(
-            app.state.pipeline,
-            "doc_planner",
-            None,
-        )
-    )
 
     print(logger.level)
     print(logger.getEffectiveLevel())
@@ -172,9 +136,6 @@ async def lifespan(app: FastAPI):
         "Shutting down... Cleaning up ML models and freeing VRAM."
     )
 
-    await document_generation_queue.stop()
-    await job_queue.stop()
-
     set_pipeline(None)
 
     app.state.asr_service = None
@@ -182,28 +143,6 @@ async def lifespan(app: FastAPI):
 
     app.state.pipeline = None
     app.state.realtime_pipeline = None
-
-    # --------------------------------------------------------------
-    # Stop final transcript worker
-    # --------------------------------------------------------------
-
-    if app.state.final_transcript_task:
-
-        app.state.final_transcript_task.cancel()
-
-        try:
-
-            await app.state.final_transcript_task
-
-        except asyncio.CancelledError:
-            pass
-
-    if app.state.final_transcript_queue:
-        await app.state.final_transcript_queue.clear()
-
-    app.state.final_transcript_worker = None
-    app.state.final_transcript_queue = None
-    app.state.final_transcript_task = None
 
 # Set log cho api realtime
 

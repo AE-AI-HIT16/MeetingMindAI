@@ -27,10 +27,11 @@ COPY meeting_config.yaml .
 COPY meetasr ./meetasr
 
 # =========================
-# Install project
+# Install project & cache weights
 # =========================
 RUN pip install --upgrade pip setuptools wheel && \
-    pip install --no-cache-dir . --extra-index-url https://download.pytorch.org/whl/cpu
+    pip install --no-cache-dir . --extra-index-url https://download.pytorch.org/whl/cpu && \
+    python -c "from meetasr.auto.auto_pipeline import AutoPipeline; import os; os.environ['GROQ_API_KEY']='dummy'; AutoPipeline.from_yaml('meeting_config.yaml')"
 
 # =========================
 # Expose API
@@ -41,9 +42,9 @@ EXPOSE 8000
 # Health check
 # =========================
 HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/v1/health')" || exit 1
+    CMD python -c "import urllib.request, os; port = os.environ.get('PORT', '8000'); urllib.request.urlopen(f'http://localhost:{port}/v1/health')" || exit 1
 
 # =========================
 # Start server
 # =========================
-CMD ["meetasr", "server", "--config", "meeting_config.yaml"]
+CMD ["sh", "-c", "meetasr server --config meeting_config.yaml --port ${PORT:-8000}"]

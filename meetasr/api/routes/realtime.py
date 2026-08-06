@@ -5,15 +5,24 @@ from meetasr.streaming.asr_worker import ASRWorker
 from meetasr.streaming.temp_asr_woker import TempASRWorker
 from meetasr.streaming.partial_buffer_cleaner import PartialBufferCleaner
 from meetasr.streaming.window_builder import SegmentWindowBuilder
-from meetasr.streaming.final_transcript_queue import FinalTranscriptJob
-
+import io
+import wave
 import asyncio
 import logging
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends
 from sqlmodel import Session
-from meetasr.db.connection import get_db
-from meetasr.db.models_phase2 import Source, MediaType, Job, JobStatus
+from meetasr.db.connection import get_db, engine
+from meetasr.db.models_phase2 import Source, MediaType, Job, JobStatus, JobStage
+
+def pcm_to_wav_bytes(pcm_bytes: bytes, sample_rate: int = 16000) -> bytes:
+    wav_io = io.BytesIO()
+    with wave.open(wav_io, "wb") as wav_file:
+        wav_file.setnchannels(1)      # mono
+        wav_file.setsampwidth(2)      # 16-bit (2 bytes)
+        wav_file.setframerate(sample_rate)
+        wav_file.writeframes(pcm_bytes)
+    return wav_io.getvalue()
 
 router = APIRouter()
 
@@ -164,47 +173,41 @@ async def realtime_stream(websocket: WebSocket, db: Session = Depends(get_db)):
             )
 
         # ===================================================
-        # Giao audio cho worker xử lý offline
+        # Save PCM audio to Cloudflare R2 and queue offline ASR
         # ===================================================
-
         try:
-
-            audio = session.audio_archive.get_numpy()
-
-            if len(audio) > 0:
-
-                final_transcript_queue = getattr(
-                    websocket.app.state,
-                    "final_transcript_queue",
-                    None,
+            pcm_bytes = session.audio_archive.get_pcm_bytes()
+            if len(pcm_bytes) > 0:
+                wav_bytes = pcm_to_wav_bytes(pcm_bytes)
+                
+                # Fetch storage backend
+                from meetasr.api.routes import sources
+                storage = sources.get_storage_backend()
+                filename = f"realtime_{session.job_id}.wav"
+                
+                # Upload WAV to Cloudflare R2
+                storage_key = await storage.save(wav_bytes, filename)
+                
+                # Update DB Source path and Job status to QUEUED
+                with Session(engine) as session_db:
+                    db_source = session_db.get(Source, session.source_id)
+                    db_job = session_db.get(Job, session.job_id)
+                    if db_source:
+                        db_source.storage_path = storage_key
+                        session_db.add(db_source)
+                    if db_job:
+                        db_job.status = JobStatus.QUEUED
+                        db_job.stage = JobStage.QUEUED
+                        db_job.progress = 0.0
+                        session_db.add(db_job)
+                    session_db.commit()
+                    
+                logger.info(
+                    "Offline transcription audio saved to storage key=%s, job queued",
+                    storage_key,
                 )
-
-                if final_transcript_queue is None:
-
-                    logger.error(
-                        "Final transcript queue not initialized ",
-                    )
-
-                else:
-
-                    await final_transcript_queue.put(
-                        FinalTranscriptJob(
-                            job_id=session.job_id,
-                            audio=audio,
-                        )
-                    )
-
-                    logger.info(
-                        "Offline transcription queued "
-                        "samples=%d",
-                        len(audio),
-                    )
-
         except Exception:
-
-            logger.exception(
-                "Failed to enqueue offline job",
-            )
+            logger.exception("Failed to save audio archive and queue offline job")
 
         # ===================================================
         # Cleanup session

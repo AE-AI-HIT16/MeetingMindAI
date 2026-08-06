@@ -54,48 +54,9 @@ class DocumentGenerationQueue:
     async def start(self, planner: Any | None) -> None:
         """Start the consumer and resume unfinished persisted jobs."""
         self._planner = planner
-        if self.running:
-            return
-        self._task = asyncio.create_task(
-            self._run(),
-            name="phase2-document-generation-worker",
-        )
-
-        with Session(self._engine) as db:
-            pending = db.exec(
-                select(DocumentGenerationJob).where(
-                    DocumentGenerationJob.status.in_(
-                        [
-                            DocumentGenerationStatus.QUEUED,
-                            DocumentGenerationStatus.PROCESSING,
-                        ]
-                    )
-                )
-            ).all()
-            for generation in pending:
-                # A PROCESSING row means the previous process stopped before it
-                # could publish a terminal event. Requeue it on startup.
-                generation.status = DocumentGenerationStatus.QUEUED
-                generation.stage = DocumentGenerationStage.QUEUED
-                generation.progress = 0.0
-                generation.updated_at = datetime.utcnow()
-                db.add(generation)
-            db.commit()
-            pending_ids = [generation.id for generation in pending]
-
-        for generation_id in pending_ids:
-            await self.enqueue(generation_id)
 
     async def stop(self) -> None:
-        if self._task is None:
-            return
-        self._task.cancel()
-        try:
-            await self._task
-        except asyncio.CancelledError:
-            pass
-        self._task = None
-        self._queued_ids.clear()
+        pass
 
     async def join(self) -> None:
         """Wait until all queued generation jobs finish (mainly for tests)."""
@@ -228,17 +189,7 @@ class DocumentGenerationQueue:
             return generation
 
     async def enqueue(self, generation_id: str) -> bool:
-        if generation_id in self._queued_ids:
-            return True
-        if not self.running:
-            logger.warning(
-                "Document generation %s remains queued because its worker "
-                "is not running.",
-                generation_id,
-            )
-            return False
-        self._queued_ids.add(generation_id)
-        await self._queue.put(generation_id)
+        """No-op for serverless deployment: generation triggered on websocket connection."""
         return True
 
     async def _submission_lock(
@@ -249,20 +200,7 @@ class DocumentGenerationQueue:
             return self._submission_locks.setdefault(key, asyncio.Lock())
 
     async def _run(self) -> None:
-        while True:
-            generation_id = await self._queue.get()
-            self._queued_ids.discard(generation_id)
-            try:
-                await self._process(generation_id)
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                logger.exception(
-                    "Unhandled document-generation failure for %s",
-                    generation_id,
-                )
-            finally:
-                self._queue.task_done()
+        pass
 
     async def _process(self, generation_id: str) -> None:
         try:
@@ -491,3 +429,14 @@ class DocumentGenerationQueue:
 
 
 document_generation_queue = DocumentGenerationQueue()
+
+
+async def run_document_generation(generation_id: str, planner: Any) -> None:
+    """Run document generation on-demand, scoped to a connection/request."""
+    document_generation_queue._planner = planner
+    try:
+        await document_generation_queue._process(generation_id)
+    except asyncio.CancelledError:
+        logger.info(f"Document generation {generation_id} cancelled.")
+        document_generation_queue._fail(generation_id, Exception("Cancelled: Client disconnected."))
+        raise

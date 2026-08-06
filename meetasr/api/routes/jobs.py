@@ -1,7 +1,4 @@
-"""REST/WebSocket endpoints for observing Phase 2 processing Jobs."""
-
-from __future__ import annotations
-
+import asyncio
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from sqlmodel import Session, select
 
@@ -16,6 +13,8 @@ from meetasr.api.schemas_phase2 import (
 from meetasr.db.connection import engine
 from meetasr.db.models_phase2 import Document, DocumentMode, Job, JobStatus, TranscriptSegment
 from meetasr.realtime.events import event_bus
+from meetasr.api.routes import sources
+from meetasr.realtime.job_worker import run_job_processing
 
 
 router = APIRouter(prefix="/v1/jobs", tags=["jobs"])
@@ -97,6 +96,24 @@ def _job_snapshot(job_id: str) -> list[dict]:
 async def job_events(websocket: WebSocket, job_id: str) -> None:
     """Replay persisted state, then stream new events for one Job."""
     await websocket.accept()
+
+    # Try to trigger job processing on-demand if it is in QUEUED or FAILED state
+    asr_service = getattr(websocket.app.state, "asr_service", None)
+    storage = sources.get_storage_backend()
+    processing_task = None
+
+    if asr_service is not None:
+        with Session(engine) as db:
+            job = db.get(Job, job_id)
+            if job and job.status in [JobStatus.QUEUED, JobStatus.FAILED]:
+                job.status = JobStatus.PROCESSING
+                db.add(job)
+                db.commit()
+
+                processing_task = asyncio.create_task(
+                    run_job_processing(job_id, asr_service, storage)
+                )
+
     queue = await event_bus.subscribe(job_id)
     try:
         snapshot = _job_snapshot(job_id)
@@ -116,3 +133,7 @@ async def job_events(websocket: WebSocket, job_id: str) -> None:
         return
     finally:
         await event_bus.unsubscribe(job_id, queue)
+        # If this is the last client connected, cancel the processing task
+        if job_id not in event_bus._subscribers:
+            if processing_task and not processing_task.done():
+                processing_task.cancel()

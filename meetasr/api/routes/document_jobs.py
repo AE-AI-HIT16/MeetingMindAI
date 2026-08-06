@@ -1,7 +1,4 @@
-"""REST/WebSocket observation endpoints for document-generation jobs."""
-
-from __future__ import annotations
-
+import asyncio
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from sqlmodel import Session
 
@@ -17,6 +14,7 @@ from meetasr.db.models_phase2 import (
     DocumentGenerationStatus,
 )
 from meetasr.realtime.events import event_bus
+from meetasr.realtime.document_generation import run_document_generation
 
 router = APIRouter(prefix="/v1/document-jobs", tags=["document-jobs"])
 
@@ -89,6 +87,24 @@ async def document_generation_events(
 ) -> None:
     """Replay persisted generation state, then stream live updates."""
     await websocket.accept()
+
+    # Try to trigger document generation on-demand if it is in QUEUED or FAILED state
+    pipeline = getattr(websocket.app.state, "pipeline", None)
+    planner = getattr(pipeline, "doc_planner", None)
+    processing_task = None
+
+    if planner is not None:
+        with Session(engine) as db:
+            generation = db.get(DocumentGenerationJob, generation_id)
+            if generation and generation.status in [DocumentGenerationStatus.QUEUED, DocumentGenerationStatus.FAILED]:
+                generation.status = DocumentGenerationStatus.PROCESSING
+                db.add(generation)
+                db.commit()
+
+                processing_task = asyncio.create_task(
+                    run_document_generation(generation_id, planner)
+                )
+
     queue = await event_bus.subscribe(generation_id)
     try:
         snapshot = _generation_snapshot(generation_id)
@@ -124,3 +140,7 @@ async def document_generation_events(
         return
     finally:
         await event_bus.unsubscribe(generation_id, queue)
+        # If this is the last client connected, cancel the processing task
+        if generation_id not in event_bus._subscribers:
+            if processing_task and not processing_task.done():
+                processing_task.cancel()

@@ -49,60 +49,25 @@ class JobQueue:
 
     @property
     def running(self) -> bool:
-        return self._task is not None and not self._task.done()
+        return True
 
     async def start(
         self,
         asr_service: ASRService | None,
         storage: StorageBackend,
     ) -> None:
-        if self.running:
-            return
         self._storage = storage
         self._asr_service = asr_service
-        self._task = asyncio.create_task(self._run(), name="phase2-job-worker")
-
-        with Session(engine) as db:
-            pending = db.exec(
-                select(Job).where(
-                    Job.status.in_([JobStatus.QUEUED, JobStatus.PROCESSING])
-                )
-            ).all()
-        for job in pending:
-            await self._queue.put(job.id)
 
     async def stop(self) -> None:
-        if self._task is None:
-            return
-        self._task.cancel()
-        try:
-            await self._task
-        except asyncio.CancelledError:
-            pass
-        self._task = None
+        pass
 
     async def enqueue(self, job_id: str) -> bool:
-        """Queue a Job if the application worker is running."""
-        if not self.running:
-            logger.warning(
-                "Job %s remains queued because the worker is not running.",
-                job_id,
-            )
-            return False
-        await self._queue.put(job_id)
+        """No-op for serverless deployment: job triggered on websocket connection."""
         return True
 
     async def _run(self) -> None:
-        while True:
-            job_id = await self._queue.get()
-            try:
-                await self._process(job_id)
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                logger.exception("Unhandled failure while processing Job %s", job_id)
-            finally:
-                self._queue.task_done()
+        pass
 
     async def _process(self, job_id: str) -> None:
         temporary_path: Path | None = None
@@ -451,3 +416,15 @@ def _sentence_to_payload(
 
 
 job_queue = JobQueue()
+
+
+async def run_job_processing(job_id: str, asr_service: ASRService, storage: StorageBackend) -> None:
+    """Run transcription job on-demand, scoped to a connection/request."""
+    job_queue._asr_service = asr_service
+    job_queue._storage = storage
+    try:
+        await job_queue._process(job_id)
+    except asyncio.CancelledError:
+        logger.info(f"Job processing {job_id} cancelled.")
+        job_queue._fail_job(job_id, "Cancelled: Client disconnected.")
+        raise
