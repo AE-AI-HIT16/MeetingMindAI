@@ -127,19 +127,22 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Deploy to AWS EC2 / Server via SSH
+      - name: Deploy to EC2 via SSH
         uses: appleboy/ssh-action@v1.0.3
-        if: ${{ secrets.AWS_HOST != '' }}
+        if: ${{ secrets.EC2_HOST != '' }}
         with:
-          host: ${{ secrets.AWS_HOST }}
-          username: ${{ secrets.AWS_USERNAME }}
-          key: ${{ secrets.AWS_SSH_KEY }}
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_SSH_KEY }}
           script: |
-            echo "Pulling latest backend Docker image..."
+            echo "Pulling latest backend image..."
             docker pull ${{ env.BACKEND_IMAGE }}:latest
-            echo "Restarting MeetASR Backend container..."
+
+            echo "Restarting backend..."
             cd /opt/meetasr || cd ~/meetasr || true
-            docker-compose up -d --no-deps meetasr_backend || docker run -d --name meetasr_backend -p 8000:8000 ${{ env.BACKEND_IMAGE }}:latest
+
+            docker compose up -d --no-deps meetasr_backend || \
+            docker run -d --name meetasr_backend -p 8000:8000 ${{ env.BACKEND_IMAGE }}:latest
 
   # ============================================================
   # JOB 5: Deploy Model Server to RunPod Endpoint
