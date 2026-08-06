@@ -42,7 +42,7 @@ async function apiFetch<T>(
   let url: string;
 
   if (isServer) {
-    const endpointId = process.env.RUNPOD_ENDPOINT_ID ?? "";
+    const endpointId = process.env.RUNPOD_ENDPOINT_ID || "dummy";
     const apiBase = `https://${endpointId}.api.runpod.ai`;
     url = new URL(input, apiBase).toString();
   } else {
