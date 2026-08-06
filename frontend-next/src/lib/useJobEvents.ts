@@ -20,8 +20,17 @@ export interface JobEventsState {
   error: string | null;
 }
 
-function jobEventsUrl(jobId: string): string {
+async function jobEventsUrl(jobId: string): Promise<string> {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  try {
+    const res = await fetch("/api/ws-info");
+    const data = await res.json();
+    if (data.host && data.token) {
+      return `wss://${data.host}/v1/jobs/${jobId}/events?api_key=${data.token}`;
+    }
+  } catch (e) {
+    // Fallback
+  }
   const host = process.env.NEXT_PUBLIC_WS_HOST ?? "127.0.0.1:8000";
   return `${protocol}//${host}/v1/jobs/${jobId}/events`;
 }
@@ -44,8 +53,10 @@ export function useJobEvents(jobId: string | null): JobEventsState {
     let stopped = false;
     let terminal = false;
 
-    const connect = () => {
-      socket = new WebSocket(jobEventsUrl(jobId));
+    const connect = async () => {
+      const url = await jobEventsUrl(jobId);
+      if (stopped) return;
+      socket = new WebSocket(url);
 
       socket.onopen = () => {
         setIsConnected(true);

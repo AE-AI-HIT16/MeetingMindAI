@@ -38,15 +38,23 @@ async function apiFetch<T>(
   init?: RequestInit,
   token?: string,
 ): Promise<T> {
-  const apiBase =
-    typeof window === "undefined"
-      ? process.env.MEETASR_API ?? "http://127.0.0.1:8000"
-      : "";
-  const url = apiBase ? new URL(input, apiBase).toString() : input;
+  const isServer = typeof window === "undefined";
+  let url: string;
+
+  if (isServer) {
+    const endpointId = process.env.RUNPOD_ENDPOINT_ID ?? "";
+    const apiBase = `https://${endpointId}.api.runpod.ai`;
+    url = new URL(input, apiBase).toString();
+  } else {
+    url = input;
+  }
   
   const headers = new Headers(init?.headers);
   if (token) {
     headers.set("Authorization", `Bearer ${token}`);
+  }
+  if (isServer && process.env.RUNPOD_API_KEY) {
+    headers.set("Authorization", `Bearer ${process.env.RUNPOD_API_KEY}`);
   }
 
   const res = await fetch(url, { ...init, headers });
@@ -78,11 +86,7 @@ async function apiFetch<T>(
  * submission/status calls.
  */
 function directApiUrl(path: string): string {
-  const configured = process.env.NEXT_PUBLIC_MEETASR_API;
-  const apiBase =
-    configured ??
-    `${window.location.protocol}//${window.location.hostname}:8000`;
-  return new URL(path, apiBase).toString();
+  return `/api/runpod${path}`;
 }
 
 // ---------------------------------------------------------------------------
