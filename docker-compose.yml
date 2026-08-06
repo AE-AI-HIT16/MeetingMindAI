@@ -2,23 +2,64 @@ version: "3.8"
 
 services:
   # =========================
-  # BACKEND
+  # RUNPOD MODEL SERVER
+  # =========================
+  meetasr_runpod:
+    build:
+      context: .
+      dockerfile: Dockerfile.runpod
+    image: khanhsayhi/meetasr-runpod:latest
+    container_name: meetasr_runpod
+    restart: unless-stopped
+    ports:
+      - "8001:8001"
+    environment:
+      - PORT=8001
+      - RUNPOD_API_KEY=${RUNPOD_API_KEY:-}
+    volumes:
+      # Hugging Face cache
+      - ./model_cache/huggingface:/root/.cache/huggingface
+      # ModelScope cache
+      - ./model_cache/modelscope:/root/.cache/modelscope
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    # Uncomment deploy block if running on host with GPU / nvidia-container-toolkit:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+  # =========================
+  # BACKEND (AWS)
   # =========================
   meetasr_backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
     image: khanhsayhi/meetasr-backend:latest
-
     container_name: meetasr_backend
-
     restart: unless-stopped
-
     depends_on:
-      - postgres_db
-      - minio_storage
-
+      meetasr_runpod:
+        condition: service_healthy
+      postgres_db:
+        condition: service_healthy
+      minio_storage:
+        condition: service_started
     ports:
       - "8000:8000"
-
     environment:
+      # ===== RunPod Connection =====
+      RUNPOD_URL: http://meetasr_runpod:8001
+      RUNPOD_API_KEY: ${RUNPOD_API_KEY:-}
+
       # ===== Database =====
       DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres_db:5432/${POSTGRES_DB}
 
@@ -35,82 +76,53 @@ services:
       MINIO_BUCKET: ${MINIO_BUCKET}
       MINIO_SECURE: "false"
 
-      # Browser truy cập presigned URL
+      # Browser presigned URL
       MINIO_PUBLIC_ENDPOINT: ${MINIO_PUBLIC_ENDPOINT:-http://localhost:9000}
-
-    volumes:
-      # Hugging Face cache
-      - ./model_cache/huggingface:/root/.cache/huggingface
-
-      # ModelScope cache
-      - ./model_cache/modelscope:/root/.cache/modelscope
-
-    command:
-      - meetasr
-      - server
-      - --config
-      - meeting_config.yaml
 
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/v1/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 120s
-
-
+      start_period: 30s
 
   # =========================
   # POSTGRESQL
   # =========================
   postgres_db:
     image: postgres:15-alpine
-
     container_name: meetasr_postgres
-
     restart: unless-stopped
-
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
-
     ports:
       - "5432:5432"
-
     volumes:
       - postgres_data:/var/lib/postgresql/data
-
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
       timeout: 5s
       retries: 5
 
-
   # =========================
   # MINIO
   # =========================
   minio_storage:
     image: minio/minio:latest
-
     container_name: meetasr_minio
-
     restart: unless-stopped
-
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
-
     command: server /data --console-address ":9001"
-
     ports:
       - "9000:9000"
       - "9001:9001"
-
     volumes:
       - minio_data:/data
-
 
 volumes:
   postgres_data:

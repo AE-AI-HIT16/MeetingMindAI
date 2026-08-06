@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="{{ language }}">
+<head>
+  <meta charset="utf-8">
+  <title>{{ title }}</title>
+  <style>
+    @font-face {
+      font-family: "MeetingMind Body";
+      src: url("{{ body_font_url }}") format("truetype");
+    }
+
+    @font-face {
+      font-family: "MeetingMind Display";
+      src: url("{{ poppins_bold_url }}") format("truetype");
+      font-weight: 700;
+    }
+
+    @page {
+      size: A4;
+      margin: 18mm 20mm;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      color: #222;
+      font-family: "MeetingMind Body", sans-serif;
+      font-size: 10.5pt;
+      line-height: 1.55;
+    }
+
+    .document-header {
+      border-bottom: 1px solid #b8c0cc;
+      margin-bottom: 9mm;
+      padding-bottom: 4mm;
+      break-inside: avoid;
+    }
+
+    .document-title,
+    .section-title,
+    .section-body h3,
+    .section-body h4 {
+      font-family: "MeetingMind Display", sans-serif;
+      font-weight: 700;
+    }
+
+    .document-title {
+      font-size: 24pt;
+      margin: 0 0 2mm;
+    }
+
+    .document-meta {
+      color: #667085;
+      margin: 0;
+    }
+
+    .section {
+      /* A whole LLM section can be several pages long. Preventing all page
+         breaks here pushed the next section to a new page and left a large
+         blank area on the previous one. */
+      break-inside: auto;
+      margin-bottom: 6mm;
+    }
+
+    .section-title {
+      font-size: 15pt;
+      margin: 0 0 3mm;
+      break-after: avoid;
+      page-break-after: avoid;
+    }
+
+    .section-body h3,
+    .section-body h4 {
+      break-after: avoid;
+      page-break-after: avoid;
+    }
+
+    .section-body p {
+      margin: 0 0 3mm;
+      orphans: 3;
+      widows: 3;
+    }
+
+    .section-body ul,
+    .section-body ol {
+      margin: 2mm 0 3mm;
+      padding-left: 7mm;
+    }
+
+    .section-body li {
+      orphans: 2;
+      widows: 2;
+    }
+
+    .section-body > :first-child {
+      margin-top: 0;
+    }
+
+    .section-body > :last-child {
+      margin-bottom: 0;
+    }
+
+    table {
+      border-collapse: collapse;
+      width: 100%;
+    }
+
+    thead {
+      display: table-header-group;
+    }
+
+    tr {
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+
+    th,
+    td {
+      border: 1px solid #aaa;
+      padding: 2mm;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    pre {
+      overflow-wrap: anywhere;
+      white-space: pre-wrap;
+    }
+  </style>
+</head>
+<body>
+  <header class="document-header">
+    <h1 class="document-title">{{ title }}</h1>
+    <p class="document-meta">{{ generated_at }} · {{ time }}</p>
+  </header>
+
+  <main>
+    {% for section in sections %}
+      <section class="section">
+        {% if section.heading %}
+          <h2 class="section-title">{{ section.heading }}</h2>
+        {% endif %}
+        <div class="section-body">{{ section.html | safe }}</div>
+      </section>
+    {% endfor %}
+  </main>
+</body>
+</html>
