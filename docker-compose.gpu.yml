@@ -1,9 +1,0 @@
-services:
-  meetasr_backend:
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]

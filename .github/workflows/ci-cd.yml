@@ -108,7 +108,7 @@ jobs:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USERNAME }}
           key: ${{ secrets.EC2_SSH_KEY }}
-          source: "docker-compose.yml,docker-compose.gpu.yml"
+          source: "docker-compose.yml"
           target: "/home/ubuntu/Backend"
 
       - name: Deploy to EC2
