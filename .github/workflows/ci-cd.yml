@@ -4,6 +4,10 @@ on:
   push:
     branches:
       - develop
+    paths-ignore:
+      - 'frontend-next/**'
+      - 'docs/**'
+      - 'README.md'
 
   workflow_dispatch:
 
@@ -146,4 +150,4 @@ jobs:
           docker pull ${{ env.IMAGE_NAME }}:latest
 
 
-
+

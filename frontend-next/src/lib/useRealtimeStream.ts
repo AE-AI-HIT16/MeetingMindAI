@@ -54,13 +54,15 @@ export interface RealtimeStreamActions {
 // Constants
 // ----------------------------------------------------------------
 
-/** Build the WebSocket URL based on the current page location. */
-function buildWsUrl(): string {
-  const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-  // In dev, the backend runs on port 8000; in prod, behind the same host.
-  // We connect directly to the backend since Next.js rewrites don't proxy WS.
-  const host = process.env.NEXT_PUBLIC_WS_HOST ?? "127.0.0.1:8000";
-  return `${proto}//${host}/v1/realtime/stream`;
+/** Build the WebSocket URL based on the unified API base URL. */
+async function buildWsUrl(): Promise<string> {
+  // Use the same environment variable as the REST API to ensure they always point to the same backend.
+  const apiBase = process.env.NEXT_PUBLIC_MEETASR_API || process.env.MEETASR_API || "http://127.0.0.1:8000";
+  
+  // Convert http/https to ws/wss
+  const wsBase = apiBase.replace(/^http/, "ws");
+  
+  return `${wsBase}/v1/realtime/stream`;
 }
 
 // ----------------------------------------------------------------
@@ -173,9 +175,9 @@ export function useRealtimeStream(): RealtimeStreamState &
       });
 
       // 3. Open WebSocket
-      const ws = new WebSocket(buildWsUrl());
+      const wsUrl = await buildWsUrl();
+      const ws = new WebSocket(wsUrl);
       ws.binaryType = "arraybuffer";
-      wsRef.current = ws;
 
       await new Promise<void>((resolve, reject) => {
         ws.onopen = () => {

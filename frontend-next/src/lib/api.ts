@@ -32,18 +32,29 @@ export class APIError extends Error {
   }
 }
 
+/**
+ * Trả về base URL của backend.
+ * Dùng NEXT_PUBLIC_MEETASR_API cho cả Client và Server (ưu tiên biến public).
+ */
+function getApiBase(): string {
+  return process.env.NEXT_PUBLIC_MEETASR_API || process.env.MEETASR_API || "http://127.0.0.1:8000";
+}
+
+/**
+ * Lấy URL tuyệt đối cho một API endpoint.
+ */
+export function getFullUrl(path: string): string {
+  return new URL(path, getApiBase()).toString();
+}
+
 /** Gửi request và throw APIError nếu response không OK. */
 async function apiFetch<T>(
   input: string,
   init?: RequestInit,
   token?: string,
 ): Promise<T> {
-  const apiBase =
-    typeof window === "undefined"
-      ? process.env.MEETASR_API ?? "http://127.0.0.1:8000"
-      : "";
-  const url = apiBase ? new URL(input, apiBase).toString() : input;
-  
+  const url = getFullUrl(input);
+
   const headers = new Headers(init?.headers);
   if (token) {
     headers.set("Authorization", `Bearer ${token}`);
@@ -72,19 +83,6 @@ async function apiFetch<T>(
   return res.json() as Promise<T>;
 }
 
-/**
- * Browser operations that should not depend on the Next.js rewrite use the
- * public FastAPI origin. This covers large uploads and background finalize
- * submission/status calls.
- */
-function directApiUrl(path: string): string {
-  const configured = process.env.NEXT_PUBLIC_MEETASR_API;
-  const apiBase =
-    configured ??
-    `${window.location.protocol}//${window.location.hostname}:8000`;
-  return new URL(path, apiBase).toString();
-}
-
 // ---------------------------------------------------------------------------
 // Sources API
 // ---------------------------------------------------------------------------
@@ -92,10 +90,19 @@ function directApiUrl(path: string): string {
 /**
  * Lấy danh sách tất cả Source (trang Library).
  * Tương đương: GET /v1/sources
+ * Trả về [] nếu backend chưa được cấu hình (build time).
  */
 export async function listSources(token?: string): Promise<Source[]> {
-  return apiFetch<Source[]>("/v1/sources", { cache: "no-store" }, token);
+  try {
+    return await apiFetch<Source[]>("/v1/sources", { cache: "no-store" }, token);
+  } catch (error) {
+    // Khi build tĩnh (thiếu RUNPOD_ENDPOINT_ID) → trả về mảng rỗng.
+    // Khi runtime thật sự lỗi → re-throw để UI hiển thị thông báo lỗi.
+    if (error instanceof APIError && error.status === 503) return [];
+    throw error;
+  }
 }
+
 
 /**
  * Lấy chi tiết một Source theo ID.
@@ -128,7 +135,7 @@ export async function uploadSource(
   if (onProgress) {
     return new Promise<CreateSourceResponse>((resolve, reject) => {
       const xhr = new XMLHttpRequest();
-      xhr.open("POST", directApiUrl("/v1/sources"));
+      xhr.open("POST", getFullUrl("/v1/sources"));
       if (token) {
         xhr.setRequestHeader("Authorization", `Bearer ${token}`);
       }
@@ -169,7 +176,7 @@ export async function uploadSource(
   }
 
   // Không cần progress → dùng fetch đơn giản hơn
-  return apiFetch<CreateSourceResponse>(directApiUrl("/v1/sources"), {
+  return apiFetch<CreateSourceResponse>("/v1/sources", {
     method: "POST",
     body: formData,
   }, token);
@@ -206,7 +213,7 @@ export async function finalizeDocument(
   mode: Exclude<DocMode, "live">,
 ): Promise<DocumentGeneration> {
   const generation = await apiFetch<DocumentGeneration>(
-    directApiUrl(`/v1/documents/${liveDocumentId}/finalize`),
+    `/v1/documents/${liveDocumentId}/finalize`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -230,7 +237,7 @@ export async function getDocumentGeneration(
   generationJobId: string,
 ): Promise<DocumentGeneration> {
   return apiFetch<DocumentGeneration>(
-    directApiUrl(`/v1/document-jobs/${generationJobId}`),
+    `/v1/document-jobs/${generationJobId}`,
     { cache: "no-store" },
   );
 }
