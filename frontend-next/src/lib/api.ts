@@ -32,6 +32,16 @@ export class APIError extends Error {
   }
 }
 
+/**
+ * Trả về base URL của backend khi đang chạy phía server (SSR/RSC).
+ * Nếu thiếu env var → trả về null thay vì crash.
+ */
+function getServerApiBase(): string | null {
+  const endpointId = process.env.RUNPOD_ENDPOINT_ID?.trim();
+  if (!endpointId) return null;
+  return `https://${endpointId}.api.runpod.ai`;
+}
+
 /** Gửi request và throw APIError nếu response không OK. */
 async function apiFetch<T>(
   input: string,
@@ -42,8 +52,12 @@ async function apiFetch<T>(
   let url: string;
 
   if (isServer) {
-    const endpointId = process.env.RUNPOD_ENDPOINT_ID || "dummy";
-    const apiBase = `https://${endpointId}.api.runpod.ai`;
+    const apiBase = getServerApiBase();
+    // Nếu thiếu biến môi trường (ví dụ lúc Vercel build tĩnh),
+    // throw lỗi có thể catch được — KHÔNG dùng new URL("") gây crash.
+    if (!apiBase) {
+      throw new APIError(503, "Backend URL chưa được cấu hình (thiếu RUNPOD_ENDPOINT_ID).");
+    }
     url = new URL(input, apiBase).toString();
   } else {
     url = input;
@@ -96,10 +110,19 @@ function directApiUrl(path: string): string {
 /**
  * Lấy danh sách tất cả Source (trang Library).
  * Tương đương: GET /v1/sources
+ * Trả về [] nếu backend chưa được cấu hình (build time).
  */
 export async function listSources(token?: string): Promise<Source[]> {
-  return apiFetch<Source[]>("/v1/sources", { cache: "no-store" }, token);
+  try {
+    return await apiFetch<Source[]>("/v1/sources", { cache: "no-store" }, token);
+  } catch (error) {
+    // Khi build tĩnh (thiếu RUNPOD_ENDPOINT_ID) → trả về mảng rỗng.
+    // Khi runtime thật sự lỗi → re-throw để UI hiển thị thông báo lỗi.
+    if (error instanceof APIError && error.status === 503) return [];
+    throw error;
+  }
 }
+
 
 /**
  * Lấy chi tiết một Source theo ID.
