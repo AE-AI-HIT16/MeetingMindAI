@@ -39,9 +39,6 @@ services:
       MINIO_PUBLIC_ENDPOINT: ${MINIO_PUBLIC_ENDPOINT:-http://localhost:9000}
 
     volumes:
-      # Backend configuration
-      - ./meeting_config.yaml:/app/meeting_config.yaml:ro
-
       # Hugging Face cache
       - ./model_cache/huggingface:/root/.cache/huggingface
 
