@@ -33,13 +33,18 @@ export class APIError extends Error {
 }
 
 /**
- * Trả về base URL của backend khi đang chạy phía server (SSR/RSC).
- * Nếu thiếu env var → trả về null thay vì crash.
+ * Trả về base URL của backend.
+ * Dùng NEXT_PUBLIC_MEETASR_API cho cả Client và Server (ưu tiên biến public).
  */
-function getServerApiBase(): string | null {
-  const endpointId = process.env.RUNPOD_ENDPOINT_ID?.trim();
-  if (!endpointId) return null;
-  return `https://${endpointId}.api.runpod.ai`;
+function getApiBase(): string {
+  return process.env.NEXT_PUBLIC_MEETASR_API || process.env.MEETASR_API || "http://127.0.0.1:8000";
+}
+
+/**
+ * Lấy URL tuyệt đối cho một API endpoint.
+ */
+export function getFullUrl(path: string): string {
+  return new URL(path, getApiBase()).toString();
 }
 
 /** Gửi request và throw APIError nếu response không OK. */
@@ -48,27 +53,11 @@ async function apiFetch<T>(
   init?: RequestInit,
   token?: string,
 ): Promise<T> {
-  const isServer = typeof window === "undefined";
-  let url: string;
+  const url = getFullUrl(input);
 
-  if (isServer) {
-    const apiBase = getServerApiBase();
-    // Nếu thiếu biến môi trường (ví dụ lúc Vercel build tĩnh),
-    // throw lỗi có thể catch được — KHÔNG dùng new URL("") gây crash.
-    if (!apiBase) {
-      throw new APIError(503, "Backend URL chưa được cấu hình (thiếu RUNPOD_ENDPOINT_ID).");
-    }
-    url = new URL(input, apiBase).toString();
-  } else {
-    url = input;
-  }
-  
   const headers = new Headers(init?.headers);
   if (token) {
     headers.set("Authorization", `Bearer ${token}`);
-  }
-  if (isServer && process.env.RUNPOD_API_KEY) {
-    headers.set("Authorization", `Bearer ${process.env.RUNPOD_API_KEY}`);
   }
 
   const res = await fetch(url, { ...init, headers });
@@ -92,15 +81,6 @@ async function apiFetch<T>(
   if (res.status === 204) return undefined as T;
 
   return res.json() as Promise<T>;
-}
-
-/**
- * Browser operations that should not depend on the Next.js rewrite use the
- * public FastAPI origin. This covers large uploads and background finalize
- * submission/status calls.
- */
-function directApiUrl(path: string): string {
-  return `/api/runpod${path}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -155,7 +135,7 @@ export async function uploadSource(
   if (onProgress) {
     return new Promise<CreateSourceResponse>((resolve, reject) => {
       const xhr = new XMLHttpRequest();
-      xhr.open("POST", directApiUrl("/v1/sources"));
+      xhr.open("POST", getFullUrl("/v1/sources"));
       if (token) {
         xhr.setRequestHeader("Authorization", `Bearer ${token}`);
       }
@@ -196,7 +176,7 @@ export async function uploadSource(
   }
 
   // Không cần progress → dùng fetch đơn giản hơn
-  return apiFetch<CreateSourceResponse>(directApiUrl("/v1/sources"), {
+  return apiFetch<CreateSourceResponse>("/v1/sources", {
     method: "POST",
     body: formData,
   }, token);
@@ -233,7 +213,7 @@ export async function finalizeDocument(
   mode: Exclude<DocMode, "live">,
 ): Promise<DocumentGeneration> {
   const generation = await apiFetch<DocumentGeneration>(
-    directApiUrl(`/v1/documents/${liveDocumentId}/finalize`),
+    `/v1/documents/${liveDocumentId}/finalize`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -257,7 +237,7 @@ export async function getDocumentGeneration(
   generationJobId: string,
 ): Promise<DocumentGeneration> {
   return apiFetch<DocumentGeneration>(
-    directApiUrl(`/v1/document-jobs/${generationJobId}`),
+    `/v1/document-jobs/${generationJobId}`,
     { cache: "no-store" },
   );
 }
