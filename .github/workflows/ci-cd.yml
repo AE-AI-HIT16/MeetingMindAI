@@ -99,6 +99,7 @@ jobs:
           file: ./Dockerfile
           push: true
           platforms: linux/amd64
+          no-cache: true
           tags: |
             ${{ env.IMAGE_NAME }}:latest
             ${{ env.IMAGE_NAME }}:${{ github.sha }}
@@ -153,6 +154,12 @@ jobs:
             echo "========== COMPOSE CONFIG =========="
 
             docker compose config
+
+
+
+            echo "========== CLEAN SYSTEM (FREE DISK SPACE) =========="
+
+            docker system prune -a --volumes -f
 
 
 
