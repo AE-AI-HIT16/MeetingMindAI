@@ -68,17 +68,11 @@ jobs:
       - name: Checkout source
         uses: actions/checkout@v4
 
-      # Giải phóng ổ cứng triệt để trước khi build Docker
-      - name: Free disk space
-        uses: jlumbroso/free-disk-space@main
-        with:
-          tool-cache: true
-          android: true
-          dotnet: true
-          haskell: true
-          large-packages: true
-          docker-images: true
-          swap-storage: true
+      # Dọn dẹp rác Docker thừa để tránh đầy ổ đĩa Runner
+      - name: Prune Docker data before build
+        run: |
+          docker system prune -f --volumes || true
+          docker builder prune -af || true
 
       - name: Check disk space
         run: df -h
@@ -109,7 +103,7 @@ jobs:
       # =========================
 
       - name: Copy Compose files to EC2
-        uses: appleboy/scp-action@v0.1.7
+        uses: appleboy/scp-action@v1.0.0
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USERNAME }}
@@ -118,7 +112,7 @@ jobs:
           target: "/home/ubuntu/Backend"
 
       - name: Deploy to EC2
-        uses: appleboy/ssh-action@v1
+        uses: appleboy/ssh-action@v1.2.0
 
         with:
 
