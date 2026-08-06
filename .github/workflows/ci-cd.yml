@@ -5,7 +5,7 @@ on:
     branches:
       - main
       - master
-      - develop 
+      - develop
     paths-ignore:
       - 'frontend-next/**'
       - 'docs/**'
@@ -16,8 +16,6 @@ on:
 env:
   BACKEND_IMAGE: khanhsayhi/meetasr-backend
   RUNPOD_IMAGE: khanhsayhi/meetasr-runpod
-  RUNPOD_ENDPOINT_ID: ngbl879qdgxbkx
-  RUNPOD_API_BASE_URL: https://api.runpod.ai/v2
 
 jobs:
 
@@ -55,7 +53,7 @@ jobs:
           pytest --ignore=tests/legacy || pytest || true
 
   # ============================================================
-  # JOB 2: Build & Push Backend Docker Image (AWS Target)
+  # JOB 2: Build & Push Backend Docker Image
   # ============================================================
   build-push-backend:
     name: Build & Push Backend Docker Image
@@ -63,20 +61,16 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout source code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v3
 
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
+      - uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and Push Backend Image
-        uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v6
         with:
           context: .
           file: ./Dockerfile.backend
@@ -86,28 +80,24 @@ jobs:
             ${{ env.BACKEND_IMAGE }}:${{ github.sha }}
 
   # ============================================================
-  # JOB 3: Build & Push RunPod Model Server Image
+  # JOB 3: Build & Push RunPod Docker Image
   # ============================================================
   build-push-runpod:
-    name: Build & Push RunPod Model Server Docker Image
+    name: Build & Push RunPod Docker Image
     needs: test
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout source code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v3
 
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
+      - uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and Push RunPod Image
-        uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v6
         with:
           context: .
           file: ./Dockerfile.runpod
@@ -117,62 +107,62 @@ jobs:
             ${{ env.RUNPOD_IMAGE }}:${{ github.sha }}
 
   # ============================================================
-  # JOB 4: Deploy Backend to AWS Server
+  # JOB 4: Deploy Backend to EC2
   # ============================================================
-  deploy-aws-backend:
-    name: Deploy Backend to AWS
+  deploy-backend:
+    name: Deploy Backend to EC2
     needs: build-push-backend
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/develop'
     runs-on: ubuntu-latest
 
     steps:
-      - name: Deploy to EC2 via SSH
+      - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.0.3
-        if: ${{ secrets.EC2_HOST != '' }}
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USERNAME }}
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
-            echo "Pulling latest backend image..."
+            set -e
+
+            echo "Pull latest backend image..."
             docker pull ${{ env.BACKEND_IMAGE }}:latest
 
-            echo "Restarting backend..."
-            cd /opt/meetasr || cd ~/meetasr || true
+            if [ -d "/opt/meetasr" ]; then
+              cd /opt/meetasr
+            elif [ -d "$HOME/meetasr" ]; then
+              cd $HOME/meetasr
+            else
+              echo "MeetASR directory not found."
+              exit 1
+            fi
 
-            docker compose up -d --no-deps meetasr_backend || \
-            docker run -d --name meetasr_backend -p 8000:8000 ${{ env.BACKEND_IMAGE }}:latest
+            docker compose pull meetasr_backend
+            docker compose up -d --no-deps meetasr_backend
+
+            docker image prune -f
 
   # ============================================================
-  # JOB 5: Deploy Model Server to RunPod Endpoint
+  # JOB 5: Notify RunPod
   # ============================================================
   deploy-runpod:
-    name: Deploy Model Server to RunPod
+    name: Notify RunPod
     needs: build-push-runpod
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/develop'
     runs-on: ubuntu-latest
 
     steps:
-      - name: Trigger RunPod Deployment
+      - name: Trigger RunPod Endpoint
         env:
           RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
-          RUNPOD_ENDPOINT_ID: ${{ env.RUNPOD_ENDPOINT_ID }}
-          RUNPOD_API_BASE_URL: ${{ env.RUNPOD_API_BASE_URL }}
+          RUNPOD_ENDPOINT_ID: ${{ secrets.RUNPOD_ENDPOINT_ID }}
+          RUNPOD_API_BASE_URL: ${{ secrets.RUNPOD_API_BASE_URL }}
         run: |
-          echo "Deploying image ${{ env.RUNPOD_IMAGE }}:latest to RunPod Endpoint ID: ${RUNPOD_ENDPOINT_ID}..."
-          
-          # 1. Purge/reset workers queue on RunPod Endpoint API v2
-          if [ -n "${RUNPOD_API_KEY}" ]; then
-            curl -s -X POST "${RUNPOD_API_BASE_URL}/${RUNPOD_ENDPOINT_ID}/purge-queue" \
-              -H "Authorization: Bearer ${RUNPOD_API_KEY}" \
-              -H "Content-Type: application/json" || true
+          echo "Refreshing RunPod Endpoint ${RUNPOD_ENDPOINT_ID}"
 
-            # 2. Trigger GraphQL update / reset for RunPod Endpoint pod
-            curl -s -X POST "https://api.runpod.io/graphql?api_key=${RUNPOD_API_KEY}" \
-              -H "Content-Type: application/json" \
-              -d "{\"query\": \"mutation { saveEndpoint(input: {id: \\\"${RUNPOD_ENDPOINT_ID}\\\"}) { id imageName } }\"}" || true
+          curl -s -X POST \
+            "${RUNPOD_API_BASE_URL}/${RUNPOD_ENDPOINT_ID}/purge-queue" \
+            -H "Authorization: Bearer ${RUNPOD_API_KEY}" \
+            -H "Content-Type: application/json" || true
 
-            echo "RunPod deployment API call completed for endpoint ${RUNPOD_ENDPOINT_ID}."
-          else
-            echo "RUNPOD_API_KEY secret is not set. Image ${{ env.RUNPOD_IMAGE }}:latest was pushed to Docker Hub."
-          fi
+          echo "RunPod deployment completed."
