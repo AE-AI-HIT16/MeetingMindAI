@@ -6,6 +6,9 @@ import { ProcessingView } from "@/components/ProcessingView";
 import { DocumentView } from "@/components/DocumentView";
 import type { DocumentData, Source } from "@/lib/types";
 
+// Luon render dong — can session va backend.
+export const dynamic = "force-dynamic";
+
 export default async function SourcePage({
   params,
   searchParams,
