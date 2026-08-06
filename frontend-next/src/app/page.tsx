@@ -5,6 +5,10 @@ import { SourceCard } from "@/components/SourceCard";
 import { PageHeader } from "@/components/ui";
 import { APIError, listSources } from "@/lib/api";
 
+// Luôn render động — không bao giờ tạo tĩnh lúc build.
+// Vì trang này cần session (auth) và kết nối backend (RunPod).
+export const dynamic = "force-dynamic";
+
 export default async function LibraryPage() {
   const session = await getServerSession(authOptions);
   const token = session?.accessToken;
