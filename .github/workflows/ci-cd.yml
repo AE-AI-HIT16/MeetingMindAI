@@ -5,8 +5,7 @@ on:
     branches:
       - main
       - master
-      - develop
-      - duykhanh/test-deploy
+      - develop 
     paths-ignore:
       - 'frontend-next/**'
       - 'docs/**'
