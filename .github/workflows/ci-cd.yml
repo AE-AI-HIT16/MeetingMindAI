@@ -4,6 +4,10 @@ on:
   push:
     branches:
       - develop
+    paths-ignore:
+      - 'frontend-next/**'
+      - 'docs/**'
+      - 'README.md'
 
   workflow_dispatch:
 
@@ -30,6 +34,20 @@ jobs:
 
       - name: Checkout source
         uses: actions/checkout@v4
+
+      # =========================
+      # Giải phóng ổ cứng trước khi làm bất cứ việc gì
+      # =========================
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
 
 
 
