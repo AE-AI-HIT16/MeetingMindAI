@@ -108,6 +108,15 @@ jobs:
       # Deploy EC2
       # =========================
 
+      - name: Copy Compose files to EC2
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          source: "docker-compose.yml,docker-compose.gpu.yml"
+          target: "/home/ubuntu/Backend"
+
       - name: Deploy to EC2
         uses: appleboy/ssh-action@v1
 
