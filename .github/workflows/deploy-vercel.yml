@@ -38,7 +38,9 @@ jobs:
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
           RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
           RUNPOD_ENDPOINT_ID: ${{ secrets.RUNPOD_ENDPOINT_ID }}
-          NEXTAUTH_URL: ${{ secrets.NEXTAUTH_URL }}
+          # NEXTAUTH_URL bắt buộc phải là URL hợp lệ, ngay cả lúc build.
+          # Nếu chưa có Secret thì dùng URL placeholder để tránh crash.
+          NEXTAUTH_URL: ${{ secrets.NEXTAUTH_URL || 'https://meeting-mind-ai.vercel.app' }}
           NEXTAUTH_SECRET: ${{ secrets.NEXTAUTH_SECRET }}
 
       - name: Deploy Project Artifacts to Vercel
