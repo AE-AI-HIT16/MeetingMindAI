@@ -4,29 +4,31 @@ services:
   # =========================
   # RUNPOD MODEL SERVER
   # =========================
-  meetasr_runpod:
-    build:
-      context: .
-      dockerfile: Dockerfile.runpod
-    image: khanhsayhi/meetasr-runpod:latest
-    container_name: meetasr_runpod
-    restart: unless-stopped
-    ports:
-      - "8001:8001"
-    environment:
-      - PORT=8001
-      - RUNPOD_API_KEY=${RUNPOD_API_KEY:-}
-    volumes:
-      # Hugging Face cache
-      - ./model_cache/huggingface:/root/.cache/huggingface
-      # ModelScope cache
-      - ./model_cache/modelscope:/root/.cache/modelscope
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
+#  meetasr_runpod:
+#    build:
+#      context: .
+#      dockerfile: Dockerfile.runpod
+#    image: khanhsayhi/meetasr-runpod:latest
+#    container_name: meetasr_runpod
+#    restart: unless-stopped
+#    ports:
+#      - "8001:8001"
+#    environment:
+#      - PORT=8001
+#      - RUNPOD_API_KEY=${RUNPOD_API_KEY:-}
+#    volumes:
+#      # Hugging Face cache
+#      - ./model_cache/huggingface:/root/.cache/huggingface
+#      # ModelScope cache
+#      - ./model_cache/modelscope:/root/.cache/modelscope
+#    healthcheck:
+#      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+#      interval: 30s
+#      timeout: 10s
+#      retries: 3
+#      start_period: 60s
+
+
     # Uncomment deploy block if running on host with GPU / nvidia-container-toolkit:
     # deploy:
     #   resources:
@@ -47,8 +49,8 @@ services:
     container_name: meetasr_backend
     restart: unless-stopped
     depends_on:
-      meetasr_runpod:
-        condition: service_healthy
+#      meetasr_runpod:
+#        condition: service_healthy
       postgres_db:
         condition: service_healthy
       minio_storage:

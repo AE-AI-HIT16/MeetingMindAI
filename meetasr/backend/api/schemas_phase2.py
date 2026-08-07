@@ -1,8 +1,120 @@
 """Public API contracts for the Phase 2 source-processing flow."""
 
-from typing import TYPE_CHECKING, Literal
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Literal, Optional
 
 from pydantic import BaseModel, Field, model_validator
+
+
+if TYPE_CHECKING:
+    from meetasr.backend.db.models_phase2 import (
+        Document,
+        DocumentGenerationJob,
+        TranscriptSegment,
+    )
+
+
+# ============================================================
+# ASR INTERNAL SCHEMAS
+# ============================================================
+
+
+@dataclass
+class Segment:
+    """A speech segment detected by VAD."""
+
+    start_ms: int
+    end_ms: int
+
+    @property
+    def duration_ms(self) -> int:
+        return self.end_ms - self.start_ms
+
+    @property
+    def start_s(self) -> float:
+        return self.start_ms / 1000.0
+
+    @property
+    def end_s(self) -> float:
+        return self.end_ms / 1000.0
+
+
+@dataclass
+class SpeakerTurn:
+    """A time range attributed to one diarized speaker."""
+
+    start_ms: int
+    end_ms: int
+    speaker: int
+
+    @property
+    def duration_ms(self) -> int:
+        return self.end_ms - self.start_ms
+
+    def to_segment(self) -> Segment:
+        """Return time range without speaker label."""
+        return Segment(
+            self.start_ms,
+            self.end_ms,
+        )
+
+
+@dataclass
+class SentenceInfo:
+    """A single sentence with timing and speaker information."""
+
+    text: str
+    start: float
+    end: float
+    speaker: Optional[int] = None
+    char_timestamps: list[list[int]] = field(default_factory=list)
+
+
+# ============================================================
+# PUBLIC API CONTRACTS
+# ============================================================
+
+
+class CreateSourceResponse(BaseModel):
+    """Identifiers needed to display a Source and follow its processing Job."""
+
+    sourceId: str
+    jobId: str
+    status: Literal["queued"]
+
+
+class TranscriptSegmentPayload(BaseModel):
+    """Canonical transcript segment sent through REST and WebSocket."""
+
+    id: int | None = None
+    start_ms: int = Field(ge=0)
+    end_ms: int = Field(ge=0)
+    speaker: int | None = Field(default=None, ge=0)
+    text: str
+
+    @model_validator(mode="after")
+    def validate_time_range(self) -> "TranscriptSegmentPayload":
+        """Reject invalid timestamps."""
+        if self.end_ms < self.start_ms:
+            raise ValueError(
+                "end_ms must be greater than or equal to start_ms"
+            )
+        return self
+
+    @classmethod
+    def from_db(
+        cls,
+        segment: "TranscriptSegment",
+    ) -> "TranscriptSegmentPayload":
+        return cls(
+            id=segment.id,
+            start_ms=segment.start_ms,
+            end_ms=segment.end_ms,
+            speaker=segment.speaker,
+            text=segment.text,
+        )
 
 if TYPE_CHECKING:
     from meetasr.backend.db.models_phase2 import (
