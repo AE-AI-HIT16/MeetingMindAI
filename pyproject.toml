@@ -7,7 +7,7 @@ name = "meetasr"
 version = "0.1.0"
 description = "Meeting Speech Recognition + LLM Summarization — rebuilt from FunASR"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.9"
 license = "MIT"
 
 authors = [

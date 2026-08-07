@@ -5,13 +5,13 @@ on:
     branches:
       - main
       - develop
-      - feature/*
-      - duykhanh/test-deploy
+      - feature/* # Hỗ trợ deploy cả nhánh feature để test
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
 
+    # Rất quan trọng: Báo cho GitHub Actions biết code nằm ở thư mục frontend-next
     defaults:
       run:
         working-directory: ./frontend-next
@@ -25,68 +25,26 @@ jobs:
           npm install --global vercel@latest
           npm install --global pnpm@9
 
-      - name: Create Vercel project config
-        run: |
-          mkdir -p .vercel
-
-          cat > .vercel/project.json <<EOF
-          {
-            "orgId": "${VERCEL_ORG_ID}",
-            "projectId": "${VERCEL_PROJECT_ID}"
-          }
-          EOF
-
-          echo "Created Vercel project config:"
-          cat .vercel/project.json
-
+      - name: Pull Vercel Environment Information
+        run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
         env:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
 
-      - name: Verify Vercel authentication
-        run: |
-          vercel whoami --token="${VERCEL_TOKEN}"
-        env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-
-      - name: Pull Vercel Project Settings and Environment
-        run: |
-          vercel pull \
-            --yes \
-            --environment=production \
-            --token="${VERCEL_TOKEN}"
-
-          echo "Vercel files:"
-          find .vercel -maxdepth 2 -type f -print || true
-
-          echo "Environment file:"
-          ls -la .env.local || true
-
-        env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-
-      - name: Check Environment Variables
-        run: |
-          echo "Loaded environment keys:"
-          grep -E "^[A-Z0-9_]+=" .env.local || true
-
-      - name: Install dependencies
-        run: |
-          pnpm install --frozen-lockfile
-
       - name: Build Project Artifacts
-        run: |
-          vercel build \
-            --prod \
-            --token="${VERCEL_TOKEN}"
+        run: vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
         env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+          RUNPOD_ENDPOINT_ID: ${{ secrets.RUNPOD_ENDPOINT_ID }}
+          # NEXTAUTH_URL bắt buộc phải là URL hợp lệ, ngay cả lúc build.
+          # Nếu chưa có Secret thì dùng URL placeholder để tránh crash.
+          NEXTAUTH_URL: ${{ secrets.NEXTAUTH_URL || 'https://meeting-mind-ai.vercel.app' }}
+          NEXTAUTH_SECRET: ${{ secrets.NEXTAUTH_SECRET }}
 
       - name: Deploy Project Artifacts to Vercel
-        run: |
-          vercel deploy \
-            --prebuilt \
-            --prod \
-            --token="${VERCEL_TOKEN}"
+        run: vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }}
         env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}

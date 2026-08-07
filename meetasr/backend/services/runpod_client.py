@@ -3,7 +3,7 @@ import asyncio
 from typing import Any, Dict
 import httpx
 
-class RunpodClient:
+class RunPodClient:
     """Simple HTTP client to call RunPod model APIs with exponential backoff.
     Uses environment variables:
         RUNPOD_URL — base URL of the RunPod server.

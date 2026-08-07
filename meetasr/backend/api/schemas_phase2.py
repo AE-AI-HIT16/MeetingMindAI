@@ -95,8 +95,7 @@ class TranscriptSegmentPayload(BaseModel):
     text: str
 
     @model_validator(mode="after")
-    def validate_time_range(self) -> "TranscriptSegmentPayload":
-        """Reject invalid timestamps."""
+    def validate_time_range(self):
         if self.end_ms < self.start_ms:
             raise ValueError(
                 "end_ms must be greater than or equal to start_ms"
@@ -108,49 +107,7 @@ class TranscriptSegmentPayload(BaseModel):
         cls,
         segment: "TranscriptSegment",
     ) -> "TranscriptSegmentPayload":
-        return cls(
-            id=segment.id,
-            start_ms=segment.start_ms,
-            end_ms=segment.end_ms,
-            speaker=segment.speaker,
-            text=segment.text,
-        )
 
-if TYPE_CHECKING:
-    from meetasr.backend.db.models_phase2 import (
-        Document,
-        DocumentGenerationJob,
-        TranscriptSegment,
-    )
-
-
-class CreateSourceResponse(BaseModel):
-    """Identifiers needed to display a Source and follow its processing Job."""
-
-    sourceId: str
-    jobId: str
-    status: Literal["queued"]
-
-
-class TranscriptSegmentPayload(BaseModel):
-    """Canonical transcript segment sent through REST and WebSocket."""
-
-    id: int | None = None
-    start_ms: int = Field(ge=0)
-    end_ms: int = Field(ge=0)
-    speaker: int | None = Field(default=None, ge=0)
-    text: str
-
-    @model_validator(mode="after")
-    def validate_time_range(self) -> "TranscriptSegmentPayload":
-        """Reject segments whose end timestamp precedes their start."""
-        if self.end_ms < self.start_ms:
-            raise ValueError("end_ms must be greater than or equal to start_ms")
-        return self
-
-    @classmethod
-    def from_db(cls, segment: "TranscriptSegment") -> "TranscriptSegmentPayload":
-        """Convert a persisted Phase 2 segment into its public payload."""
         return cls(
             id=segment.id,
             start_ms=segment.start_ms,
@@ -164,7 +121,11 @@ class StatusEvent(BaseModel):
     """Job stage/progress update."""
 
     type: Literal["status"] = "status"
-    stage: Literal["extracting_audio", "transcribing", "generating_doc"]
+    stage: Literal[
+        "extracting_audio",
+        "transcribing",
+        "generating_doc",
+    ]
     progress: float = Field(ge=0.0, le=1.0)
 
 
@@ -191,14 +152,14 @@ class SpeakerAssignment(BaseModel):
 
 
 class SpeakerUpdateEvent(BaseModel):
-    """Apply full-file diarization results by persisted segment ID."""
+    """Apply diarization results."""
 
     type: Literal["speaker_update"] = "speaker_update"
     updates: list[SpeakerAssignment]
 
 
 class DoneEvent(BaseModel):
-    """Terminal success event for an upload Job."""
+    """Terminal success event."""
 
     type: Literal["done"] = "done"
     duration_ms: int = Field(ge=0)
@@ -207,7 +168,7 @@ class DoneEvent(BaseModel):
 
 
 class ErrorEvent(BaseModel):
-    """Terminal failure event for an upload Job."""
+    """Terminal failure event."""
 
     type: Literal["error"] = "error"
     code: str
@@ -215,21 +176,46 @@ class ErrorEvent(BaseModel):
 
 
 class FinalizeDocumentRequest(BaseModel):
-    """Requested final representation of a live document."""
+    """Requested final document representation."""
 
-    mode: Literal["summary", "full_text"]
+    mode: Literal[
+        "summary",
+        "full_text",
+    ]
 
 
 class DocumentGenerationResponse(BaseModel):
-    """Accepted/background state returned by the finalize endpoint."""
+    """Background document generation status."""
 
     generationJobId: str
     documentId: str
     sourceId: str
-    mode: Literal["summary", "full_text"]
-    status: Literal["queued", "processing", "done", "failed"]
-    stage: Literal["queued", "generating", "saving", "done", "failed"]
-    progress: float = Field(ge=0.0, le=1.0)
+
+    mode: Literal[
+        "summary",
+        "full_text",
+    ]
+
+    status: Literal[
+        "queued",
+        "processing",
+        "done",
+        "failed",
+    ]
+
+    stage: Literal[
+        "queued",
+        "generating",
+        "saving",
+        "done",
+        "failed",
+    ]
+
+    progress: float = Field(
+        ge=0.0,
+        le=1.0,
+    )
+
     error: str | None = None
 
     @classmethod
@@ -237,6 +223,7 @@ class DocumentGenerationResponse(BaseModel):
         cls,
         generation: "DocumentGenerationJob",
     ) -> "DocumentGenerationResponse":
+
         return cls(
             generationJobId=generation.id,
             documentId=generation.document_id,
@@ -250,33 +237,54 @@ class DocumentGenerationResponse(BaseModel):
 
 
 class DocumentGenerationStatusEvent(BaseModel):
-    """Progress update for one background document-generation job."""
+    """Progress update for document generation."""
 
     type: Literal["document_status"] = "document_status"
+
     generation_job_id: str
     document_id: str
-    stage: Literal["queued", "generating", "saving"]
-    progress: float = Field(ge=0.0, le=1.0)
+
+    stage: Literal[
+        "queued",
+        "generating",
+        "saving",
+    ]
+
+    progress: float = Field(
+        ge=0.0,
+        le=1.0,
+    )
 
 
 class DocumentGenerationDoneEvent(BaseModel):
-    """Terminal success for background document generation."""
+    """Document generation finished."""
 
     type: Literal["document_done"] = "document_done"
+
     generation_job_id: str
     document_id: str
-    mode: Literal["summary", "full_text"]
+
+    mode: Literal[
+        "summary",
+        "full_text",
+    ]
 
 
 class DocumentGenerationErrorEvent(BaseModel):
-    """Terminal failure for background document generation."""
+    """Document generation failed."""
 
     type: Literal["document_error"] = "document_error"
+
     generation_job_id: str
     document_id: str
+
     code: str
     message: str
-    retry_after: int | None = Field(default=None, ge=0)
+
+    retry_after: int | None = Field(
+        default=None,
+        ge=0,
+    )
 
 
 class DocumentResponse(BaseModel):
@@ -284,13 +292,24 @@ class DocumentResponse(BaseModel):
 
     id: str
     sourceId: str
-    mode: Literal["live", "summary", "full_text"]
+
+    mode: Literal[
+        "live",
+        "summary",
+        "full_text",
+    ]
+
     markdown: str
     createdAt: str
     updatedAt: str
 
+
     @classmethod
-    def from_db(cls, document: "Document") -> "DocumentResponse":
+    def from_db(
+        cls,
+        document: "Document",
+    ) -> "DocumentResponse":
+
         return cls(
             id=document.id,
             sourceId=document.source_id,

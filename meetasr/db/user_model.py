@@ -24,6 +24,7 @@ class User(SQLModel, table=True):
     __tablename__ = "users"
     __table_args__ = (
         UniqueConstraint("provider", "provider_id", name="uq_provider_id"),
+        {"extend_existing": True},
     )
 
     id: str = Field(default_factory=_new_uuid, primary_key=True)
