@@ -4,31 +4,29 @@ services:
   # =========================
   # RUNPOD MODEL SERVER
   # =========================
-#  meetasr_runpod:
-#    build:
-#      context: .
-#      dockerfile: Dockerfile.runpod
-#    image: khanhsayhi/meetasr-runpod:latest
-#    container_name: meetasr_runpod
-#    restart: unless-stopped
-#    ports:
-#      - "8001:8001"
-#    environment:
-#      - PORT=8001
-#      - RUNPOD_API_KEY=${RUNPOD_API_KEY:-}
-#    volumes:
-#      # Hugging Face cache
-#      - ./model_cache/huggingface:/root/.cache/huggingface
-#      # ModelScope cache
-#      - ./model_cache/modelscope:/root/.cache/modelscope
-#    healthcheck:
-#      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
-#      interval: 30s
-#      timeout: 10s
-#      retries: 3
-#      start_period: 60s
-
-
+  meetasr_runpod:
+    build:
+      context: .
+      dockerfile: Dockerfile.runpod
+    image: khanhsayhi/meetasr-runpod:latest
+    container_name: meetasr_runpod
+    restart: unless-stopped
+    ports:
+      - "8001:8001"
+    environment:
+      - PORT=8001
+      - RUNPOD_API_KEY=${RUNPOD_API_KEY:-}
+    volumes:
+      # Hugging Face cache
+      - ./model_cache/huggingface:/root/.cache/huggingface
+      # ModelScope cache
+      - ./model_cache/modelscope:/root/.cache/modelscope
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
     # Uncomment deploy block if running on host with GPU / nvidia-container-toolkit:
     # deploy:
     #   resources:
@@ -49,8 +47,8 @@ services:
     container_name: meetasr_backend
     restart: unless-stopped
     depends_on:
-#      meetasr_runpod:
-#        condition: service_healthy
+      meetasr_runpod:
+        condition: service_healthy
       postgres_db:
         condition: service_healthy
       minio_storage:
@@ -59,23 +57,23 @@ services:
       - "8000:8000"
     environment:
       # ===== RunPod Connection =====
-      RUNPOD_URL: http://meetasr_runpod:8001
+      RUNPOD_URL: ${RUNPOD_URL:-http://meetasr_runpod:8001}
       RUNPOD_API_KEY: ${RUNPOD_API_KEY:-}
 
       # ===== Database =====
-      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres_db:5432/${POSTGRES_DB}
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-admin}:${POSTGRES_PASSWORD:-password123}@postgres_db:5432/${POSTGRES_DB:-meetasr_db}
 
       # ===== LLM =====
-      GROQ_API_KEY: ${GROQ_API_KEY}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
 
       # ===== Storage =====
       STORAGE_BACKEND: s3
 
       # ===== MinIO =====
       MINIO_ENDPOINT: http://minio_storage:9000
-      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
-      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
-      MINIO_BUCKET: ${MINIO_BUCKET}
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-admin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-password123}
+      MINIO_BUCKET: ${MINIO_BUCKET:-meetasr-audio}
       MINIO_SECURE: "false"
 
       # Browser presigned URL
@@ -96,15 +94,15 @@ services:
     container_name: meetasr_postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER:-admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password123}
+      POSTGRES_DB: ${POSTGRES_DB:-meetasr_db}
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-admin} -d ${POSTGRES_DB:-meetasr_db}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -117,8 +115,8 @@ services:
     container_name: meetasr_minio
     restart: unless-stopped
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-admin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-password123}
     command: server /data --console-address ":9001"
     ports:
       - "9000:9000"
