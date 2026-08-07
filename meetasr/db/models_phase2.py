@@ -5,6 +5,8 @@
     Source (1) ──► Document (nhiều — summary, full_text, live…)
     Job    (1) ──► TranscriptSegment (nhiều)
 """
+
+from __future__ import annotations
 import uuid
 from datetime import datetime
 from typing import List, Optional

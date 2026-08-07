@@ -1,5 +1,7 @@
 """Central registry for all MeetASR components."""
 
+from __future__ import annotations
+
 import logging
 import inspect
 from dataclasses import dataclass, field

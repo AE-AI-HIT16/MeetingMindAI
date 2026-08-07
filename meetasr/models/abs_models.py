@@ -1,5 +1,7 @@
 """Abstract base classes for all model types."""
 
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 import numpy as np
 from meetasr.schemas import Segment
