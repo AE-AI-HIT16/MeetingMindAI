@@ -36,7 +36,7 @@ jobs:
           }
           EOF
 
-          echo "Vercel project config:"
+          echo "Created Vercel project config:"
           cat .vercel/project.json
 
         env:
@@ -49,22 +49,25 @@ jobs:
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
 
-      - name: Pull Vercel Environment Variables
+      - name: Pull Vercel Project Settings and Environment
         run: |
-          vercel env pull .env.local \
-            --environment=production \
+          vercel pull \
             --yes \
+            --environment=production \
             --token="${VERCEL_TOKEN}"
 
-          echo "Environment loaded:"
-          ls -la .env.local
+          echo "Vercel files:"
+          find .vercel -maxdepth 2 -type f -print || true
+
+          echo "Environment file:"
+          ls -la .env.local || true
 
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
 
-      - name: Check environment variables
+      - name: Check Environment Variables
         run: |
-          echo "Available environment keys:"
+          echo "Loaded environment keys:"
           grep -E "^[A-Z0-9_]+=" .env.local || true
 
       - name: Install dependencies
