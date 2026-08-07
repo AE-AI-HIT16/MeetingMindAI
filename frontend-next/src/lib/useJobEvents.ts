@@ -21,7 +21,7 @@ export interface JobEventsState {
 }
 
 async function jobEventsUrl(jobId: string): Promise<string> {
-  const apiBase = process.env.NEXT_PUBLIC_MEETASR_API || process.env.MEETASR_API || "http://127.0.0.1:8000";
+  const apiBase = process.env.NEXT_PUBLIC_MEETASR_API || process.env.MEETASR_API || "http://56.10.9.132:8000";
   const wsBase = apiBase.replace(/^http/, "ws");
   return `${wsBase}/v1/jobs/${jobId}/events`;
 }

@@ -57,7 +57,7 @@ export interface RealtimeStreamActions {
 /** Build the WebSocket URL based on the unified API base URL. */
 async function buildWsUrl(): Promise<string> {
   // Use the same environment variable as the REST API to ensure they always point to the same backend.
-  const apiBase = process.env.NEXT_PUBLIC_MEETASR_API || process.env.MEETASR_API || "http://127.0.0.1:8000";
+  const apiBase = process.env.NEXT_PUBLIC_MEETASR_API || process.env.MEETASR_API || "http://56.10.9.132:8000";
 
   // Convert http/https to ws/wss
   const wsBase = apiBase.replace(/^http/, "ws");

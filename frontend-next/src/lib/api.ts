@@ -6,7 +6,7 @@
  *  - Dễ mock khi test.
  *  - Xử lý lỗi thống nhất (throw APIError với code + message).
  *
- * Next.js rewrite trong next.config.ts tự proxy /v1/* → http://127.0.0.1:8000/v1/*
+ * Next.js rewrite tự proxy /v1/* → http://56.10.9.132:8000/v1/*
  * nên không cần CORS setup và không cần biết host của backend.
  */
 
@@ -37,7 +37,7 @@ export class APIError extends Error {
  * Dùng NEXT_PUBLIC_MEETASR_API cho cả Client và Server (ưu tiên biến public).
  */
 function getApiBase(): string {
-  return process.env.NEXT_PUBLIC_MEETASR_API || process.env.MEETASR_API || "http://127.0.0.1:8000";
+  return process.env.NEXT_PUBLIC_MEETASR_API || process.env.MEETASR_API || "http://56.10.9.132:8000";
 }
 
 /**

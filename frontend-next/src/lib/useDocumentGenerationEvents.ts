@@ -21,7 +21,7 @@ interface TrackedGenerationState extends DocumentGenerationEventsState {
 }
 
 function documentEventsUrl(generationJobId: string): string {
-  const apiBase = process.env.NEXT_PUBLIC_MEETASR_API || process.env.MEETASR_API || "http://127.0.0.1:8000";
+  const apiBase = process.env.NEXT_PUBLIC_MEETASR_API || process.env.MEETASR_API || "http://56.10.9.132:8000";
   const wsBase = apiBase.replace(/^http/, "ws");
   return `${wsBase}/v1/document-jobs/${generationJobId}/events`;
 }

@@ -42,7 +42,7 @@ export const authOptions: NextAuthOptions = {
 
   callbacks: {
     async jwt({ token, account, user }) {
-      const apiBase = process.env.MEETASR_API || "http://127.0.0.1:8000";
+      const apiBase = process.env.MEETASR_API || process.env.NEXT_PUBLIC_MEETASR_API || "http://56.10.9.132:8000";
 
       // --- Lần đăng nhập đầu tiên: Sync với Backend ---
       if (account && user) {
