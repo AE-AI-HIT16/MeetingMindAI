@@ -80,8 +80,8 @@ export function useJobEvents(jobId: string | null): JobEventsState {
               incoming.id !== null
                 ? item.id === incoming.id
                 : item.startMs === incoming.startMs &&
-                  item.endMs === incoming.endMs &&
-                  item.text === incoming.text,
+                item.endMs === incoming.endMs &&
+                item.text === incoming.text,
             );
 
             let next: typeof current;

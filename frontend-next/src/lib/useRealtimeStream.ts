@@ -58,10 +58,10 @@ export interface RealtimeStreamActions {
 async function buildWsUrl(): Promise<string> {
   // Use the same environment variable as the REST API to ensure they always point to the same backend.
   const apiBase = process.env.NEXT_PUBLIC_MEETASR_API || process.env.MEETASR_API || "http://127.0.0.1:8000";
-  
+
   // Convert http/https to ws/wss
   const wsBase = apiBase.replace(/^http/, "ws");
-  
+
   return `${wsBase}/v1/realtime/stream`;
 }
 
@@ -105,7 +105,7 @@ export function useRealtimeStream(): RealtimeStreamState &
 
     // Close AudioContext
     if (audioCtxRef.current && audioCtxRef.current.state !== "closed") {
-      audioCtxRef.current.close().catch(() => {});
+      audioCtxRef.current.close().catch(() => { });
       audioCtxRef.current = null;
     }
 
@@ -145,8 +145,8 @@ export function useRealtimeStream(): RealtimeStreamState &
     try {
       const stream = source === "microphone"
         ? await navigator.mediaDevices.getUserMedia({
-            audio: { channelCount: 1, sampleRate: 16000, echoCancellation: true, noiseSuppression: true },
-          })
+          audio: { channelCount: 1, sampleRate: 16000, echoCancellation: true, noiseSuppression: true },
+        })
         : await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
 
       if (stream.getAudioTracks().length === 0) {
@@ -304,7 +304,7 @@ export function useRealtimeStream(): RealtimeStreamState &
               } else {
                 next = [...prev, item];
               }
-//               const next = [...prev, item];
+              //               const next = [...prev, item];
 
               next.sort((a, b) => a.startMs - b.startMs);
               return next;
