@@ -82,22 +82,72 @@ jobs:
   # ============================================================
   # JOB 3: Build & Push RunPod Docker Image
   # ============================================================
+
   build-push-runpod:
     name: Build & Push RunPod Docker Image
     needs: test
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout source code
+        uses: actions/checkout@v4
 
-      - uses: docker/setup-buildx-action@v3
+      - name: Show runner information
+        run: |
+          echo "===== RUNNER INFO ====="
+          uname -a
+          echo
+          echo "===== CPU ====="
+          nproc
+          echo
+          echo "===== MEMORY ====="
+          free -h
+          echo
+          echo "===== DISK ====="
+          df -h
+          echo
+          echo "===== DOCKER ====="
+          docker version
+          docker info
 
-      - uses: docker/login-action@v3
+      - name: Check RunPod Dockerfile
+        run: |
+          echo "===== Dockerfile.runpod ====="
+          ls -lh Dockerfile.runpod
+          echo
+          sed -n '1,240p' Dockerfile.runpod
+  
+          echo
+          echo "===== Build context ====="
+          du -sh .
+          du -sh ./* 2>/dev/null | sort -h | tail -30
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Inspect Buildx
+        run: |
+          echo "===== BUILDX VERSION ====="
+          docker buildx version
+  
+          echo
+          echo "===== BUILDX INSPECT ====="
+          docker buildx inspect --bootstrap
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - uses: docker/build-push-action@v6
+      - name: Verify Docker Hub login
+        run: |
+          echo "Docker Hub login successful."
+          docker info | grep -E "Username|Registry" || true
+
+      - name: Build & Push RunPod Docker Image
+        id: build-runpod
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: ./Dockerfile.runpod
@@ -105,10 +155,66 @@ jobs:
           tags: |
             ${{ env.RUNPOD_IMAGE }}:latest
             ${{ env.RUNPOD_IMAGE }}:${{ github.sha }}
+          provenance: false
+          sbom: false
+          outputs: type=registry
+          pull: true
+          no-cache: true
+
+      - name: Show Docker state after build
+        if: always()
+        run: |
+          echo "===== BUILD RESULT ====="
+          docker ps -a || true
+  
+          echo
+          echo "===== DOCKER DISK USAGE ====="
+          docker system df || true
+  
+          echo
+          echo "===== DISK AFTER BUILD ====="
+          df -h
+  
+          echo
+          echo "===== MEMORY AFTER BUILD ====="
+          free -h
+
+      - name: RunPod build failed diagnostics
+        if: failure()
+        run: |
+          echo "=================================================="
+          echo "RUNPOD DOCKER BUILD/PUSH FAILED"
+          echo "=================================================="
+  
+          echo
+          echo "===== EXIT / ENVIRONMENT ====="
+          echo "GITHUB_SHA=${GITHUB_SHA}"
+          echo "RUNPOD_IMAGE=${RUNPOD_IMAGE}"
+  
+          echo
+          echo "===== MEMORY ====="
+          free -h
+  
+          echo
+          echo "===== DISK ====="
+          df -h
+  
+          echo
+          echo "===== INODES ====="
+          df -i
+  
+          echo
+          echo "===== DOCKER DISK ====="
+          docker system df || true
+  
+          echo
+          echo "===== DOCKER INFO ====="
+          docker info || true
 
   # ============================================================
   # JOB 4: Deploy Backend to EC2
   # ============================================================
+
   deploy-backend:
     name: Deploy Backend to EC2
     needs: build-push-backend
@@ -124,23 +230,23 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
             set -e
-
+  
             echo "Pull latest backend image..."
             docker pull ${{ env.BACKEND_IMAGE }}:latest
-
-            if [ -d "/opt/meetasr" ]; then
-              cd /opt/meetasr
-            elif [ -d "$HOME/meetasr" ]; then
-              cd $HOME/meetasr
-            else
-              echo "MeetASR directory not found."
-              exit 1
-            fi
-
+  
+            echo "Go to backend directory..."
+            cd /home/ubuntu/Backend
+  
+            echo "Pull latest compose image..."
             docker compose pull meetasr_backend
+  
+            echo "Restart backend..."
             docker compose up -d --no-deps meetasr_backend
-
+  
+            echo "Cleanup old images..."
             docker image prune -f
+  
+            echo "Backend deployment completed successfully."
 
   # ============================================================
   # JOB 5: Notify RunPod
