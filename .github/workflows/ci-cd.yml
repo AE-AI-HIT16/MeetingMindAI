@@ -286,42 +286,55 @@ jobs:
           echo "RunPod Load Balancer Health Check"
           echo "=========================================="
 
-          echo "Endpoint ID: ${RUNPOD_ENDPOINT_ID}"
-          echo "Base URL: ${RUNPOD_API_BASE_URL}"
+          # Build base URL properly
+          BASE_URL="${RUNPOD_API_BASE_URL:-https://api.runpod.ai/v2}"
+          BASE_URL="${BASE_URL%/}"
 
-          HEALTH_URL="${RUNPOD_API_BASE_URL}/health"
-
-          echo
-          echo "Checking:"
-          echo "${HEALTH_URL}"
-
-          echo
-          echo "Sending health request..."
-
-          HTTP_CODE=$(curl \
-            --silent \
-            --show-error \
-            --output /tmp/runpod-health-response.txt \
-            --write-out "%{http_code}" \
-            --max-time 30 \
-            -H "Authorization: Bearer ${RUNPOD_API_KEY}" \
-            "${HEALTH_URL}")
-
-          echo
-          echo "HTTP Status: ${HTTP_CODE}"
-
-          echo
-          echo "Response:"
-          cat /tmp/runpod-health-response.txt || true
-
-          echo
-
-          if [ "${HTTP_CODE}" -ge 200 ] && [ "${HTTP_CODE}" -lt 300 ]; then
-            echo "RunPod Load Balancer is healthy."
+          if [ -n "${RUNPOD_ENDPOINT_ID}" ] && [[ "${BASE_URL}" != *"${RUNPOD_ENDPOINT_ID}"* ]]; then
+            HEALTH_URL="${BASE_URL}/${RUNPOD_ENDPOINT_ID}/health"
           else
-            echo "RunPod health check failed."
-            exit 1
+            HEALTH_URL="${BASE_URL}/health"
           fi
 
-          echo
-          echo "RunPod deployment verification completed."
+          echo "Endpoint ID: ${RUNPOD_ENDPOINT_ID}"
+          echo "Base URL: ${BASE_URL}"
+          echo "Health Check Target: ${HEALTH_URL}"
+          echo "------------------------------------------"
+
+          MAX_RETRIES=15
+          RETRY_INTERVAL=10
+
+          for ((i=1; i<=MAX_RETRIES; i++)); do
+            echo "[Attempt ${i}/${MAX_RETRIES}] Sending health request..."
+
+            HTTP_CODE=$(curl \
+              --silent \
+              --show-error \
+              --output /tmp/runpod-health-response.txt \
+              --write-out "%{http_code}" \
+              --max-time 25 \
+              --connect-timeout 10 \
+              -H "Authorization: Bearer ${RUNPOD_API_KEY}" \
+              "${HEALTH_URL}" || echo "000")
+
+            echo "HTTP Status: ${HTTP_CODE}"
+
+            if [ "${HTTP_CODE}" -ge 200 ] && [ "${HTTP_CODE}" -lt 300 ]; then
+              echo
+              echo "Response Body:"
+              cat /tmp/runpod-health-response.txt || true
+              echo
+              echo "RunPod Load Balancer is healthy and responding!"
+              exit 0
+            fi
+
+            if [ ${i} -lt ${MAX_RETRIES} ]; then
+              echo "RunPod server may be cold-starting. Retrying in ${RETRY_INTERVAL}s..."
+              sleep ${RETRY_INTERVAL}
+            fi
+          done
+
+          echo "ERROR: RunPod health check failed after ${MAX_RETRIES} attempts."
+          echo "Last Response Body:"
+          cat /tmp/runpod-health-response.txt || true
+          exit 1
