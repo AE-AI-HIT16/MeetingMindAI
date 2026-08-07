@@ -7,7 +7,8 @@ import numpy as np
 from typing import Any
 import httpx
 
-from meetasr.backend.api.schemas_phase2 import TranscriptSegmentPayload, SentenceInfo, Segment, SpeakerTurn
+from meetasr.backend.api.schemas_phase2 import TranscriptSegmentPayload
+from meetasr.backend.schemas import SentenceInfo, Segment, SpeakerTurn
 from meetasr.backend.utils.audio import load_audio
 
 class ASRServiceResult:
