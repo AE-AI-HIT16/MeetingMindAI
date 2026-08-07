@@ -25,21 +25,29 @@ jobs:
           npm install --global vercel@latest
           npm install --global pnpm@9
 
-      - name: Link Vercel project
+      - name: Create Vercel project config
         run: |
-          vercel link \
-            --yes \
-            --scope="${VERCEL_ORG_ID}" \
-            --project="${VERCEL_PROJECT_ID}" \
-            --token="${VERCEL_TOKEN}"
+          mkdir -p .vercel
+
+          cat > .vercel/project.json <<EOF
+          {
+            "orgId": "${VERCEL_ORG_ID}",
+            "projectId": "${VERCEL_PROJECT_ID}"
+          }
+          EOF
+
+          echo "Vercel project config:"
+          cat .vercel/project.json
+
         env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
 
-      - name: Verify Vercel link
+      - name: Verify Vercel authentication
         run: |
-          cat .vercel/project.json
+          vercel whoami --token="${VERCEL_TOKEN}"
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
 
       - name: Pull Vercel Environment Variables
         run: |
@@ -47,17 +55,21 @@ jobs:
             --environment=production \
             --yes \
             --token="${VERCEL_TOKEN}"
+
+          echo "Environment loaded:"
+          ls -la .env.local
+
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
 
-      - name: Check environment
+      - name: Check environment variables
         run: |
-          echo "Checking env file..."
-          ls -la
-          grep -E "^[A-Z_]+=" .env.local || true
+          echo "Available environment keys:"
+          grep -E "^[A-Z0-9_]+=" .env.local || true
 
       - name: Install dependencies
-        run: pnpm install
+        run: |
+          pnpm install --frozen-lockfile
 
       - name: Build Project Artifacts
         run: |
