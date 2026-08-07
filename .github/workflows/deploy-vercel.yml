@@ -25,22 +25,21 @@ jobs:
           npm install --global vercel@latest
           npm install --global pnpm@9
 
-      - name: Remove old Vercel project configuration
-        run: |
-          rm -rf .vercel
-          echo "Old .vercel directory removed."
-
       - name: Link Vercel project
         run: |
           vercel link \
             --yes \
-            --project=${VERCEL_PROJECT_ID} \
-            --scope=${VERCEL_ORG_ID} \
-            --token=${VERCEL_TOKEN}
+            --scope="${VERCEL_ORG_ID}" \
+            --project="${VERCEL_PROJECT_ID}" \
+            --token="${VERCEL_TOKEN}"
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+      - name: Verify Vercel link
+        run: |
+          cat .vercel/project.json
 
       - name: Pull Vercel Environment Variables
         run: |
