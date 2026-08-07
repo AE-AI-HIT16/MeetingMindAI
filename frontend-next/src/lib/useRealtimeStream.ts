@@ -58,12 +58,16 @@ export interface RealtimeStreamActions {
 async function buildWsUrl(): Promise<string> {
   const wsHost = process.env.NEXT_PUBLIC_WS_HOST;
   if (wsHost) {
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    return `${protocol}//${wsHost}/v1/realtime/stream`;
+    // If user passed full URL in NEXT_PUBLIC_WS_HOST like http://56.10.9.132:8000
+    const cleanHost = wsHost.replace(/^https?:\/\//, "").replace(/^wss?:\/\//, "").replace(/\/+$/, "");
+    if (cleanHost) {
+      const protocol = typeof window !== "undefined" && window.location.protocol === "https:" ? "wss:" : "ws:";
+      return `${protocol}//${cleanHost}/v1/realtime/stream`;
+    }
   }
 
   const apiBase = process.env.NEXT_PUBLIC_MEETASR_API || process.env.MEETASR_API || "http://56.10.9.132:8000";
-  const wsBase = apiBase.replace(/^http/, "ws");
+  const wsBase = apiBase.replace(/^http/, "ws").replace(/\/+$/, "");
   return `${wsBase}/v1/realtime/stream`;
 }
 
