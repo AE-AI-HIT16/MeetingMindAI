@@ -52,7 +52,7 @@ export default function LoginPage() {
     setLoading("guest");
     // Dat cookie guest_mode — middleware cho qua
     document.cookie = "guest_mode=true; path=/; max-age=86400"; // het han sau 24h
-    router.push("/");
+    window.location.href = "/";
   }
 
   const isDisabled = !!loading || status === "loading";

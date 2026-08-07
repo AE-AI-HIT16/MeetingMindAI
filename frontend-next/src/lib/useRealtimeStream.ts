@@ -180,18 +180,28 @@ export function useRealtimeStream(): RealtimeStreamState &
       ws.binaryType = "arraybuffer";
 
       await new Promise<void>((resolve, reject) => {
+        let settled = false;
         ws.onopen = () => {
-          setIsConnected(true);
-          resolve();
+          if (!settled) {
+            settled = true;
+            setIsConnected(true);
+            resolve();
+          }
         };
-        ws.onerror = () => {
-          reject(new Error("Không thể kết nối WebSocket tới backend."));
+        ws.onerror = (e) => {
+          if (!settled) {
+            settled = true;
+            console.error("WebSocket connection error:", wsUrl, e);
+            reject(new Error(`Không thể kết nối WebSocket tới backend (${wsUrl}).`));
+          }
         };
         // Timeout after 5 s
-        setTimeout(
-          () => reject(new Error("WebSocket connection timed out.")),
-          5000,
-        );
+        setTimeout(() => {
+          if (!settled) {
+            settled = true;
+            reject(new Error(`WebSocket connection timed out (${wsUrl}).`));
+          }
+        }, 5000);
       });
 
       // 4. WS message handler — receives transcript_delta JSON
