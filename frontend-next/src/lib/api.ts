@@ -195,7 +195,7 @@ export async function deleteSource(id: string): Promise<void> {
  * Backend hỗ trợ HTTP Range nên trình duyệt có thể tua tự nhiên.
  */
 export function mediaUrl(sourceId: string): string {
-  return `/v1/sources/${sourceId}/media`;
+  return getFullUrl(`/v1/sources/${sourceId}/media`);
 }
 
 // ---------------------------------------------------------------------------
@@ -246,5 +246,5 @@ export function documentExportUrl(
   documentId: string,
   format: "md" | "docx" | "pdf",
 ): string {
-  return `/v1/documents/${documentId}/export?format=${format}`;
+  return getFullUrl(`/v1/documents/${documentId}/export?format=${format}`);
 }

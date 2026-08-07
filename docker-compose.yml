@@ -39,6 +39,7 @@ services:
   # =========================
   # BACKEND (AWS)
   # =========================
+  
   meetasr_backend:
     build:
       context: .
