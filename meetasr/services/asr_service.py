@@ -8,7 +8,6 @@ from meetasr.api.schemas_phase2 import TranscriptSegmentPayload, SentenceInfo, S
 from dataclasses import dataclass
 from meetasr.backend.services.runpod_client import RunPodClient
 
-
 @dataclass(frozen=True)
 class ASRServiceResult:
     """Normalized result consumed by both live and upload workers."""
