@@ -139,6 +139,7 @@ def _get_realtime_pipeline(request: Request) -> ASRPipeline:
 # Health
 # ------------------------------------------------------------------
 @app.get("/health")
+@app.get("/ping")
 async def health():
     return {"status": "ok", "pipeline_loaded": app.state.pipeline is not None}
 
