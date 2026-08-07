@@ -39,6 +39,9 @@ EXPECTED_TOKEN = os.getenv("RUNPOD_API_KEY", "")
 
 security = HTTPBearer(auto_error=False)
 
+from dotenv import load_dotenv
+load_dotenv()
+
 
 # ------------------------------------------------------------------
 # Auth dependency

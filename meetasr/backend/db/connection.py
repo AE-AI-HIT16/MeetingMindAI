@@ -18,9 +18,10 @@ logger = logging.getLogger(__name__)
 # Nạp biến môi trường từ tệp .env
 load_dotenv()
 
-#hệ thống sẽ ưu tiên lấy DATABASE_URL từ file .env
-# Nếu không tìm thấy file .env, nó mới lùi về dùng SQLite mặc định.
 DATABASE_URL: str = os.environ.get("DATABASE_URL", "sqlite:///meetasr.db")
+if "<neon-host>" in DATABASE_URL or "<user>" in DATABASE_URL:
+    DATABASE_URL = "sqlite:///meetasr.db"
+
 
 # Khắc phục lỗi multi-threading của SQLite khi chạy cùng FastAPI (chỉ áp dụng nếu dùng SQLite)
 _connect_args: dict = {}

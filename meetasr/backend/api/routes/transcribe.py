@@ -48,12 +48,11 @@ async def transcribe(
     finally:
         safe_remove(audio_path)
 
-    match response_format:
-        case "text":
-            return PlainTextResponse(result.text)
-        case "srt":
-            return PlainTextResponse(result.to_srt(), media_type="text/srt")
-        case "verbose_json":
-            return JSONResponse(result.to_dict())
-        case _:
-            return {"text": result.text}
+    if response_format == "text":
+        return PlainTextResponse(result.text)
+    elif response_format == "srt":
+        return PlainTextResponse(result.to_srt(), media_type="text/srt")
+    elif response_format == "verbose_json":
+        return JSONResponse(result.to_dict())
+    else:
+        return {"text": result.text}

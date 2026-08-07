@@ -6,7 +6,6 @@
     Job    (1) ──► TranscriptSegment (nhiều)
 """
 
-from __future__ import annotations
 import uuid
 from datetime import datetime
 from typing import List, Optional
@@ -133,12 +132,11 @@ class Job(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
     # Relationships
-    source: Optional[Source] = Relationship(back_populates="job")
+    source: Source = Relationship(back_populates="job")
     segments: List["TranscriptSegment"] = Relationship(
         back_populates="job",
         sa_relationship_kwargs={"cascade": "all, delete-orphan"},
     )
-
 
 
 class TranscriptSegment(SQLModel, table=True):
@@ -160,7 +158,7 @@ class TranscriptSegment(SQLModel, table=True):
     text: str               # recognised text for this segment
 
     # Relationships
-    job: Optional[Job] = Relationship(back_populates="segments")
+    job: Job = Relationship(back_populates="segments")
 
 
 class Document(SQLModel, table=True):
@@ -190,7 +188,7 @@ class Document(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
     # Relationships
-    source: Optional[Source] = Relationship(back_populates="documents")
+    source: Source = Relationship(back_populates="documents")
 
 
 class DocumentGenerationJob(SQLModel, table=True):
@@ -216,7 +214,7 @@ class DocumentGenerationJob(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
-    source: Optional[Source] = Relationship(
+    source: Source = Relationship(
         back_populates="document_generation_jobs"
     )
 
@@ -234,3 +232,4 @@ class DocumentDuplicateArchive(SQLModel, table=True):
     original_created_at: datetime
     original_updated_at: datetime
     archived_at: datetime = Field(default_factory=datetime.utcnow)
+

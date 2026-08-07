@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
-@dataclass(slots=True)
+@dataclass
 class FinalTranscriptJob:
     job_id: int
     audio: np.ndarray
