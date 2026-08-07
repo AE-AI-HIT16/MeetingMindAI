@@ -30,16 +30,6 @@ jobs:
           rm -rf .vercel
           echo "Old .vercel directory removed."
 
-      - name: Verify Vercel secrets
-        run: |
-          echo "VERCEL_ORG_ID=${VERCEL_ORG_ID}"
-          echo "VERCEL_PROJECT_ID=${VERCEL_PROJECT_ID}"
-          echo "VERCEL_TOKEN exists: $([ -n "$VERCEL_TOKEN" ] && echo yes || echo no)"
-        env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-
       - name: Link Vercel project
         run: |
           vercel link \
@@ -52,16 +42,23 @@ jobs:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
 
-      - name: Pull Vercel Environment Information
+      - name: Pull Vercel Environment Variables
         run: |
-          vercel pull \
-            --yes \
+          vercel env pull .env.local \
             --environment=production \
+            --yes \
             --token="${VERCEL_TOKEN}"
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+      - name: Check environment
+        run: |
+          echo "Checking env file..."
+          ls -la
+          grep -E "^[A-Z_]+=" .env.local || true
+
+      - name: Install dependencies
+        run: pnpm install
 
       - name: Build Project Artifacts
         run: |
@@ -70,8 +67,6 @@ jobs:
             --token="${VERCEL_TOKEN}"
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
 
       - name: Deploy Project Artifacts to Vercel
         run: |
@@ -81,5 +76,3 @@ jobs:
             --token="${VERCEL_TOKEN}"
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
