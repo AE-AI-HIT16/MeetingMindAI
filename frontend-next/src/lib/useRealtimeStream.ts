@@ -56,12 +56,14 @@ export interface RealtimeStreamActions {
 
 /** Build the WebSocket URL based on the unified API base URL. */
 async function buildWsUrl(): Promise<string> {
-  // Use the same environment variable as the REST API to ensure they always point to the same backend.
+  const wsHost = process.env.NEXT_PUBLIC_WS_HOST;
+  if (wsHost) {
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    return `${protocol}//${wsHost}/v1/realtime/stream`;
+  }
+
   const apiBase = process.env.NEXT_PUBLIC_MEETASR_API || process.env.MEETASR_API || "http://56.10.9.132:8000";
-
-  // Convert http/https to ws/wss
   const wsBase = apiBase.replace(/^http/, "ws");
-
   return `${wsBase}/v1/realtime/stream`;
 }
 
