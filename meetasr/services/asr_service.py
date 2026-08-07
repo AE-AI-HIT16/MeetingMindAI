@@ -1,15 +1,12 @@
-"""Async adapter around the synchronous MeetPipeline transcription API."""
 
-from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+import numpy as np
 from typing import Any
 
-import numpy as np
-
-from meetasr.api.schemas_phase2 import TranscriptSegmentPayload
-from meetasr.schemas import Segment, SentenceInfo, SpeakerTurn
+from meetasr.api.schemas_phase2 import TranscriptSegmentPayload, SentenceInfo, Segment, SpeakerTurn
+from dataclasses import dataclass
+from meetasr.backend.services.runpod_client import RunPodClient
 
 
 @dataclass(frozen=True)
@@ -34,10 +31,9 @@ class PreparedTranscription:
 class ASRService:
     """Run one shared pipeline off the event loop and normalize its result."""
 
-    def __init__(self, pipeline: Any) -> None:
-        if pipeline is None:
-            raise ValueError("pipeline is required")
-        self.pipeline = pipeline
+    def __init__(self, pipeline: Any = None) -> None:
+        # pipeline is kept for backward compatibility but not used in backend deployment
+        self.client = RunPodClient()
         self._transcribe_lock = asyncio.Lock()
 
     async def transcribe(
@@ -47,11 +43,10 @@ class ASRService:
         offset_ms: int = 0,
         key: str | None = None,
     ) -> ASRServiceResult:
-        # Upload jobs and live-mic sessions share this service. Serialize access
-        # because the underlying pipeline/GPU is not safe to run concurrently.
+        """Upload jobs and live‑mic sessions share this service. Serialize access because the underlying pipeline/GPU is not safe to run concurrently."""
         async with self._transcribe_lock:
             result = await asyncio.to_thread(
-                self.pipeline.transcribe,
+                self.client.transcribe,
                 audio_source,
                 key=key,
             )
@@ -88,21 +83,21 @@ class ASRService:
         self,
         audio_source: Any,
     ) -> PreparedTranscription:
-        """Decode audio and optionally build diarization-first ASR turns."""
+        """Decode audio and optionally build diarization‑first ASR turns."""
         async with self._transcribe_lock:
-            if getattr(self.pipeline, "diarization_first", False):
+            if getattr(self.client, "diarization_first", False):
                 (
                     audio,
                     vad_segments,
                     speaker_turns,
                     duration_ms,
                 ) = await asyncio.to_thread(
-                    self.pipeline.prepare_diarization_first_transcription,
+                    self.client.prepare_incremental,
                     audio_source,
                 )
             else:
                 audio, vad_segments, duration_ms = await asyncio.to_thread(
-                    self.pipeline.prepare_incremental_transcription,
+                    self.client.prepare_incremental,
                     audio_source,
                 )
                 speaker_turns = None
@@ -124,13 +119,13 @@ class ASRService:
         """Run ASR for one VAD segment while preserving global timestamps."""
         kwargs = {"key": key} if key is not None else {}
         effective_language = (
-            getattr(self.pipeline, "transcription_language", "auto")
+            getattr(self.client, "transcription_language", "auto")
             if language == "auto"
             else language
         )
         async with self._transcribe_lock:
             return await asyncio.to_thread(
-                self.pipeline.transcribe_vad_segment,
+                self.client.transcribe_segment,
                 prepared.audio,
                 segment,
                 effective_language,
@@ -142,16 +137,10 @@ class ASRService:
         prepared: PreparedTranscription,
         sentences: list[SentenceInfo],
     ) -> list[SentenceInfo]:
-        """Finalize preassigned turns or run legacy ASR-first diarization."""
+        """Finalize preassigned turns or run legacy ASR‑first diarization."""
         async with self._transcribe_lock:
-            if prepared.speaker_turns is not None:
-                return await asyncio.to_thread(
-                    self.pipeline.finalize_preassigned_transcript,
-                    sentences,
-                )
             return await asyncio.to_thread(
-                self.pipeline.finalize_incremental_transcript,
-                prepared.audio,
+                self.client.finalize_incremental,
+                prepared,
                 sentences,
-                prepared.vad_segments,
             )

@@ -6,6 +6,7 @@ on:
       - main
       - develop
       - feature/* # Hỗ trợ deploy cả nhánh feature để test
+      - duykhanh/test-deploy
 
 jobs:
   deploy:
