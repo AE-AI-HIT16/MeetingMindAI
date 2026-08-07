@@ -21,23 +21,36 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # Quan trọng:
-      # Xóa Vercel project link cũ vì project đã được đổi sang project mới.
+      # Xóa project link cũ
       - name: Remove old Vercel project configuration
-        run: rm -rf .vercel
+        run: |
+          rm -rf .vercel
+          echo "Old .vercel directory removed."
 
       - name: Install Vercel CLI and pnpm
         run: |
           npm install --global vercel@latest
           npm install --global pnpm@9
 
+      # Debug để xác nhận GitHub đang dùng project mới
+      - name: Verify Vercel configuration
+        run: |
+          echo "===== VERCEL CONFIG ====="
+          echo "VERCEL_ORG_ID=${VERCEL_ORG_ID}"
+          echo "VERCEL_PROJECT_ID=${VERCEL_PROJECT_ID}"
+          echo "========================="
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
       - name: Pull Vercel Environment Information
         run: |
           vercel pull \
             --yes \
             --environment=production \
-            --token=${{ secrets.VERCEL_TOKEN }}
+            --token="${VERCEL_TOKEN}"
         env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
 
@@ -45,15 +58,16 @@ jobs:
         run: |
           vercel build \
             --prod \
-            --token=${{ secrets.VERCEL_TOKEN }}
+            --token="${VERCEL_TOKEN}"
         env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
           RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
           RUNPOD_ENDPOINT_ID: ${{ secrets.RUNPOD_ENDPOINT_ID }}
 
-          # NEXTAUTH_URL bắt buộc phải là URL hợp lệ lúc build.
-          # Nếu chưa có Secret thì dùng URL placeholder.
+          # NEXTAUTH_URL phải là URL hợp lệ lúc build.
           NEXTAUTH_URL: ${{ secrets.NEXTAUTH_URL || 'https://meeting-mind-ai.vercel.app' }}
           NEXTAUTH_SECRET: ${{ secrets.NEXTAUTH_SECRET }}
 
@@ -62,7 +76,8 @@ jobs:
           vercel deploy \
             --prebuilt \
             --prod \
-            --token=${{ secrets.VERCEL_TOKEN }}
+            --token="${VERCEL_TOKEN}"
         env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
