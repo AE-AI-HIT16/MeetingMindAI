@@ -99,6 +99,24 @@ async def lifespan(app: FastAPI):
     runpod_api_key = os.environ.get("RUNPOD_API_KEY", "")
     logger.info(f"Using RunPod URL: {runpod_url}")
 
+    # Auto-spawn local RunPod ML engine on port 8001 if port 8001 is closed
+    if "localhost:8001" in runpod_url or "127.0.0.1:8001" in runpod_url:
+        try:
+            import socket
+            import subprocess
+            import sys
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.settimeout(1.0)
+                if s.connect_ex(("127.0.0.1", 8001)) != 0:
+                    logger.info("Port 8001 not detected. Auto-spawning GPU ML Engine on port 8001...")
+                    subprocess.Popen(
+                        [sys.executable, "-m", "uvicorn", "meetasr.runpod.app:app", "--host", "0.0.0.0", "--port", "8001"],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+        except Exception as exc:
+            logger.warning(f"Could not auto-start local RunPod service on port 8001: {exc}")
+
     app.state.asr_service = ASRService(runpod_url=runpod_url, api_key=runpod_api_key)
     app.state.realtime_asr_service = RealtimeASRService(runpod_url=runpod_url, api_key=runpod_api_key)
 

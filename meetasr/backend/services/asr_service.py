@@ -52,7 +52,23 @@ class ASRService:
         self.runpod_url = runpod_url.rstrip("/")
         self.api_key = api_key or os.environ.get("RUNPOD_API_KEY", "")
         self.headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
-        self._transcribe_lock = asyncio.Lock()
+    def _ensure_local_port_8001(self) -> None:
+        """Auto-spawn GPU ML Engine on port 8001 if calling localhost and port 8001 is closed."""
+        if "localhost:8001" in self.runpod_url or "127.0.0.1:8001" in self.runpod_url:
+            try:
+                import socket
+                import subprocess
+                import sys
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.settimeout(1.0)
+                    if s.connect_ex(("127.0.0.1", 8001)) != 0:
+                        subprocess.Popen(
+                            [sys.executable, "-m", "uvicorn", "meetasr.runpod.app:app", "--host", "0.0.0.0", "--port", "8001"],
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                        )
+            except Exception:
+                pass
 
     async def transcribe(
         self,
