@@ -83,15 +83,20 @@ class ASRService:
             path += f"?{parsed.query}"
 
         candidates = [self.runpod_url.rstrip("/")]
-        fallbacks = [
-            "http://localhost:8001",
-            "http://127.0.0.1:8001",
-            "http://host.docker.internal:8001",
-            "http://meetasr_runpod:8001",
-        ]
-        for f in fallbacks:
-            if f.rstrip("/") not in candidates:
-                candidates.append(f.rstrip("/"))
+        is_local_url = any(
+            h in self.runpod_url
+            for h in ("localhost", "127.0.0.1", "host.docker.internal", "meetasr_runpod")
+        )
+        if is_local_url:
+            fallbacks = [
+                "http://localhost:8001",
+                "http://127.0.0.1:8001",
+                "http://host.docker.internal:8001",
+                "http://meetasr_runpod:8001",
+            ]
+            for f in fallbacks:
+                if f.rstrip("/") not in candidates:
+                    candidates.append(f.rstrip("/"))
 
         return [f"{c}{path}" for c in candidates]
 
