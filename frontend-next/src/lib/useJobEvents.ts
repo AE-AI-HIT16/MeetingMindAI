@@ -21,21 +21,23 @@ export interface JobEventsState {
 }
 
 async function jobEventsUrl(jobId: string): Promise<string> {
-  const envHost = process.env.NEXT_PUBLIC_WS_HOST || process.env.NEXT_PUBLIC_MEETASR_API || process.env.MEETASR_API || "http://56.10.9.132:8000";
+  const envHost = process.env.NEXT_PUBLIC_WS_HOST || process.env.NEXT_PUBLIC_MEETASR_API || process.env.MEETASR_API || "http://127.0.0.1:8000";
 
-  let raw = envHost.trim();
+  let raw = envHost.trim().replace(/^["']|["']$/g, "");
   if (!/^https?:\/\//i.test(raw) && !/^wss?:\/\//i.test(raw)) {
-    raw = `http://${raw}`;
+    raw = `https://${raw}`;
   }
 
   try {
     const parsed = new URL(raw);
     const isHttps = typeof window !== "undefined" && window.location.protocol === "https:";
     const wsScheme = isHttps ? "wss:" : "ws:";
-    return `${wsScheme}//${parsed.host}/v1/jobs/${jobId}/events`;
+    const wsUrl = `${wsScheme}//${parsed.host}/v1/jobs/${jobId}/events`;
+    console.log(`[useJobEvents] Connecting to Job Events WS URL: ${wsUrl}`);
+    return wsUrl;
   } catch (err) {
-    console.error("Failed to parse WS URL for job events:", envHost, err);
-    return `ws://56.10.9.132:8000/v1/jobs/${jobId}/events`;
+    console.error("[useJobEvents] Failed to parse WS URL for job events:", envHost, err);
+    return `wss://vc1tkd3pyp231z-8000.proxy.runpod.net/v1/jobs/${jobId}/events`;
   }
 }
 
@@ -199,8 +201,9 @@ export function useJobEvents(jobId: string | null): JobEventsState {
         }
       };
 
-      socket.onerror = () => {
-        setError("Không thể kết nối tới luồng tiến trình.");
+      socket.onerror = (ev) => {
+        console.error("[useJobEvents] WebSocket connection error:", url, ev);
+        setError(`Không thể kết nối tới luồng tiến trình (${url}).`);
       };
       socket.onclose = () => {
         setIsConnected(false);
