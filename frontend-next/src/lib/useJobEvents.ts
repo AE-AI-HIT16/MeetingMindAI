@@ -37,7 +37,7 @@ async function jobEventsUrl(jobId: string): Promise<string> {
     return wsUrl;
   } catch (err) {
     console.error("[useJobEvents] Failed to parse WS URL for job events:", envHost, err);
-    return `wss://vc1tkd3pyp231z-8000.proxy.runpod.net/v1/jobs/${jobId}/events`;
+    return `wss://qr0omrgs411iat-8000.proxy.runpod.net/v1/jobs/${jobId}/events`;
   }
 }
 
