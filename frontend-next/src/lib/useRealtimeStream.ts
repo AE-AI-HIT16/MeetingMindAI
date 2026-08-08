@@ -187,6 +187,11 @@ export function useRealtimeStream(): RealtimeStreamState &
 
       // 3. Open WebSocket
       const wsUrl = await buildWsUrl();
+      console.log("[RealtimeStream] Opening WebSocket connection...");
+      console.log("[RealtimeStream] Target WS URL:", wsUrl);
+      console.log("[RealtimeStream] NEXT_PUBLIC_MEETASR_API:", process.env.NEXT_PUBLIC_MEETASR_API);
+      console.log("[RealtimeStream] Window Location Origin:", typeof window !== "undefined" ? window.location.origin : "server");
+
       const ws = new WebSocket(wsUrl);
       ws.binaryType = "arraybuffer";
 
@@ -195,14 +200,17 @@ export function useRealtimeStream(): RealtimeStreamState &
         ws.onopen = () => {
           if (!settled) {
             settled = true;
+            console.log("[RealtimeStream] WebSocket connected successfully to:", wsUrl);
             setIsConnected(true);
             resolve();
           }
         };
-        ws.onerror = (e) => {
+        ws.onerror = (ev) => {
           if (!settled) {
             settled = true;
-            console.error("WebSocket connection error:", wsUrl, e);
+            console.error("[RealtimeStream] WebSocket onerror event triggered:", ev);
+            console.error("[RealtimeStream] Attempted WS URL:", wsUrl);
+            console.error("[RealtimeStream] Current NEXT_PUBLIC_MEETASR_API:", process.env.NEXT_PUBLIC_MEETASR_API);
             reject(new Error(`Không thể kết nối WebSocket tới backend (${wsUrl}).`));
           }
         };
@@ -210,7 +218,7 @@ export function useRealtimeStream(): RealtimeStreamState &
         setTimeout(() => {
           if (!settled) {
             settled = true;
-            reject(new Error(`WebSocket connection timed out (${wsUrl}).`));
+            reject(new Error(`WebSocket connection to ${wsUrl} timed out.`));
           }
         }, 5000);
       });

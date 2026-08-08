@@ -64,12 +64,13 @@ export const authOptions: NextAuthOptions = {
 
           if (res.ok) {
             const data = await res.json();
+            console.log(`[NextAuth JWT] Sync successful for user: ${data?.user?.id}`);
             token.accessToken = data.access_token;
             token.sub = data.user.id;
             // Lưu thời điểm hết hạn (expires_in trả về = giây)
             token.tokenExpiry = Date.now() + data.expires_in * 1000;
           } else {
-            console.error("Backend sync failed", await res.text());
+            console.error("[NextAuth JWT Error] Backend sync failed with status:", res.status, await res.text());
           }
         } catch (error) {
           console.error("Lỗi khi gọi /v1/auth/sync:", error);

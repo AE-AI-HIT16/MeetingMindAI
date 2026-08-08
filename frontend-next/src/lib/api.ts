@@ -54,33 +54,42 @@ async function apiFetch<T>(
   token?: string,
 ): Promise<T> {
   const url = getFullUrl(input);
+  console.log(`[API] Fetching: ${url} (Base: ${getApiBase()})`);
 
   const headers = new Headers(init?.headers);
   if (token) {
     headers.set("Authorization", `Bearer ${token}`);
   }
 
-  const res = await fetch(url, { ...init, headers });
+  try {
+    const res = await fetch(url, { ...init, headers });
 
-  if (!res.ok) {
-    let message = `HTTP ${res.status}`;
-    try {
-      const body = await res.json();
-      message =
-        body?.detail ??
-        body?.message ??
-        body?.error?.message ??
-        message;
-    } catch {
-      // bỏ qua nếu body không phải JSON
+    if (!res.ok) {
+      let message = `HTTP ${res.status}`;
+      try {
+        const body = await res.json();
+        message =
+          body?.detail ??
+          body?.message ??
+          body?.error?.message ??
+          message;
+      } catch {
+        // bỏ qua nếu body không phải JSON
+      }
+      console.error(`[API Error] ${url} -> Status ${res.status}:`, message);
+      throw new APIError(res.status, message);
     }
-    throw new APIError(res.status, message);
+
+    // 204 No Content — không có body
+    if (res.status === 204) return undefined as T;
+
+    return res.json() as Promise<T>;
+  } catch (err) {
+    if (!(err instanceof APIError)) {
+      console.error(`[API Network Error] Failed to fetch ${url}:`, err);
+    }
+    throw err;
   }
-
-  // 204 No Content — không có body
-  if (res.status === 204) return undefined as T;
-
-  return res.json() as Promise<T>;
 }
 
 // ---------------------------------------------------------------------------
