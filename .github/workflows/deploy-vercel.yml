@@ -35,9 +35,9 @@ jobs:
         run: vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
         env:
           # Environment variables cho MeetASR Backend (RunPod SSL Proxy)
-          NEXT_PUBLIC_MEETASR_API: ${{ secrets.NEXT_PUBLIC_MEETASR_API || 'https://vc1tkd3pyp231z-8000.proxy.runpod.net' }}
-          MEETASR_API: ${{ secrets.MEETASR_API || 'https://vc1tkd3pyp231z-8000.proxy.runpod.net' }}
-          NEXT_PUBLIC_WS_HOST: ${{ secrets.NEXT_PUBLIC_WS_HOST || 'https://vc1tkd3pyp231z-8000.proxy.runpod.net' }}
+          NEXT_PUBLIC_MEETASR_API: ${{ secrets.NEXT_PUBLIC_MEETASR_API || 'https://qr0omrgs411iat-8000.proxy.runpod.net' }}
+          MEETASR_API: ${{ secrets.MEETASR_API || 'https://qr0omrgs411iat-8000.proxy.runpod.net' }}
+          NEXT_PUBLIC_WS_HOST: ${{ secrets.NEXT_PUBLIC_WS_HOST || 'https://qr0omrgs411iat-8000.proxy.runpod.net' }}
           # NEXTAUTH_URL bắt buộc phải là URL hợp lệ, ngay cả lúc build.
           NEXTAUTH_URL: ${{ secrets.NEXTAUTH_URL || 'https://frontend-next-three-smoky.vercel.app' }}
           NEXTAUTH_SECRET: ${{ secrets.NEXTAUTH_SECRET }}
