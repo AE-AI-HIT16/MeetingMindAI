@@ -56,9 +56,9 @@ export interface RealtimeStreamActions {
 
 /** Build the WebSocket URL based on the unified API base URL. */
 async function buildWsUrl(): Promise<string> {
-  const envHost = process.env.NEXT_PUBLIC_WS_HOST || process.env.NEXT_PUBLIC_MEETASR_API || process.env.MEETASR_API || "http://56.10.9.132:8000";
+  const envHost = process.env.NEXT_PUBLIC_WS_HOST || process.env.NEXT_PUBLIC_MEETASR_API || process.env.MEETASR_API || "http://127.0.0.1:8000";
 
-  let raw = envHost.trim();
+  let raw = envHost.trim().replace(/^["']|["']$/g, "");
   if (!/^https?:\/\//i.test(raw) && !/^wss?:\/\//i.test(raw)) {
     raw = `http://${raw}`;
   }

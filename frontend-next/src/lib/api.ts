@@ -37,18 +37,28 @@ export class APIError extends Error {
  * Dùng NEXT_PUBLIC_MEETASR_API cho cả Client và Server (ưu tiên biến public).
  */
 function getApiBase(): string {
-  const base =
+  let base =
     process.env.NEXT_PUBLIC_MEETASR_API ||
     process.env.MEETASR_API ||
     "http://127.0.0.1:8000";
-  return base.trim().replace(/\/+$/, "");
+  base = base.trim().replace(/^["']|["']$/g, "").replace(/\/+$/, "");
+  if (!base.startsWith("http://") && !base.startsWith("https://")) {
+    base = `https://${base}`;
+  }
+  return base;
 }
 
 /**
  * Lấy URL tuyệt đối cho một API endpoint.
  */
 export function getFullUrl(path: string): string {
-  return new URL(path, getApiBase()).toString();
+  const base = getApiBase();
+  const cleanPath = path.startsWith("/") ? path : `/${path}`;
+  try {
+    return new URL(cleanPath, base).toString();
+  } catch {
+    return `${base}${cleanPath}`;
+  }
 }
 
 /** Gửi request và throw APIError nếu response không OK. */
