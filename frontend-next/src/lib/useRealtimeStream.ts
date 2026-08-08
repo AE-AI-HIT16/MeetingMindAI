@@ -70,7 +70,9 @@ async function buildWsUrl(): Promise<string> {
     return `${wsScheme}//${parsed.host}/v1/realtime/stream`;
   } catch (err) {
     console.error("Failed to parse WS URL from:", envHost, err);
-    return "ws://56.10.9.132:8000/v1/realtime/stream";
+    const isHttps = typeof window !== "undefined" && window.location.protocol === "https:";
+    const wsScheme = isHttps ? "wss:" : "ws:";
+    return `${wsScheme}//56.10.9.132:8000/v1/realtime/stream`;
   }
 }
 
