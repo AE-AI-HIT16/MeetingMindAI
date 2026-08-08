@@ -30,7 +30,7 @@ FROM python:3.12-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PATH="/opt/venv/bin:$PATH" \
-    RUNPOD_URL="http://localhost:8001"
+    RUNPOD_URL="http://meetasr_runpod:8001"
 
 WORKDIR /app
 

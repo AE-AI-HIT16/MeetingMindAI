@@ -58,7 +58,7 @@ services:
       - "8000:8000"
     environment:
       # ===== RunPod Connection =====
-      RUNPOD_URL: ${RUNPOD_URL:-https://qr0omrgs411iat-8001.proxy.runpod.net}
+      RUNPOD_URL: ${RUNPOD_URL:-http://meetasr_runpod:8001}
       RUNPOD_API_KEY: ${RUNPOD_API_KEY:-}
 
       # ===== Database =====
