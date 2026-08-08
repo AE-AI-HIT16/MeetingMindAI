@@ -52,6 +52,8 @@ class ASRService:
         self.runpod_url = runpod_url.rstrip("/")
         self.api_key = api_key or os.environ.get("RUNPOD_API_KEY", "")
         self.headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
+        self._transcribe_lock = asyncio.Lock()
+
     def _ensure_local_port_8001(self) -> None:
         """Auto-spawn GPU ML Engine on port 8001 if calling localhost and port 8001 is closed."""
         if "localhost:8001" in self.runpod_url or "127.0.0.1:8001" in self.runpod_url:
