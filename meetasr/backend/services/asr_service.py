@@ -56,24 +56,24 @@ class ASRService:
         self._transcribe_lock = asyncio.Lock()
 
     def _ensure_local_port_8001(self) -> None:
-        """Auto-spawn GPU ML Engine on port 8001 if calling localhost and port 8001 is closed."""
+        """Auto-spawn GPU ML Engine on port 8001 if calling outside Docker and port 8001 is closed."""
         if os.path.exists("/.dockerenv"):
             return
-        if "localhost:8001" in self.runpod_url or "127.0.0.1:8001" in self.runpod_url:
-            try:
-                import socket
-                import subprocess
-                import sys
-                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                    s.settimeout(1.0)
-                    if s.connect_ex(("127.0.0.1", 8001)) != 0:
-                        subprocess.Popen(
-                            [sys.executable, "-m", "uvicorn", "meetasr.runpod.app:app", "--host", "0.0.0.0", "--port", "8001"],
-                            stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL,
-                        )
-            except Exception:
-                pass
+        try:
+            import socket
+            import subprocess
+            import sys
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.settimeout(1.0)
+                if s.connect_ex(("127.0.0.1", 8001)) != 0:
+                    logger.info("Port 8001 is closed. Auto-spawning local ASR model server on port 8001...")
+                    subprocess.Popen(
+                        [sys.executable, "-m", "uvicorn", "meetasr.runpod.app:app", "--host", "0.0.0.0", "--port", "8001"],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+        except Exception as exc:
+            logger.warning("Failed to auto-spawn local ASR server on port 8001: %s", exc)
 
     def _get_candidate_urls(self, target_url: str) -> list[str]:
         from urllib.parse import urlparse
