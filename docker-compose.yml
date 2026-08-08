@@ -60,6 +60,8 @@ services:
       # ===== RunPod Connection =====
       RUNPOD_URL: ${RUNPOD_URL:-http://meetasr_runpod:8001}
       RUNPOD_API_KEY: ${RUNPOD_API_KEY:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
       # ===== Database =====
       DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-admin}:${POSTGRES_PASSWORD:-password123}@postgres_db:5432/${POSTGRES_DB:-meetasr_db}

@@ -108,8 +108,11 @@ class ASRService:
                     return response
             except (httpx.ConnectError, httpx.NetworkError, httpx.TimeoutException) as exc:
                 if attempt == max_retries:
-                    logger.error("ASR service connection failed after %d attempts: %s", max_retries, exc)
-                    raise
+                    logger.error("ASR service connection to %s failed after %d attempts: %s", url, max_retries, exc)
+                    raise RuntimeError(
+                        f"Cannot connect to ASR service at '{url}': {exc}. "
+                        f"Verify that RUNPOD_URL is correct and accessible from the container."
+                    ) from exc
                 logger.warning(
                     "ASR service connection error to %s (attempt %d/%d): %s. Retrying in %.1fs...",
                     url, attempt, max_retries, exc, delay
