@@ -44,13 +44,14 @@ export default async function LibraryPage() {
 
   const { sources, loadError } = await listSources(token)
     .then((items) => ({ sources: items, loadError: null }))
-    .catch((error: unknown) => ({
-      sources: [],
-      loadError:
-        error instanceof APIError
-          ? error.message
-          : "Không thể kết nối tới máy chủ.",
-    }));
+    .catch((error: unknown) => {
+      console.error("[LibraryPage Server Error] listSources failed:", error);
+      const detail = error instanceof Error ? error.message : String(error);
+      return {
+        sources: [],
+        loadError: `Không thể kết nối tới máy chủ (${detail}).`,
+      };
+    });
   const processing = sources.filter((s) => s.status === "processing").length;
 
   return (
