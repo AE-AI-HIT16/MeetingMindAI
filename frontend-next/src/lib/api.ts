@@ -37,7 +37,11 @@ export class APIError extends Error {
  * Dùng NEXT_PUBLIC_MEETASR_API cho cả Client và Server (ưu tiên biến public).
  */
 function getApiBase(): string {
-  return process.env.NEXT_PUBLIC_MEETASR_API || process.env.MEETASR_API || "http://56.10.9.132:8000";
+  const base =
+    process.env.NEXT_PUBLIC_MEETASR_API ||
+    process.env.MEETASR_API ||
+    "http://127.0.0.1:8000";
+  return base.trim().replace(/\/+$/, "");
 }
 
 /**
