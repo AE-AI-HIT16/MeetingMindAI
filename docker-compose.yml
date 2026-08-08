@@ -23,10 +23,10 @@ services:
       - ./model_cache/modelscope:/root/.cache/modelscope
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
-      interval: 30s
+      interval: 20s
       timeout: 10s
-      retries: 3
-      start_period: 60s
+      retries: 10
+      start_period: 180s
     # Uncomment deploy block if running on host with GPU / nvidia-container-toolkit:
     # deploy:
     #   resources:
