@@ -1,4 +1,6 @@
 import asyncio
+import httpx
+import numpy as np
 from types import SimpleNamespace
 
 import pytest
@@ -298,3 +300,50 @@ def test_asr_service_uses_diarization_first_turns_and_default_language(
     finalized = asyncio.run(run_flow())
 
     assert finalized[0].speaker == 1
+
+
+def test_backend_asr_service_retries_on_503(monkeypatch) -> None:
+    from meetasr.backend.services.asr_service import ASRService as BackendASRService
+
+    service = BackendASRService(runpod_url="http://localhost:8001")
+    service._ensure_local_port_8001 = lambda: None  # No-op in test
+
+    calls = 0
+
+    class MockResponse:
+        def __init__(self, status_code: int, data: dict):
+            self.status_code = status_code
+            self._data = data
+
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                request = httpx.Request("POST", "http://localhost:8001/v1/prepare_incremental")
+                response = httpx.Response(self.status_code, json=self._data, request=request)
+                raise httpx.HTTPStatusError("503 error", request=request, response=response)
+
+        def json(self):
+            return self._data
+
+    async def mock_post(self_client, url, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return MockResponse(503, {"detail": "Pipeline not loaded"})
+        return MockResponse(200, {
+            "vad_segments": [{"start_ms": 0, "end_ms": 2000}],
+            "duration_ms": 2000,
+            "speaker_turns": None,
+        })
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+
+    async def run():
+        audio = np.zeros(2 * 16000, dtype=np.float32)
+        return await service.prepare_incremental(audio)
+
+    prepared = asyncio.run(run())
+    assert calls == 2
+    assert prepared.duration_ms == 2000
+    assert len(prepared.vad_segments) == 1
+
+

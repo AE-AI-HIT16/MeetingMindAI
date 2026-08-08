@@ -33,9 +33,16 @@ class ASRService:
     """Run one shared pipeline off the event loop and normalize its result."""
 
     def __init__(self, pipeline: Any = None) -> None:
-        # pipeline is kept for backward compatibility but not used in backend deployment
-        self.client = RunPodClient()
+        self.client = pipeline if pipeline is not None else RunPodClient()
         self._transcribe_lock = asyncio.Lock()
+
+    async def _call_client(self, fn: Any, *args: Any, **kwargs: Any) -> Any:
+        if asyncio.iscoroutinefunction(fn):
+            return await fn(*args, **kwargs)
+        res = fn(*args, **kwargs)
+        if asyncio.iscoroutine(res):
+            return await res
+        return res
 
     async def transcribe(
         self,
@@ -46,7 +53,7 @@ class ASRService:
     ) -> ASRServiceResult:
         """Upload jobs and live‑mic sessions share this service. Serialize access because the underlying pipeline/GPU is not safe to run concurrently."""
         async with self._transcribe_lock:
-            result = await asyncio.to_thread(
+            result = await self._call_client(
                 self.client.transcribe,
                 audio_source,
                 key=key,
@@ -87,21 +94,29 @@ class ASRService:
         """Decode audio and optionally build diarization‑first ASR turns."""
         async with self._transcribe_lock:
             if getattr(self.client, "diarization_first", False):
+                method = getattr(
+                    self.client,
+                    "prepare_diarization_first_transcription",
+                    getattr(self.client, "prepare_incremental", None),
+                )
                 (
                     audio,
                     vad_segments,
                     speaker_turns,
                     duration_ms,
-                ) = await asyncio.to_thread(
-                    self.client.prepare_incremental,
-                    audio_source,
-                )
+                ) = await self._call_client(method, audio_source)
             else:
-                audio, vad_segments, duration_ms = await asyncio.to_thread(
-                    self.client.prepare_incremental,
-                    audio_source,
+                method = getattr(
+                    self.client,
+                    "prepare_incremental_transcription",
+                    getattr(self.client, "prepare_incremental", None),
                 )
-                speaker_turns = None
+                res = await self._call_client(method, audio_source)
+                if len(res) == 4:
+                    audio, vad_segments, speaker_turns, duration_ms = res
+                else:
+                    audio, vad_segments, duration_ms = res
+                    speaker_turns = None
         return PreparedTranscription(
             audio=audio,
             vad_segments=vad_segments,
@@ -124,9 +139,14 @@ class ASRService:
             if language == "auto"
             else language
         )
+        method = getattr(
+            self.client,
+            "transcribe_vad_segment",
+            getattr(self.client, "transcribe_segment", None),
+        )
         async with self._transcribe_lock:
-            return await asyncio.to_thread(
-                self.client.transcribe_segment,
+            return await self._call_client(
+                method,
                 prepared.audio,
                 segment,
                 effective_language,
@@ -140,8 +160,22 @@ class ASRService:
     ) -> list[SentenceInfo]:
         """Finalize preassigned turns or run legacy ASR‑first diarization."""
         async with self._transcribe_lock:
-            return await asyncio.to_thread(
+            if getattr(self.client, "finalize_preassigned_transcript", None):
+                return await self._call_client(
+                    self.client.finalize_preassigned_transcript,
+                    sentences,
+                )
+            if getattr(self.client, "finalize_incremental_transcript", None):
+                return await self._call_client(
+                    self.client.finalize_incremental_transcript,
+                    prepared.audio,
+                    sentences,
+                    prepared.vad_segments,
+                )
+            return await self._call_client(
                 self.client.finalize_incremental,
                 prepared,
                 sentences,
             )
+
+

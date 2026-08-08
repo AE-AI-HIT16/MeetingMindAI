@@ -1,6 +1,5 @@
-from __future__ import annotations
-
 import asyncio
+import logging
 import os
 import json
 import numpy as np
@@ -9,6 +8,8 @@ import httpx
 
 from meetasr.backend.api.schemas_phase2 import TranscriptSegmentPayload, SentenceInfo, Segment, SpeakerTurn
 from meetasr.backend.utils.audio import load_audio
+
+logger = logging.getLogger(__name__)
 
 class ASRServiceResult:
     """Normalized result consumed by both live and upload workers."""
@@ -72,6 +73,59 @@ class ASRService:
             except Exception:
                 pass
 
+    async def _post_with_retry(
+        self,
+        url: str,
+        files: Any = None,
+        data: Any = None,
+        json_payload: Any = None,
+        timeout: float = 600.0,
+        max_retries: int = 8,
+        initial_delay: float = 1.0,
+    ) -> httpx.Response:
+        self._ensure_local_port_8001()
+        delay = initial_delay
+        for attempt in range(1, max_retries + 1):
+            try:
+                async with httpx.AsyncClient(timeout=timeout, headers=self.headers) as client:
+                    if json_payload is not None:
+                        response = await client.post(url, json=json_payload)
+                    else:
+                        response = await client.post(url, files=files, data=data)
+
+                    if response.status_code in (502, 503, 504) and attempt < max_retries:
+                        logger.warning(
+                            "ASR service at %s returned HTTP %s (attempt %d/%d). Retrying in %.1fs...",
+                            url, response.status_code, attempt, max_retries, delay
+                        )
+                        await asyncio.sleep(delay)
+                        delay = min(delay * 2, 15.0)
+                        continue
+
+                    response.raise_for_status()
+                    return response
+            except (httpx.ConnectError, httpx.NetworkError, httpx.TimeoutException) as exc:
+                if attempt == max_retries:
+                    logger.error("ASR service connection failed after %d attempts: %s", max_retries, exc)
+                    raise
+                logger.warning(
+                    "ASR service connection error to %s (attempt %d/%d): %s. Retrying in %.1fs...",
+                    url, attempt, max_retries, exc, delay
+                )
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, 15.0)
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code in (502, 503, 504) and attempt < max_retries:
+                    logger.warning(
+                        "ASR service at %s returned HTTP %s (attempt %d/%d). Retrying in %.1fs...",
+                        url, exc.response.status_code, attempt, max_retries, delay
+                    )
+                    await asyncio.sleep(delay)
+                    delay = min(delay * 2, 15.0)
+                else:
+                    raise
+        raise RuntimeError(f"Failed after {max_retries} attempts to call {url}")
+
     async def transcribe(
         self,
         audio_source: Any,
@@ -79,30 +133,25 @@ class ASRService:
         offset_ms: int = 0,
         key: str | None = None,
     ) -> ASRServiceResult:
-        # Prepare files dict
+        # Prepare files dict with raw bytes for safe retries
         if isinstance(audio_source, str) and os.path.exists(audio_source):
-            file_obj = open(audio_source, "rb")
-            files = {"file": (os.path.basename(audio_source), file_obj)}
+            with open(audio_source, "rb") as f:
+                file_bytes = f.read()
+            files = {"file": (os.path.basename(audio_source), file_bytes)}
         else:
             audio_arr = load_audio(audio_source)
             wav_bytes = numpy_to_wav_bytes(audio_arr)
             files = {"file": ("audio.wav", wav_bytes)}
-            file_obj = None
 
-        try:
-            async with self._transcribe_lock:
-                async with httpx.AsyncClient(timeout=600.0, headers=self.headers) as client:
-                    data = {"key": key} if key else {}
-                    response = await client.post(
-                        f"{self.runpod_url}/v1/transcribe",
-                        files=files,
-                        data=data
-                    )
-                    response.raise_for_status()
-                    res_json = response.json()
-        finally:
-            if file_obj:
-                file_obj.close()
+        async with self._transcribe_lock:
+            data = {"key": key} if key else {}
+            response = await self._post_with_retry(
+                f"{self.runpod_url}/v1/transcribe",
+                files=files,
+                data=data,
+                timeout=600.0,
+            )
+            res_json = response.json()
 
         # Parse output
         sentence_info = res_json.get("sentence_info", [])
@@ -144,13 +193,12 @@ class ASRService:
         files = {"file": ("audio.wav", wav_bytes)}
 
         async with self._transcribe_lock:
-            async with httpx.AsyncClient(timeout=600.0, headers=self.headers) as client:
-                response = await client.post(
-                    f"{self.runpod_url}/v1/prepare_incremental",
-                    files=files,
-                )
-                response.raise_for_status()
-                res_json = response.json()
+            response = await self._post_with_retry(
+                f"{self.runpod_url}/v1/prepare_incremental",
+                files=files,
+                timeout=600.0,
+            )
+            res_json = response.json()
 
         vad_segments = [
             Segment(start_ms=s["start_ms"], end_ms=s["end_ms"])
@@ -196,14 +244,13 @@ class ASRService:
             data["key"] = key
 
         async with self._transcribe_lock:
-            async with httpx.AsyncClient(timeout=120.0, headers=self.headers) as client:
-                response = await client.post(
-                    f"{self.runpod_url}/v1/transcribe_segment",
-                    files=files,
-                    data=data,
-                )
-                response.raise_for_status()
-                res_json = response.json()
+            response = await self._post_with_retry(
+                f"{self.runpod_url}/v1/transcribe_segment",
+                files=files,
+                data=data,
+                timeout=120.0,
+            )
+            res_json = response.json()
 
         return [
             SentenceInfo(
@@ -234,32 +281,32 @@ class ASRService:
         ]
 
         async with self._transcribe_lock:
-            async with httpx.AsyncClient(timeout=300.0, headers=self.headers) as client:
-                if prepared.speaker_turns is not None:
-                    payload = {"sentences": sentences_data}
-                    response = await client.post(
-                        f"{self.runpod_url}/v1/finalize_incremental",
-                        json=payload,
-                    )
-                else:
-                    wav_bytes = numpy_to_wav_bytes(prepared.audio)
-                    files = {"file": ("audio.wav", wav_bytes)}
-                    vad_data = [
-                        {"start_ms": v.start_ms, "end_ms": v.end_ms}
-                        for v in prepared.vad_segments
-                    ]
-                    data = {
-                        "sentences_json": json.dumps(sentences_data),
-                        "vad_segments_json": json.dumps(vad_data)
-                    }
-                    response = await client.post(
-                        f"{self.runpod_url}/v1/finalize_incremental",
-                        files=files,
-                        data=data,
-                    )
+            if prepared.speaker_turns is not None:
+                payload = {"sentences": sentences_data}
+                response = await self._post_with_retry(
+                    f"{self.runpod_url}/v1/finalize_incremental",
+                    json_payload=payload,
+                    timeout=300.0,
+                )
+            else:
+                wav_bytes = numpy_to_wav_bytes(prepared.audio)
+                files = {"file": ("audio.wav", wav_bytes)}
+                vad_data = [
+                    {"start_ms": v.start_ms, "end_ms": v.end_ms}
+                    for v in prepared.vad_segments
+                ]
+                data = {
+                    "sentences_json": json.dumps(sentences_data),
+                    "vad_segments_json": json.dumps(vad_data)
+                }
+                response = await self._post_with_retry(
+                    f"{self.runpod_url}/v1/finalize_incremental",
+                    files=files,
+                    data=data,
+                    timeout=300.0,
+                )
 
-                response.raise_for_status()
-                res_json = response.json()
+            res_json = response.json()
 
         return [
             SentenceInfo(
@@ -277,10 +324,11 @@ class ASRService:
         wav_bytes = numpy_to_wav_bytes(audio)
         files = {"file": ("chunk.wav", wav_bytes)}
         async with self._transcribe_lock:
-            async with httpx.AsyncClient(timeout=10.0, headers=self.headers) as client:
-                response = await client.post(
-                    f"{self.runpod_url}/v1/realtime/recognize",
-                    files=files,
-                )
-                response.raise_for_status()
-                return response.json()
+            response = await self._post_with_retry(
+                f"{self.runpod_url}/v1/realtime/recognize",
+                files=files,
+                timeout=10.0,
+                max_retries=3,
+            )
+            return response.json()
+
