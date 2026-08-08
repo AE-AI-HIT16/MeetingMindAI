@@ -75,6 +75,26 @@ class ASRService:
             except Exception:
                 pass
 
+    def _get_candidate_urls(self, target_url: str) -> list[str]:
+        from urllib.parse import urlparse
+        parsed = urlparse(target_url)
+        path = parsed.path
+        if parsed.query:
+            path += f"?{parsed.query}"
+
+        candidates = [self.runpod_url.rstrip("/")]
+        fallbacks = [
+            "http://localhost:8001",
+            "http://127.0.0.1:8001",
+            "http://host.docker.internal:8001",
+            "http://meetasr_runpod:8001",
+        ]
+        for f in fallbacks:
+            if f.rstrip("/") not in candidates:
+                candidates.append(f.rstrip("/"))
+
+        return [f"{c}{path}" for c in candidates]
+
     async def _post_with_retry(
         self,
         url: str,
@@ -87,49 +107,63 @@ class ASRService:
     ) -> httpx.Response:
         self._ensure_local_port_8001()
         delay = initial_delay
-        for attempt in range(1, max_retries + 1):
-            try:
-                async with httpx.AsyncClient(timeout=timeout, headers=self.headers) as client:
-                    if json_payload is not None:
-                        response = await client.post(url, json=json_payload)
-                    else:
-                        response = await client.post(url, files=files, data=data)
+        candidate_urls = self._get_candidate_urls(url)
+        last_exception: Exception | None = None
 
-                    if response.status_code in (502, 503, 504) and attempt < max_retries:
+        for attempt in range(1, max_retries + 1):
+            for candidate in candidate_urls:
+                try:
+                    async with httpx.AsyncClient(timeout=timeout, headers=self.headers) as client:
+                        if json_payload is not None:
+                            response = await client.post(candidate, json=json_payload)
+                        else:
+                            response = await client.post(candidate, files=files, data=data)
+
+                        if response.status_code in (502, 503, 504):
+                            logger.warning(
+                                "ASR service at %s returned HTTP %s (attempt %d/%d). Retrying in %.1fs...",
+                                candidate, response.status_code, attempt, max_retries, delay
+                            )
+                            last_exception = httpx.HTTPStatusError(
+                                f"HTTP {response.status_code}",
+                                request=response.request,
+                                response=response,
+                            )
+                            break
+
+                        response.raise_for_status()
+
+                        # Update primary runpod_url if connected via a fallback
+                        from urllib.parse import urlparse
+                        base = candidate.rsplit(urlparse(candidate).path, 1)[0]
+                        if base != self.runpod_url:
+                            logger.info("Successfully connected to fallback ASR URL: %s", base)
+                            self.runpod_url = base
+
+                        return response
+                except (httpx.ConnectError, httpx.NetworkError, httpx.TimeoutException) as exc:
+                    last_exception = exc
+                    continue
+                except httpx.HTTPStatusError as exc:
+                    if exc.response.status_code in (502, 503, 504):
+                        last_exception = exc
                         logger.warning(
                             "ASR service at %s returned HTTP %s (attempt %d/%d). Retrying in %.1fs...",
-                            url, response.status_code, attempt, max_retries, delay
+                            candidate, exc.response.status_code, attempt, max_retries, delay
                         )
-                        await asyncio.sleep(delay)
-                        delay = min(delay * 2, 15.0)
-                        continue
+                        break
+                    else:
+                        raise
 
-                    response.raise_for_status()
-                    return response
-            except (httpx.ConnectError, httpx.NetworkError, httpx.TimeoutException) as exc:
-                if attempt == max_retries:
-                    logger.error("ASR service connection to %s failed after %d attempts: %s", url, max_retries, exc)
-                    raise RuntimeError(
-                        f"Cannot connect to ASR service at '{url}': {exc}. "
-                        f"Verify that RUNPOD_URL is correct and accessible from the container."
-                    ) from exc
-                logger.warning(
-                    "ASR service connection error to %s (attempt %d/%d): %s. Retrying in %.1fs...",
-                    url, attempt, max_retries, exc, delay
-                )
+            if attempt < max_retries:
                 await asyncio.sleep(delay)
                 delay = min(delay * 2, 15.0)
-            except httpx.HTTPStatusError as exc:
-                if exc.response.status_code in (502, 503, 504) and attempt < max_retries:
-                    logger.warning(
-                        "ASR service at %s returned HTTP %s (attempt %d/%d). Retrying in %.1fs...",
-                        url, exc.response.status_code, attempt, max_retries, delay
-                    )
-                    await asyncio.sleep(delay)
-                    delay = min(delay * 2, 15.0)
-                else:
-                    raise
-        raise RuntimeError(f"Failed after {max_retries} attempts to call {url}")
+
+        logger.error("ASR service connection failed after %d attempts: %s", max_retries, last_exception)
+        raise RuntimeError(
+            f"Cannot connect to ASR service after {max_retries} attempts (tried {candidate_urls}): {last_exception}. "
+            f"Verify that ASR model server is running on port 8001."
+        ) from last_exception
 
     async def transcribe(
         self,

@@ -314,6 +314,7 @@ def test_backend_asr_service_retries_on_503(monkeypatch) -> None:
         def __init__(self, status_code: int, data: dict):
             self.status_code = status_code
             self._data = data
+            self.request = httpx.Request("POST", "http://localhost:8001/v1/prepare_incremental")
 
         def raise_for_status(self):
             if self.status_code >= 400:
