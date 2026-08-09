@@ -36,7 +36,7 @@ export default function RootLayout({
       suppressHydrationWarning
       className={`${bricolage.variable} ${inter.variable} ${spaceMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full">
+      <body suppressHydrationWarning className="min-h-full">
         <AuthProvider>
           <div className="flex min-h-screen">
             <Sidebar />

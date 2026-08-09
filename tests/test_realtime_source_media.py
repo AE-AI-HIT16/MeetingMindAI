@@ -59,6 +59,17 @@ def test_realtime_job_keeps_authenticated_owner() -> None:
     engine.dispose()
 
 
+def test_realtime_job_filename_is_filesystem_safe() -> None:
+    engine = _engine()
+    with Session(engine) as db:
+        source, _ = _create_realtime_job(db, None)
+
+        assert source.filename.startswith("realtime_")
+        assert source.filename.endswith(".wav")
+        assert not set('<>:"/\\|?*').intersection(source.filename)
+    engine.dispose()
+
+
 @pytest.mark.asyncio
 async def test_realtime_audio_is_saved_as_playable_wav_before_enqueue() -> None:
     engine = _engine()

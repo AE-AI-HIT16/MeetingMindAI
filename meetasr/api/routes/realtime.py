@@ -149,7 +149,7 @@ async def realtime_stream(
             stored_job = db.get(Job, session.job_id)
             if stored_job is not None:
                 stored_job.status = JobStatus.FAILED
-                stored_job.error = "Final transcript queue unavailable."
+                stored_job.error = "Final transcript finalization failed."
                 db.add(stored_job)
                 db.commit()
 
@@ -196,7 +196,7 @@ def _create_realtime_job(
 ) -> tuple[Source, Job]:
     """Create an owned realtime Source and its processing Job."""
     source = Source(
-        filename=f"realtime_{datetime.utcnow().isoformat()}.wav",
+        filename=f"realtime_{datetime.utcnow():%Y%m%dT%H%M%S%fZ}.wav",
         media_type=MediaType.AUDIO,
         storage_path="",
         user_id=user_id,
