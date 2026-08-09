@@ -9,6 +9,8 @@ from meetasr.backend.api import dependencies
 router = APIRouter(tags=["System"])
 
 
+@router.get("/")
+@router.get("/health")
 @router.get("/v1/health")
 async def health() -> dict:
     """Health check — reports server status and loaded models.

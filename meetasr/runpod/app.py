@@ -138,8 +138,10 @@ def _get_realtime_pipeline(request: Request) -> ASRPipeline:
 # ------------------------------------------------------------------
 # Health
 # ------------------------------------------------------------------
+@app.get("/")
 @app.get("/health")
 @app.get("/ping")
+@app.get("/v1/health")
 async def health():
     if getattr(app.state, "pipeline", None) is None:
         raise HTTPException(status_code=503, detail="Pipeline not loaded")
