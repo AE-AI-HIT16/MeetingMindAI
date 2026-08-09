@@ -190,9 +190,11 @@ export async function uploadSource(
         }
       });
 
-      xhr.addEventListener("error", () =>
-        reject(new APIError(0, "Lỗi kết nối mạng.")),
-      );
+      xhr.addEventListener("error", (e) => {
+        const targetUrl = getFullUrl("/v1/sources");
+        console.error("[uploadSource] XHR network error event:", e, "Target URL:", targetUrl);
+        reject(new APIError(0, `Lỗi kết nối mạng tới Backend (${targetUrl}).`));
+      });
 
       xhr.send(formData);
     });

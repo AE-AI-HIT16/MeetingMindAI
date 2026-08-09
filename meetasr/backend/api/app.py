@@ -156,10 +156,11 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Allow all origins for local dev — restrict origins on production
+# Allow all origins for local dev & production with credentials
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # TODO: restrict to actual domain on production
+    allow_origins=["*"],
+    allow_origin_regex=r"https?://.*",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
