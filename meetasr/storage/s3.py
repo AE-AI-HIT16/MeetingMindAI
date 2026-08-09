@@ -65,6 +65,9 @@ class S3Storage(StorageBackend):
         self._bucket = bucket
         self._presign_expires = presign_expires
 
+        if endpoint_url:
+            endpoint_url = endpoint_url.strip().strip('"').strip("'")
+
         self._client = boto3.client(
             "s3",
             endpoint_url=endpoint_url,
