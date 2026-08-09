@@ -3,7 +3,6 @@
 from meetasr.register import tables
 from meetasr.llm.openai_client import OpenAIClient
 
-
 @tables.register("llm_classes", key="ollama")
 class OllamaClient(OpenAIClient):
     """Ollama local LLM client.
@@ -18,7 +17,7 @@ class OllamaClient(OpenAIClient):
 
     def __init__(
         self,
-        model: str = "llama3.2",
+        model: str = "llama3",
         host: str = "http://localhost:11434",
         timeout: int = 120,
         retry_attempts: int = 2,
@@ -32,7 +31,7 @@ class OllamaClient(OpenAIClient):
             retry_attempts: Retry attempts on failure.
         """
         super().__init__(
-            api_key="ollama",              # Ollama doesn't check key
+            api_key="ollama",
             model=model,
             base_url=f"{host}/v1",
             timeout=timeout,

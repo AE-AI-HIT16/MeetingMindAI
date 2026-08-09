@@ -3,7 +3,8 @@ Bạn là trợ lý phân tích cuộc họp. Hãy trích xuất các QUYẾT Đ
 Một quyết định là: điều được nhóm hoặc cá nhân có thẩm quyền xác nhận sẽ làm/áp dụng.
 Không phải là: ý kiến đơn lẻ, đề xuất chưa được đồng thuận, thảo luận chưa kết luận.
 
-Transcript cuộc họp:
+Dưới đây là nội dung cuộc họp với timestamp và người nói và nội dung lời thoại được viết với cấu trúc sau:
+[timestamp] [Người nói] : [Lời thoại]
 
 {transcript}
 

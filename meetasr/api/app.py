@@ -1,174 +1,290 @@
-"""FastAPI application for MeetASR REST API."""
+"""FastAPI application entry point for MeetASR.
+
+Registers all routers and configures the application lifespan,
+CORS middleware, and global exception handler.
+"""
+# Loading .env must happen before importing route modules because they read
+# authentication and database variables at import time.
+# ruff: noqa: E402
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
-import tempfile
-import time
-import uuid
-from typing import Optional
+from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import JSONResponse, PlainTextResponse
+from dotenv import load_dotenv
+
+# Load the repository-local .env without overriding variables supplied by the
+# shell, container or deployment platform.
+load_dotenv()
+
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from meetasr import __version__
+from meetasr.api.dependencies import CONFIG_PATH, set_pipeline
+from meetasr.api.routes import (
+    auth,
+    db_routes,
+    document,
+    document_jobs,
+    documents_phase2,
+    health,
+    jobs,
+    realtime,
+    sources,
+    summarize,
+    test_model,
+    transcribe,
+)
 from meetasr.auto.auto_pipeline import AutoPipeline
-from meetasr.pipeline import MeetPipeline
+from meetasr.db.connection import init_db
+from meetasr.pipeline_realtime import ASRPipeline
+from meetasr.realtime.document_generation import document_generation_queue
+from meetasr.realtime.job_worker import job_queue
+from meetasr.services.asr_service import ASRService
+from meetasr.services.inference_coordinator import InferenceCoordinator
+from meetasr.services.realtime_asr_service import RealtimeASRService
+from meetasr.streaming.final_transcript_queue import FinalTranscriptQueue
+from meetasr.streaming.final_transcript_worker import FinalTranscriptWorker
 
-# Configure logging
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
+
+# ------------------------------------------------------------------
+# Lifecycle (modern FastAPI pattern replacing deprecated on_event)
+# ------------------------------------------------------------------
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage server lifespan: load pipeline on startup, release on shutdown."""
+
+    # --------------------------------------------------------------
+    # Initialize application state
+    # --------------------------------------------------------------
+    app.state.pipeline = None
+    app.state.realtime_pipeline = None
+
+    app.state.asr_service = None
+    app.state.realtime_asr_service = None
+    app.state.inference_coordinator = None
+    app.state.final_transcript_queue = None
+    app.state.final_transcript_worker = None
+    app.state.final_transcript_task = None
+
+    init_db()
+    logger.info("Database tables initialized.")
+
+    # --------------------------------------------------------------
+    # STARTUP
+    # --------------------------------------------------------------
+    if os.path.exists(CONFIG_PATH):
+        logger.info(f"Loading pipeline from {CONFIG_PATH}...")
+
+        # Full pipeline:
+        # ASR + VAD + Punctuation + Speaker + LLM + Document planner
+        pipeline = AutoPipeline.from_yaml(CONFIG_PATH)
+
+        warm_up = getattr(pipeline.asr, "warm_up", None)
+        if callable(warm_up):
+            logger.info("Warming up ASR model before accepting realtime audio...")
+            await asyncio.to_thread(warm_up)
+            logger.info("ASR model warm-up complete.")
+
+        # Lightweight realtime pipeline:
+        # ASR + VAD only
+        # Reuse loaded model instances from full pipeline
+        realtime_pipeline = ASRPipeline(
+            asr_model=pipeline.asr,
+            vad_model=pipeline.vad,
+            device=pipeline.device,
+            realtime_config=pipeline.realtime_config,
+            transcription_language=pipeline.transcription_language,
+        )
+
+        # Keep global full pipeline reference
+        set_pipeline(pipeline)
+
+        app.state.pipeline = pipeline
+        app.state.realtime_pipeline = realtime_pipeline
+        coordinator = InferenceCoordinator()
+        await coordinator.start()
+        app.state.inference_coordinator = coordinator
+
+        # ----------------------------------------------------------
+        # Create independent services
+        # ----------------------------------------------------------
+
+        # Full processing service:
+        # Used by upload jobs / transcription APIs
+        app.state.asr_service = ASRService(
+            pipeline,
+            coordinator=coordinator,
+        )
+
+        # Realtime websocket service:
+        # Used by realtime streaming workers
+        app.state.realtime_asr_service = RealtimeASRService(
+            realtime_pipeline,
+            coordinator=coordinator,
+        )
+
+        logger.info("Full ASR pipeline ready.")
+        logger.info("Realtime ASR pipeline ready.")
+
+        # ----------------------------------------------------------
+        # Final transcript worker
+        # ----------------------------------------------------------
+
+        app.state.final_transcript_queue = FinalTranscriptQueue()
+
+        app.state.final_transcript_worker = FinalTranscriptWorker(
+            queue=app.state.final_transcript_queue,
+            pipeline=pipeline,
+            coordinator=coordinator,
+        )
+
+        app.state.final_transcript_task = asyncio.create_task(
+            app.state.final_transcript_worker.run()
+        )
+
+        logger.info("Final transcript worker started.")
+
+    else:
+        logger.warning(
+            f"Config '{CONFIG_PATH}' not found. "
+            "Server starts without pipeline."
+        )
+
+    # --------------------------------------------------------------
+    # Start background workers
+    # --------------------------------------------------------------
+    await job_queue.start(
+        app.state.asr_service,
+        sources.get_storage_backend(),
+    )
+
+    await document_generation_queue.start(
+        getattr(
+            app.state.pipeline,
+            "doc_planner",
+            None,
+        )
+    )
+
+    yield
+
+    # --------------------------------------------------------------
+    # SHUTDOWN
+    # --------------------------------------------------------------
+    logger.info(
+        "Shutting down... Cleaning up ML models and freeing VRAM."
+    )
+
+    await document_generation_queue.stop()
+    await job_queue.stop()
+
+    set_pipeline(None)
+
+    app.state.asr_service = None
+    app.state.realtime_asr_service = None
+
+    app.state.pipeline = None
+    app.state.realtime_pipeline = None
+
+    # --------------------------------------------------------------
+    # Stop final transcript worker
+    # --------------------------------------------------------------
+
+    if app.state.final_transcript_task:
+
+        app.state.final_transcript_task.cancel()
+
+        try:
+
+            await app.state.final_transcript_task
+
+        except asyncio.CancelledError:
+            pass
+
+    if app.state.final_transcript_queue:
+        await app.state.final_transcript_queue.clear()
+
+    if app.state.inference_coordinator:
+        metrics = app.state.inference_coordinator.snapshot()
+        await app.state.inference_coordinator.stop()
+        logger.info("Inference metrics at shutdown: %s", metrics)
+
+    app.state.final_transcript_worker = None
+    app.state.final_transcript_queue = None
+    app.state.final_transcript_task = None
+    app.state.inference_coordinator = None
+
+# Set log cho api realtime
+
+root = logging.getLogger()
+root.setLevel(logging.INFO)
+
+# ------------------------------------------------------------------
+# App Initialization
+# ------------------------------------------------------------------
 app = FastAPI(
     title="MeetASR API",
     description="Meeting Speech Recognition + LLM Summarization",
     version=__version__,
     docs_url="/docs",
     redoc_url="/redoc",
+    lifespan=lifespan,
 )
 
-# Pipeline instance — loaded once at startup
-_pipeline: Optional[MeetPipeline] = None
-_config_path = os.environ.get("MEETASR_CONFIG", "meeting_config.yaml")
+# Allow all origins for local dev — restrict origins on production
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # TODO: restrict to actual domain on production
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-SUPPORTED_FORMATS = {".wav", ".mp3", ".m4a", ".mp4", ".flac", ".ogg", ".webm"}
-MAX_FILE_BYTES = 500 * 1024 * 1024  # 500 MB
-
-
-# ------------------------------------------------------------------
-# Lifecycle
-# ------------------------------------------------------------------
-
-@app.on_event("startup")
-async def startup_event():
-    """Load pipeline on server startup."""
-    global _pipeline
-    if os.path.exists(_config_path):
-        logging.info(f"Loading pipeline from {_config_path}...")
-        _pipeline = AutoPipeline.from_yaml(_config_path)
-        logging.info("Pipeline ready.")
-    else:
-        logging.warning(
-            f"Config file '{_config_path}' not found. "
-            "Server starts without a pipeline — set MEETASR_CONFIG or POST a config."
-        )
+# Register route modules
+app.include_router(health.router)
+app.include_router(auth.router)       # POST /v1/auth/google, GET /v1/auth/me
+app.include_router(transcribe.router)
+app.include_router(summarize.router)
+app.include_router(db_routes.router)
+app.include_router(document.router)
+app.include_router(documents_phase2.router)
+app.include_router(document_jobs.router)
+app.include_router(realtime.router)
+app.include_router(jobs.router)
+app.include_router(test_model.router)
+app.include_router(sources.router)   # Phase 2: /v1/sources — upload, library, media stream
 
 
 # ------------------------------------------------------------------
-# Routes
+# Global Exception Handler
 # ------------------------------------------------------------------
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Catch unhandled exceptions and return a safe 500 response.
 
-@app.get("/v1/health", tags=["System"])
-async def health():
-    """Health check endpoint."""
-    return {
-        "status": "ok",
-        "version": __version__,
-        "pipeline_loaded": _pipeline is not None,
-    }
+    Args:
+        request: The incoming HTTP request.
+        exc: The unhandled exception.
 
-
-@app.post("/v1/audio/transcriptions", tags=["ASR"])
-async def transcribe(
-    file: UploadFile = File(..., description="Audio file (wav, mp3, m4a, mp4, flac)"),
-    language: str = Form("auto", description="Language code: auto, vi, zh, en"),
-    response_format: str = Form("verbose_json", description="json | text | verbose_json | srt"),
-    speaker_diarization: bool = Form(False, description="Enable speaker detection"),
-):
-    """Transcribe an audio file to text.
-
-    Returns transcript in the requested format.
+    Returns:
+        JSONResponse with status 500 and a generic error body.
     """
-    _check_pipeline()
-    audio_path = await _save_upload(file)
-
-    try:
-        result = _pipeline.transcribe(
-            audio_path,
-            language=language if language != "auto" else "auto",
-        )
-    finally:
-        _safe_remove(audio_path)
-
-    if response_format == "text":
-        return PlainTextResponse(result.text)
-    elif response_format == "srt":
-        return PlainTextResponse(result.to_srt(), media_type="text/plain")
-    elif response_format == "json":
-        return {"text": result.text}
-    else:  # verbose_json (default)
-        return JSONResponse(result.to_dict())
-
-
-@app.post("/v1/meeting/summarize", tags=["Meeting"])
-async def summarize_meeting(
-    file: UploadFile = File(..., description="Audio file"),
-    language: str = Form("vi", description="Output language: vi | en"),
-    response_format: str = Form("json", description="json | markdown"),
-):
-    """Full pipeline: transcribe + LLM summarization.
-
-    Returns MeetingReport with summary, topics, action items, and decisions.
-    """
-    _check_pipeline()
-    if _pipeline.summarizer is None:
-        raise HTTPException(
-            status_code=503,
-            detail="LLM summarizer is not configured. Add 'llm' section to your config YAML.",
-        )
-
-    audio_path = await _save_upload(file)
-
-    try:
-        report = _pipeline.summarize_meeting(audio_path, language=language)
-    finally:
-        _safe_remove(audio_path)
-
-    if response_format == "markdown":
-        return PlainTextResponse(report.to_markdown(), media_type="text/markdown")
-
-    return JSONResponse(report.to_dict())
-
-
-# ------------------------------------------------------------------
-# Helpers
-# ------------------------------------------------------------------
-
-def _check_pipeline():
-    if _pipeline is None:
-        raise HTTPException(
-            status_code=503,
-            detail=(
-                "Pipeline not loaded. "
-                f"Create '{_config_path}' and restart the server."
-            ),
-        )
-
-
-async def _save_upload(file: UploadFile) -> str:
-    """Save uploaded file to a temp path and return the path."""
-    ext = os.path.splitext(file.filename or "audio.wav")[-1].lower()
-    if ext not in SUPPORTED_FORMATS:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unsupported file format '{ext}'. Supported: {sorted(SUPPORTED_FORMATS)}",
-        )
-
-    content = await file.read()
-    if len(content) > MAX_FILE_BYTES:
-        raise HTTPException(
-            status_code=413,
-            detail=f"File too large ({len(content) // 1024 // 1024} MB). Max 500 MB.",
-        )
-
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=ext)
-    tmp.write(content)
-    tmp.close()
-    return tmp.name
-
-
-def _safe_remove(path: str):
-    try:
-        os.remove(path)
-    except Exception:
-        pass
+    logger.error(f"Unhandled error on {request.url}: {exc}", exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": {
+                "code": "internal_error",
+                "message": "Internal server error.",
+            }
+        },
+    )

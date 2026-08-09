@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field, asdict
-from typing import Optional
-
+from dataclasses import asdict, dataclass, field
+from typing import Literal, Optional
 
 # ---------------------------------------------------------------------------
 # ASR Output
@@ -32,6 +31,27 @@ class Segment:
 
 
 @dataclass
+class SpeakerTurn:
+    """A time range attributed to one diarized speaker."""
+
+    start_ms: int
+    end_ms: int
+    speaker: int
+
+    @property
+    def duration_ms(self) -> int:
+        return self.end_ms - self.start_ms
+
+    def to_segment(self) -> Segment:
+        """Return the time range without its speaker label."""
+        return Segment(self.start_ms, self.end_ms)
+
+
+SpeakerSegmentKind = Literal["single", "mixed", "uncertain"]
+TargetedAction = Literal["keep", "retranscribe", "fallback"]
+
+
+@dataclass
 class SentenceInfo:
     """A single sentence with timing and speaker information."""
 
@@ -41,6 +61,38 @@ class SentenceInfo:
     speaker: Optional[int] = None
     # char-level timestamps [[start_ms, end_ms], ...]
     char_timestamps: list[list[int]] = field(default_factory=list)
+
+
+@dataclass(frozen=True, slots=True)
+class TargetedSegmentPlan:
+    """Finalization action for one persisted realtime transcript segment."""
+
+    index: int
+    action: TargetedAction
+    kind: SpeakerSegmentKind
+    speaker: int | None
+    turns: tuple[SpeakerTurn, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class TargetedRetranscriptionStats:
+    """Runtime counters for one targeted retranscription pass."""
+
+    kept_segments: int
+    targeted_segments: int
+    replaced_segments: int
+    fallback_segments: int
+    asr_audio_ms: int
+
+
+@dataclass(frozen=True, slots=True)
+class TargetedRetranscriptionResult:
+    """Final sentence list and source mapping for targeted retranscription."""
+
+    sentence_info: list[SentenceInfo]
+    source_indices: list[int]
+    replaced_indices: tuple[int, ...]
+    stats: TargetedRetranscriptionStats
 
 
 @dataclass
@@ -130,15 +182,15 @@ class MeetingReport:
         from meetasr.utils.misc import seconds_to_human
 
         lines = [
-            f"# Báo cáo Cuộc họp",
-            f"",
+            "# Báo cáo Cuộc họp",
+            "",
             f"**Thời lượng:** {seconds_to_human(self.transcript.duration)}  ",
             f"**Ngôn ngữ:** {self.language}  ",
             f"**Mô hình ASR:** {self.asr_model}  ",
             f"**Mô hình LLM:** {self.llm_model}  ",
-            f"",
-            f"---",
-            f"",
+            "",
+            "---",
+            "",
         ]
 
         if self.summary:
@@ -180,6 +232,11 @@ class MeetingReport:
                 lines.append(f"{ts} {spk}{s.text}  ")
 
         return "\n".join(lines)
+
+    @dataclass
+    class Segment:
+        start_ms: int
+        end_ms: int
 
 
 # ---------------------------------------------------------------------------

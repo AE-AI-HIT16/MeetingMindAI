@@ -1,0 +1,65 @@
+# Qwen3-ASR 1.7B preset for offline Vietnamese transcription.
+#
+# qwen-asr downloads Qwen/Qwen3-ASR-1.7B on first use. For an air-gapped
+# runtime, download it in advance and set model_size to the local directory.
+
+device: cpu
+
+pipeline:
+  # Upload jobs detect speaker turns before Qwen transcription. This prevents
+  # one ASR chunk from containing several speakers and avoids post-ASR
+  # character-level cuts in the middle of Vietnamese words.
+  transcription_language: vi
+  diarization_first:
+    enabled: true
+    max_chunk_ms: 15000
+    boundary_search_ms: 2000
+    min_chunk_ms: 1000
+
+realtime:
+  vad:
+    frame_ms: 32
+    start_threshold: 0.50
+    end_threshold: 0.35
+    min_speech_ms: 250
+    min_silence_ms: 600
+    pre_roll_ms: 300
+    post_roll_ms: 100
+  asr:
+    partial_interval_ms: 800
+    partial_min_audio_ms: 700
+    partial_max_audio_ms: 5000
+    max_utterance_ms: 15000
+
+asr:
+  model: qwen3-asr
+  hub: none
+  model_size: Qwen/Qwen3-ASR-1.7B
+  device: cuda:0
+  dtype: bfloat16
+  max_inference_batch_size: 1
+  max_new_tokens: 512
+
+  # Qwen3-ForcedAligner-0.6B does not officially support Vietnamese.
+  # Leave this unset for Vietnamese; MeetASR uses VAD segment timestamps.
+  # forced_aligner: Qwen/Qwen3-ForcedAligner-0.6B
+
+vad:
+  model: silero-vad
+  backend: onnx
+  device: cpu
+  threshold: 0.5
+  neg_threshold: 0.35
+  min_speech_duration_ms: 250
+  min_silence_duration_ms: 500
+  speech_pad_ms: 80
+  max_speech_duration_s: 30
+
+# Qwen3-ASR already returns punctuated text, so no external punc model is needed.
+
+spk:
+  model: cam++
+  hub: ms
+  device: cpu
+  cluster_type: spectral
+  min_cluster_size: 4

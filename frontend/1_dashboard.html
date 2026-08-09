@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dashboard - MeetASR (Bright Minimal)</title>
+  <style>
+    :root {
+      --bg-color: #FFFFFF;
+      --bg-alt: #F8FAFC;
+      --text-primary: #334155;
+      --text-secondary: #64748B;
+      --border-color: #E2E8F0;
+      --primary-blue: #3B82F6;
+      --primary-blue-light: #EFF6FF;
+      --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+      --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+      --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg-alt);
+      color: var(--text-primary);
+      font-family: var(--font-family);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .container {
+      padding: 48px;
+      max-width: 1400px;
+      margin: 0 auto;
+      width: 100%;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+      gap: 24px;
+    }
+
+    .card {
+      aspect-ratio: 1 / 1;
+      border-radius: 16px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      background-color: var(--bg-color);
+    }
+
+    .card-add {
+      border: 2px dashed var(--primary-blue);
+      background-color: var(--bg-color);
+    }
+
+    .card-add:hover {
+      background-color: var(--primary-blue-light);
+      transform: translateY(-2px);
+    }
+
+    .card-add .icon {
+      font-size: 40px;
+      font-weight: 300;
+      color: var(--primary-blue);
+      margin-bottom: 12px;
+    }
+
+    .card-add .text {
+      font-size: 15px;
+      font-weight: 500;
+      color: var(--primary-blue);
+    }
+
+    .card-file {
+      position: relative;
+      border: 1px solid var(--border-color);
+      padding: 24px;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .card-file:hover {
+      transform: translateY(-4px);
+      box-shadow: var(--shadow-md);
+      border-color: transparent;
+    }
+
+    .card-file .icon {
+      margin-bottom: 16px;
+      background-color: var(--primary-blue-light);
+      padding: 16px;
+      border-radius: 50%;
+    }
+    
+    .card-file .icon svg {
+      width: 32px;
+      height: 32px;
+      fill: none;
+      stroke: var(--primary-blue);
+      stroke-width: 1.5;
+    }
+
+    .card-file .filename {
+      font-size: 15px;
+      font-weight: 500;
+      color: var(--text-primary);
+      text-align: center;
+    }
+
+    .btn-delete {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: #EF4444;
+      padding: 6px;
+      border-radius: 6px;
+      transition: background 0.2s;
+    }
+
+    .btn-delete:hover {
+      background: #FEE2E2;
+    }
+
+    .btn-delete svg {
+      width: 18px;
+      height: 18px;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 2;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <div class="grid">
+      <!-- Khối Thêm Mới -->
+      <div class="card card-add">
+        <div class="icon">+</div>
+        <div class="text">Thêm mới</div>
+      </div>
+
+    </div>
+  </div>
+
+  <script>
+    document.addEventListener("DOMContentLoaded", async () => {
+      const grid = document.querySelector(".grid");
+      const addCard = document.querySelector(".card-add");
+
+      // Chuyển trang khi bấm Thêm mới
+      addCard.addEventListener("click", () => {
+        window.location.href = "2_upload.html";
+      });
+
+      try {
+        // Gọi API lấy danh sách cuộc họp
+        const response = await fetch("http://127.0.0.1:8000/v1/meetings?limit=50");
+        if (!response.ok) throw new Error("API lỗi!");
+        const meetings = await response.json();
+
+        // Xóa các thẻ nháp đi, chỉ giữ lại nút "Thêm mới"
+        grid.innerHTML = "";
+        grid.appendChild(addCard);
+
+        // Render dữ liệu thực tế từ Database
+        meetings.forEach(meeting => {
+          const card = document.createElement("div");
+          card.className = "card card-file";
+          card.style.cursor = "pointer";
+
+          // Khi bấm vào file, chuyển sang Workspace với ID tương ứng
+          card.onclick = () => {
+            window.location.href = `3_workspace.html?id=${meeting.id}`;
+          };
+
+          card.innerHTML = `
+            <button class="btn-delete" title="Xóa cuộc họp">
+              <svg viewBox="0 0 24 24"><path d="M3 6h18"></path><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+            </button>
+            <div class="icon">
+              <svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>
+            </div>
+            <div class="filename">${meeting.title || "Unknown File"}</div>
+          `;
+
+          const delBtn = card.querySelector(".btn-delete");
+          delBtn.onclick = async (e) => {
+            e.stopPropagation(); // Ngăn sự kiện click nhảy sang mở card
+            if (confirm("Bạn có chắc chắn muốn xóa cuộc họp này? Dữ liệu sẽ bị xóa vĩnh viễn.")) {
+              try {
+                const delRes = await fetch(`http://127.0.0.1:8000/v1/meetings/${meeting.id}`, { method: 'DELETE' });
+                if (delRes.ok) {
+                  card.remove(); // Xóa thẻ khỏi giao diện
+                } else {
+                  alert("Xóa thất bại!");
+                }
+              } catch (err) {
+                console.error(err);
+                alert("Lỗi kết nối khi xóa!");
+              }
+            }
+          };
+
+          grid.appendChild(card);
+        });
+      } catch (error) {
+        console.error("Lỗi khi fetch danh sách meetings:", error);
+      }
+    });
+  </script>
+</body>
+</html>

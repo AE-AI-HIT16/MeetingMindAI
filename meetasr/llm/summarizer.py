@@ -6,6 +6,8 @@ import json
 import logging
 import os
 import time
+from dataclasses import asdict
+import re
 from typing import Optional
 
 from meetasr.llm.abs_llm import AbsLLMClient
@@ -20,8 +22,6 @@ from meetasr.schemas import (
 # Max characters in a single LLM call. Transcripts longer than this
 # are split and processed via map-reduce.
 MAX_CHARS_DIRECT = 8000
-
-_PROMPT_DIR = os.path.join(os.path.dirname(__file__), "prompts")
 
 
 class MeetingSummarizer:
@@ -47,7 +47,8 @@ class MeetingSummarizer:
         self.language = language
         self.temperature = temperature
         self.max_tokens = max_tokens
-        self._prompts = self._load_prompts()
+        from meetasr.llm.llm_utils.prompts import load_prompts
+        self._prompts = load_prompts(language=self.language)
 
     # ------------------------------------------------------------------
     # Public API
@@ -95,6 +96,7 @@ class MeetingSummarizer:
 
     def _format_transcript(self, result: TranscriptResult) -> str:
         """Convert TranscriptResult to human-readable text for LLM."""
+
         if result.sentence_info:
             lines = []
             for s in result.sentence_info:
@@ -102,7 +104,7 @@ class MeetingSummarizer:
                 spk = f"Speaker {s.speaker}: " if s.speaker is not None else ""
                 lines.append(f"{ts} {spk}{s.text}")
             return "\n".join(lines)
-        # Fallback: just the full text
+
         return result.text
 
     # ------------------------------------------------------------------
@@ -111,9 +113,7 @@ class MeetingSummarizer:
 
     def _get_summary(self, text: str) -> str:
         """Generate summary paragraph."""
-        if len(text) <= MAX_CHARS_DIRECT:
-            return self._call_summary_direct(text)
-        return self._call_summary_mapreduce(text)
+        return self._call_summary_direct(text)
 
     def _call_summary_direct(self, text: str) -> str:
         prompt = self._prompts["summarize"].format(transcript=text)
@@ -127,28 +127,7 @@ class MeetingSummarizer:
             logging.warning(f"Summary LLM call failed: {e}")
             return "[Không thể tạo tóm tắt]" if self.language == "vi" else "[Summary unavailable]"
 
-    def _call_summary_mapreduce(self, text: str) -> str:
-        """Summarize long transcripts via chunking → chunk summaries → final summary."""
-        chunks = self._split_text(text, MAX_CHARS_DIRECT)
-        logging.info(f"Transcript too long ({len(text)} chars), splitting into {len(chunks)} chunks")
-        chunk_summaries = []
-        for i, chunk in enumerate(chunks):
-            logging.info(f"Summarizing chunk {i + 1}/{len(chunks)}...")
-            s = self._call_summary_direct(chunk)
-            chunk_summaries.append(s)
 
-        # Merge chunk summaries into final summary
-        merged = "\n\n".join(chunk_summaries)
-        reduce_prompt = self._prompts["summarize"].format(transcript=merged)
-        try:
-            return self.client.chat(
-                reduce_prompt,
-                temperature=self.temperature,
-                max_tokens=self.max_tokens,
-            ).strip()
-        except Exception as e:
-            logging.warning(f"Reduce summary failed: {e}")
-            return "\n\n".join(chunk_summaries)   # return parts as fallback
 
     def _get_topics(self, text: str) -> list[Topic]:
         """Extract main topics as list of Topic objects."""
@@ -209,63 +188,31 @@ class MeetingSummarizer:
                     temperature=self.temperature,
                     max_tokens=self.max_tokens,
                 ).strip()
-                # Strip markdown code fences if model wraps output
-                if raw.startswith("```"):
-                    raw = raw.split("```")[1]
-                    if raw.startswith("json"):
-                        raw = raw[4:]
+                
+                # Extract markdown code fence if present
+                match = re.search(r"```(?:json)?(.*?)```", raw, re.DOTALL | re.IGNORECASE)
+                if match:
+                    raw = match.group(1).strip()
+                else:
+                    # Otherwise, try to extract array brackets just in case
+                    start = raw.find('[')
+                    end = raw.rfind(']')
+                    if start != -1 and end != -1:
+                        raw = raw[start:end+1]
+                        
                 parsed = json.loads(raw)
                 if isinstance(parsed, list):
                     return parsed
             except json.JSONDecodeError as e:
-                logging.warning(f"JSON parse failed (attempt {attempt + 1}): {e}")
+                logging.warning(f"JSON parse failed (attempt {attempt + 1}): {e}\nRaw snippet: {raw[:100]}...")
             except Exception as e:
                 logging.warning(f"LLM call failed (attempt {attempt + 1}): {e}")
         logging.warning("Returning empty fallback for this LLM call.")
         return fallback
 
-    def _load_prompts(self) -> dict[str, str]:
-        """Load prompt templates from files."""
-        lang = self.language
-        # Fallback to English if language-specific prompt not found
-        def _read(name: str) -> str:
-            for suffix in [f"_{lang}.txt", "_en.txt"]:
-                path = os.path.join(_PROMPT_DIR, name + suffix)
-                if os.path.exists(path):
-                    with open(path, encoding="utf-8") as f:
-                        return f.read()
-            raise FileNotFoundError(f"Prompt file not found for '{name}' in {_PROMPT_DIR}")
-
-        return {
-            "summarize": _read("summarize"),
-            "topics": _read("topics"),
-            "action_items": _read("action_items"),
-            "decisions": _read("decisions"),
-        }
-
     def _truncate(self, text: str, max_chars: int = MAX_CHARS_DIRECT) -> str:
         """Truncate text to max_chars for topic/action/decision extraction."""
-        if len(text) <= max_chars:
-            return text
-        # Take first half + last quarter to capture intro and closing
-        half = max_chars // 2
-        return text[:half] + "\n...[truncated]...\n" + text[-(max_chars // 4):]
-
-    @staticmethod
-    def _split_text(text: str, chunk_size: int) -> list[str]:
-        """Split text into chunks at line boundaries."""
-        lines = text.split("\n")
-        chunks, current, current_len = [], [], 0
-        for line in lines:
-            line_len = len(line) + 1
-            if current_len + line_len > chunk_size and current:
-                chunks.append("\n".join(current))
-                current, current_len = [], 0
-            current.append(line)
-            current_len += line_len
-        if current:
-            chunks.append("\n".join(current))
-        return chunks
+        return text
 
 
 def _optional_float(val) -> Optional[float]:

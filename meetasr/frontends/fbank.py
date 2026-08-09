@@ -7,6 +7,43 @@ import numpy as np
 from meetasr.register import tables
 
 
+def compute_lfr_features(fbank_feats: np.ndarray, lfr_m: int = 7, lfr_n: int = 6) -> np.ndarray:
+    """Stack Fbank features according to FunASR LFR specifications.
+
+    Args:
+        fbank_feats: Fbank feature matrix with shape [T, D].
+        lfr_m: Number of adjacent frames to stack.
+        lfr_n: Frame stride between stacked windows.
+
+    Returns:
+        LFR feature matrix with shape [ceil(T / lfr_n), D * lfr_m].
+
+    Raises:
+        ValueError: If the input shape or LFR parameters are invalid.
+    """
+    if fbank_feats.ndim != 2:
+        raise ValueError(f"Expected 2-D fbank features, got shape {fbank_feats.shape}")
+    if lfr_m <= 0 or lfr_n <= 0:
+        raise ValueError(f"lfr_m and lfr_n must be positive, got {lfr_m=} {lfr_n=}")
+
+    frame_count, feature_dim = fbank_feats.shape
+    if frame_count == 0:
+        return np.empty((0, feature_dim * lfr_m), dtype=np.float32)
+
+    stacked_feats = []
+    radius = (lfr_m - 1) // 2
+
+    for center in range(0, frame_count, lfr_n):
+        frame_indices = [
+            max(0, min(index, frame_count - 1))
+            for index in range(center - radius, center - radius + lfr_m)
+        ]
+        stacked = np.concatenate([fbank_feats[index] for index in frame_indices], axis=0)
+        stacked_feats.append(stacked)
+
+    return np.asarray(stacked_feats, dtype=np.float32)
+
+
 @tables.register("frontend_classes", key="WavFrontend")
 class WavFrontend:
     """Compute log-Mel filterbank (FBANK) features.
@@ -31,8 +68,8 @@ class WavFrontend:
         frame_length: int = 25,
         frame_shift: int = 10,
         dither: float = 0.0,
-        lfr_m: int = 1,
-        lfr_n: int = 1,
+        lfr_m: int = 7,
+        lfr_n: int = 6,
         **kwargs,
     ):
         self.fs = fs
@@ -82,16 +119,4 @@ class WavFrontend:
 
     def _apply_lfr(self, feats: np.ndarray) -> np.ndarray:
         """Apply Low Frame Rate stacking/skipping."""
-        T, D = feats.shape
-        T_lfr = (T - self.lfr_m) // self.lfr_n + 1
-        lfr_feats = np.zeros((T_lfr, D * self.lfr_m), dtype=np.float32)
-        for i in range(T_lfr):
-            start = i * self.lfr_n
-            end = min(start + self.lfr_m, T)
-            chunk = feats[start:end]
-            # Pad if last chunk is shorter
-            if chunk.shape[0] < self.lfr_m:
-                pad = np.tile(feats[-1:], (self.lfr_m - chunk.shape[0], 1))
-                chunk = np.concatenate([chunk, pad], axis=0)
-            lfr_feats[i] = chunk.flatten()
-        return lfr_feats
+        return compute_lfr_features(feats, lfr_m=self.lfr_m, lfr_n=self.lfr_n)
