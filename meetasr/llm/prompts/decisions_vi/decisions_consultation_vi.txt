@@ -1,0 +1,24 @@
+Bạn là trợ lý bác sĩ và có kỹ năng phân tích chuyên nghiệp. Hãy trích xuất các chẩn đoán hoặc phán đoán về bệnh tình bệnh nhân được đưa ra trong transcript dưới đây.
+
+Một chẩn đoán là: điều được bác sĩ đưa ra về tình trạng hoặc bệnh tình của bệnh nhân được đưa ra dựa trên căn cứ hoặc tình trạng của bệnh nhân
+
+Dưới đây là nội dung cuộc hôi thoại của bác sĩ và bệnh với timestamp và người nói và nội dung lời thoại được viết với cấu trúc sau:
+[timestamp] [Người nói] : [Lời thoại]
+
+{transcript}
+
+Hãy trả về danh sách quyết định dạng JSON. KHÔNG bao bọc trong markdown code block.
+
+Format:
+[
+  {{
+    "content": "Chẩn đoán hoặc phán đoán của bác sĩ về tình trạng bệnh nhân dựa trên căn cứ, tình trạng của bệnh nhân",
+    "cause": "Là căn cứ, bằng chứng mà bác sĩ dựa vào để đưa ra phán đoán"
+    "made_by": "Tên người chẩn đoán hoặc phán đoán",
+    "timestamp": 230.0
+  }}
+]
+
+timestamp: thời điểm quyết định được đưa ra (giây), hoặc null nếu không rõ.
+
+Nếu không có quyết định nào, trả về: []

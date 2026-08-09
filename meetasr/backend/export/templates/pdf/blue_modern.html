@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="{{ language }}">
+<head>
+  <meta charset="utf-8">
+  <title>{{ title }}</title>
+  <style>
+    @font-face {
+      font-family: "MeetingMind Body";
+      src: url("{{ body_font_url }}") format("truetype");
+      font-style: normal;
+      font-weight: 400;
+    }
+
+    @font-face {
+      font-family: "Poppins";
+      src: url("{{ poppins_bold_url }}") format("truetype");
+      font-style: normal;
+      font-weight: 700;
+    }
+
+    @page {
+      size: A4;
+      margin: 0;
+      background: #eaeaea;
+    }
+
+    :root {
+      --accent: #2a4280;
+      --paper: #eaeaea;
+      --ink: #17191f;
+      --muted: #68718a;
+      --rule: #2a4280;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background: var(--paper);
+      color: var(--ink);
+      font-family: "MeetingMind Body", sans-serif;
+      font-size: 9.4pt;
+      line-height: 1.4;
+    }
+
+    .report {
+      background: var(--paper);
+      min-height: 297mm;
+      padding: 0 15mm 14mm;
+    }
+
+    .masthead {
+      align-items: center;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .brand-badge {
+      align-items: center;
+      background: var(--accent);
+      border-radius: 0 0 11mm 11mm;
+      color: #fff;
+      display: flex;
+      font-family: "Poppins", sans-serif;
+      gap: 2.5mm;
+      justify-content: center;
+      letter-spacing: 0.02em;
+      min-height: 18mm;
+      padding: 3.5mm 9mm 4mm;
+      text-align: center;
+      width: 76mm;
+    }
+
+    .brand-wordmark {
+      font-size: 13pt;
+      line-height: 1;
+    }
+
+    .brand-ai {
+      background: #fff;
+      border: 0;
+      border-radius: 999px;
+      color: var(--accent);
+      font-size: 9pt;
+      letter-spacing: 0.08em;
+      line-height: 1;
+      padding: 1.2mm 2.2mm 1mm;
+    }
+
+    .report-title {
+      color: var(--accent);
+      font-family: "Poppins", sans-serif;
+      font-size: 30pt;
+      font-weight: 700;
+      letter-spacing: -0.045em;
+      line-height: 1.05;
+      margin: 14mm 0 5mm;
+      overflow-wrap: anywhere;
+      text-align: center;
+      text-transform: uppercase;
+      width: 100%;
+    }
+
+    .title-rule {
+      background: var(--rule);
+      height: 0.4mm;
+      width: 100%;
+    }
+
+    .section-grid {
+      column-count: 2;
+      column-gap: 10mm;
+      column-fill: balance;
+      margin-top: 16mm;
+    }
+
+    .section-card {
+      break-inside: auto;
+      display: block;
+      margin: 0 0 10mm;
+      min-width: 0;
+    }
+
+    .section-label {
+      background: var(--accent);
+      border-radius: 999px;
+      color: #fff;
+      display: table;
+      font-family: "Poppins", sans-serif;
+      font-size: 12.8pt;
+      font-weight: 700;
+      letter-spacing: 0.015em;
+      line-height: 1.18;
+      margin: 0 0 5mm;
+      max-width: 100%;
+      padding: 2.4mm 5.5mm 2.2mm;
+      text-transform: uppercase;
+      break-after: avoid;
+    }
+
+    .section-body {
+      overflow-wrap: anywhere;
+      width: 100%;
+    }
+
+    .section-body > :first-child {
+      margin-top: 0;
+    }
+
+    .section-body > :last-child {
+      margin-bottom: 0;
+    }
+
+    .section-body p {
+      margin: 0 0 3mm;
+      text-align: justify;
+    }
+
+    .section-body strong,
+    .section-body h3,
+    .section-body h4 {
+      color: var(--accent);
+      font-family: "Poppins", sans-serif;
+      font-weight: 700;
+    }
+
+    .section-body h3,
+    .section-body h4 {
+      font-size: 10pt;
+      line-height: 1.2;
+      margin: 4mm 0 1.5mm;
+    }
+
+    .section-body ul,
+    .section-body ol {
+      margin: 0;
+      padding-left: 5mm;
+    }
+
+    .section-body li {
+      break-inside: avoid;
+      margin-bottom: 1.2mm;
+      padding-left: 1mm;
+    }
+
+    .section-body blockquote {
+      border-left: 1mm solid var(--accent);
+      color: var(--muted);
+      margin: 0;
+      padding: 1mm 0 1mm 4mm;
+    }
+
+    .section-body table {
+      border-collapse: collapse;
+      font-size: 8.3pt;
+      line-height: 1.38;
+      table-layout: fixed;
+      width: 100%;
+    }
+
+    .section-body th,
+    .section-body td {
+      border-bottom: 0.3mm solid #8fa8e8;
+      padding: 2mm 1.5mm 2mm 0;
+      text-align: left;
+      vertical-align: top;
+      overflow-wrap: anywhere;
+    }
+
+    .section-body th {
+      color: var(--accent);
+      font-family: "Poppins", sans-serif;
+      font-weight: 700;
+    }
+
+    .section-body pre,
+    .section-body code {
+      font-family: monospace;
+      font-size: 7.5pt;
+      white-space: pre-wrap;
+    }
+
+    .section-body hr {
+      background: #9aa9cb;
+      border: 0;
+      height: 0.25mm;
+      margin: 4mm 0;
+    }
+
+    .section-body a {
+      color: var(--accent);
+    }
+
+  </style>
+</head>
+<body>
+  <main class="report">
+    <header class="masthead">
+      <div class="brand-badge" aria-label="{{ brand_name }}">
+        <span class="brand-wordmark">MeetingMind</span>
+        <span class="brand-ai">AI</span>
+      </div>
+      <h1 class="report-title">{{ title }}</h1>
+      <div class="title-rule"></div>
+    </header>
+
+    <div class="section-grid">
+      {% for section in sections %}
+        <section class="section-card">
+          {% if section.heading %}
+            <h2 class="section-label">{{ section.heading }}</h2>
+          {% endif %}
+          <div class="section-body">{{ section.html | safe }}</div>
+        </section>
+      {% endfor %}
+    </div>
+  </main>
+</body>
+</html>

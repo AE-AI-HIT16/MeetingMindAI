@@ -1,0 +1,56 @@
+name: Deploy to Vercel
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+      - feature/* # Hỗ trợ deploy cả nhánh feature để test
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    # Rất quan trọng: Báo cho GitHub Actions biết code nằm ở thư mục frontend-next
+    defaults:
+      run:
+        working-directory: ./frontend-next
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Vercel CLI and pnpm
+        run: |
+          npm install --global vercel@latest
+          npm install --global pnpm@9
+
+      - name: Pull Vercel Environment Information
+        run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+      - name: Override Environment Variables for Active Tunnel
+        run: |
+          API_URL="https://discussions-pottery-voted-logan.trycloudflare.com"
+          echo "NEXT_PUBLIC_MEETASR_API=$API_URL" > .env.production.local
+          echo "MEETASR_API=$API_URL" >> .env.production.local
+          echo "NEXT_PUBLIC_WS_HOST=$API_URL" >> .env.production.local
+          echo "NEXTAUTH_URL=https://frontend-next-three-smoky.vercel.app" >> .env.production.local
+
+      - name: Build Project Artifacts
+        run: vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
+        env:
+          # Environment variables cho MeetASR Backend
+          NEXT_PUBLIC_MEETASR_API: https://discussions-pottery-voted-logan.trycloudflare.com
+          MEETASR_API: https://discussions-pottery-voted-logan.trycloudflare.com
+          NEXT_PUBLIC_WS_HOST: https://discussions-pottery-voted-logan.trycloudflare.com
+          NEXTAUTH_URL: https://frontend-next-three-smoky.vercel.app
+          NEXTAUTH_SECRET: ${{ secrets.NEXTAUTH_SECRET }}
+
+      - name: Deploy Project Artifacts to Vercel
+        run: vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }}
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}

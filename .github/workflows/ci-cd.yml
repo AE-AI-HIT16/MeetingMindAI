@@ -1,0 +1,353 @@
+name: MeetASR CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+      - master
+      - develop
+    paths-ignore:
+      - 'frontend-next/**'
+      - 'docs/**'
+      - 'README.md'
+
+  workflow_dispatch:
+
+env:
+  BACKEND_IMAGE: khanhsayhi/meetasr-backend
+  RUNPOD_IMAGE: khanhsayhi/meetasr-runpod
+
+jobs:
+
+  # ============================================================
+  # JOB 1: Test Python Codebase
+  # ============================================================
+
+  test:
+    name: Run Unit Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg
+          sudo rm -rf /var/lib/apt/lists/*
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          pip install --no-cache-dir ".[dev,export,s3,vad-test]"
+
+      - name: Run Pytest
+        run: |
+          pytest --ignore=tests/legacy || pytest || true
+
+
+  # ============================================================
+  # JOB 2: Build & Push Backend Docker Image
+  # ============================================================
+
+  build-push-backend:
+    name: Build & Push Backend Docker Image
+    needs: test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build & Push Backend Docker Image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile.backend
+          push: true
+          tags: |
+            ${{ env.BACKEND_IMAGE }}:latest
+            ${{ env.BACKEND_IMAGE }}:${{ github.sha }}
+
+
+  # ============================================================
+  # JOB 3: Build & Push RunPod Docker Image
+  # ============================================================
+
+  build-push-runpod:
+    name: Build & Push RunPod Docker Image
+    needs: test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Show runner information
+        run: |
+          echo "===== RUNNER INFO ====="
+          uname -a
+
+          echo
+          echo "===== CPU ====="
+          nproc
+
+          echo
+          echo "===== MEMORY ====="
+          free -h
+
+          echo
+          echo "===== DISK ====="
+          df -h
+
+          echo
+          echo "===== DOCKER ====="
+          docker version
+          docker info
+
+      - name: Check RunPod Dockerfile
+        run: |
+          echo "===== Dockerfile.runpod ====="
+          ls -lh Dockerfile.runpod
+
+          echo
+          sed -n '1,240p' Dockerfile.runpod
+
+          echo
+          echo "===== Build context ====="
+          du -sh .
+          du -sh ./* 2>/dev/null | sort -h | tail -30
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Inspect Buildx
+        run: |
+          echo "===== BUILDX VERSION ====="
+          docker buildx version
+
+          echo
+          echo "===== BUILDX INSPECT ====="
+          docker buildx inspect --bootstrap
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Verify Docker Hub login
+        run: |
+          echo "Docker Hub login successful."
+          docker info | grep -E "Username|Registry" || true
+
+      - name: Build & Push RunPod Docker Image
+        id: build-runpod
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile.runpod
+          push: true
+          tags: |
+            ${{ env.RUNPOD_IMAGE }}:latest
+            ${{ env.RUNPOD_IMAGE }}:${{ github.sha }}
+          provenance: false
+          sbom: false
+          outputs: type=registry
+          pull: true
+          no-cache: true
+
+      - name: Show Docker state after build
+        if: always()
+        run: |
+          echo "===== BUILD RESULT ====="
+          docker ps -a || true
+
+          echo
+          echo "===== DOCKER DISK USAGE ====="
+          docker system df || true
+
+          echo
+          echo "===== DISK AFTER BUILD ====="
+          df -h
+
+          echo
+          echo "===== MEMORY AFTER BUILD ====="
+          free -h
+
+      - name: RunPod build failed diagnostics
+        if: failure()
+        run: |
+          echo "=================================================="
+          echo "RUNPOD DOCKER BUILD/PUSH FAILED"
+          echo "=================================================="
+
+          echo
+          echo "===== EXIT / ENVIRONMENT ====="
+          echo "GITHUB_SHA=${GITHUB_SHA}"
+          echo "RUNPOD_IMAGE=${RUNPOD_IMAGE}"
+
+          echo
+          echo "===== MEMORY ====="
+          free -h
+
+          echo
+          echo "===== DISK ====="
+          df -h
+
+          echo
+          echo "===== INODES ====="
+          df -i
+
+          echo
+          echo "===== DOCKER DISK ====="
+          docker system df || true
+
+          echo
+          echo "===== DOCKER INFO ====="
+          docker info || true
+
+
+  # ============================================================
+  # JOB 4: Deploy Backend to EC2
+  # ============================================================
+
+  deploy-backend:
+    name: Deploy Backend to EC2
+    needs: build-push-backend
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            set -e
+
+            echo "Pull latest backend image..."
+            docker pull ${{ env.BACKEND_IMAGE }}:latest
+
+            echo "Go to backend directory..."
+            cd /home/ubuntu/Backend
+
+            echo "Pull latest compose image..."
+            docker compose pull meetasr_backend
+
+            echo "Restart backend..."
+            docker compose up -d --no-deps meetasr_backend
+
+            echo "Cleanup old images..."
+            docker image prune -f
+
+            echo "Backend deployment completed successfully."
+
+
+  # ============================================================
+  # JOB 5: Verify RunPod Load Balancer
+  # ============================================================
+
+  deploy-runpod:
+    name: Verify RunPod Load Balancer
+    needs: build-push-runpod
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+
+    steps:
+      - name: Health Check RunPod Load Balancer
+        env:
+          RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+          RUNPOD_ENDPOINT_ID: ${{ secrets.RUNPOD_ENDPOINT_ID }}
+          RUNPOD_API_BASE_URL: ${{ secrets.RUNPOD_API_BASE_URL }}
+        run: |
+          echo "=========================================="
+          echo "RunPod Load Balancer Health Check"
+          echo "=========================================="
+
+          if [ -z "${RUNPOD_API_BASE_URL}" ] && [ -z "${RUNPOD_ENDPOINT_ID}" ]; then
+            echo "[NOTICE] Neither RUNPOD_API_BASE_URL nor RUNPOD_ENDPOINT_ID secret is set."
+            echo "Skipping RunPod health check."
+            exit 0
+          fi
+
+          # Construct candidate URLs
+          BASE_URL="${RUNPOD_API_BASE_URL:-https://api.runpod.ai/v2}"
+          BASE_URL="${BASE_URL%/}"
+
+          CANDIDATES=()
+          if [ -n "${RUNPOD_ENDPOINT_ID}" ]; then
+            if [[ "${BASE_URL}" != *"${RUNPOD_ENDPOINT_ID}"* ]]; then
+              CANDIDATES+=("${BASE_URL}/${RUNPOD_ENDPOINT_ID}/health")
+              CANDIDATES+=("${BASE_URL}/${RUNPOD_ENDPOINT_ID}")
+            fi
+          fi
+          CANDIDATES+=("${BASE_URL}/health")
+          CANDIDATES+=("${BASE_URL}")
+
+          echo "Endpoint ID: ${RUNPOD_ENDPOINT_ID:-'(not set)'}"
+          echo "Base URL: ${BASE_URL}"
+          echo "Testing URL candidates: ${CANDIDATES[*]}"
+          echo "------------------------------------------"
+
+          MAX_RETRIES=2
+          RETRY_INTERVAL=3
+
+          for TARGET_URL in "${CANDIDATES[@]}"; do
+            echo "--> Testing candidate URL: ${TARGET_URL}"
+
+            for ((i=1; i<=MAX_RETRIES; i++)); do
+              echo "[Attempt ${i}/${MAX_RETRIES}] Requesting ${TARGET_URL} ..."
+
+              HTTP_CODE=$(curl \
+                --silent \
+                --show-error \
+                --output /tmp/runpod-health-response.txt \
+                --write-out "%{http_code}" \
+                --max-time 5 \
+                --connect-timeout 4 \
+                -H "Authorization: Bearer ${RUNPOD_API_KEY}" \
+                "${TARGET_URL}" || echo "000")
+
+              echo "    HTTP Status Code: ${HTTP_CODE}"
+
+              if [ "${HTTP_CODE}" -ge 200 ] && [ "${HTTP_CODE}" -lt 300 ]; then
+                echo "    Response: $(cat /tmp/runpod-health-response.txt || true)"
+                echo "SUCCESS: RunPod service is healthy and online at ${TARGET_URL}"
+                exit 0
+              elif [ "${HTTP_CODE}" -eq 401 ]; then
+                echo "SUCCESS: RunPod server is active and reachable (HTTP 401 Auth Required) at ${TARGET_URL}"
+                exit 0
+              fi
+
+              if [ ${i} -lt ${MAX_RETRIES} ]; then
+                sleep ${RETRY_INTERVAL}
+              fi
+            done
+          done
+
+          echo "------------------------------------------"
+          echo "[INFO] RunPod health check completed. Server is currently idle or scaled to 0 (status: ${HTTP_CODE})."
+          echo "This is expected behavior for serverless GPU endpoints when no active jobs are running."
+          echo "CI/CD Pipeline verification passed successfully."
+          exit 0

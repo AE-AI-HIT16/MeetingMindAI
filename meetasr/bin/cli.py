@@ -8,10 +8,13 @@ import logging
 import os
 import sys
 
+from dotenv import load_dotenv
 
-def cmd_transcribe(args):
+
+def cmd_transcribe(args: argparse.Namespace) -> None:
     """Run transcription on one or more audio files."""
     from meetasr.auto.auto_pipeline import AutoPipeline
+    from meetasr.utils.llm_export import transcript_to_llm_payload
 
     if args.config:
         pipeline = AutoPipeline.from_yaml(args.config)
@@ -19,7 +22,7 @@ def cmd_transcribe(args):
         # Minimal config — ASR only, no LLM
         pipeline = AutoPipeline.from_config({
             "asr": {"model": args.model, "device": args.device, "hub": args.hub},
-            "vad": {"model": "fsmn-vad", "hub": args.hub},
+            "vad": {"model": "silero-vad"},
             "punc": {"model": "ct-punc", "hub": args.hub} if not args.no_punc else None,
         })
 
@@ -32,7 +35,20 @@ def cmd_transcribe(args):
         result = pipeline.transcribe(audio_path, language=args.language)
 
         if args.output_format == "json":
-            print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
+            output = json.dumps(
+                transcript_to_llm_payload(result),
+                ensure_ascii=False,
+                indent=2,
+            )
+            if args.output_dir:
+                os.makedirs(args.output_dir, exist_ok=True)
+                stem = os.path.splitext(os.path.basename(audio_path))[0]
+                out_path = os.path.join(args.output_dir, f"{stem}.json")
+                with open(out_path, "w", encoding="utf-8") as f:
+                    f.write(output)
+                print(f"Saved JSON: {out_path}", file=sys.stderr)
+            else:
+                print(output)
         elif args.output_format == "srt":
             srt_text = result.to_srt()
             if args.output_dir:
@@ -48,7 +64,7 @@ def cmd_transcribe(args):
             print(result.text)
 
 
-def cmd_summarize(args):
+def cmd_summarize(args: argparse.Namespace) -> None:
     """Run full meeting summarization."""
     from meetasr.auto.auto_pipeline import AutoPipeline
 
@@ -86,11 +102,11 @@ def cmd_summarize(args):
             print(output)
 
 
-def cmd_server(args):
+def cmd_server(args: argparse.Namespace) -> None:
     """Start the FastAPI server."""
     import uvicorn
     if args.config:
-        os.environ.setdefault("MEETASR_CONFIG", args.config)
+        os.environ["MEETASR_CONFIG"] = args.config
     uvicorn.run(
         "meetasr.api.app:app",
         host=args.host,
@@ -100,8 +116,9 @@ def cmd_server(args):
     )
 
 
-def main():
+def main() -> None:
     """Main CLI entry point."""
+    load_dotenv()
     parser = argparse.ArgumentParser(
         prog="meetasr",
         description="MeetASR — Meeting Speech Recognition + LLM Summarization",
