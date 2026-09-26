@@ -6,6 +6,7 @@ import type {
   DocumentGenerationStage,
   DocumentGenerationStatus,
 } from "./types";
+import { getWebSocketBase } from "./runtime";
 
 export interface DocumentGenerationEventsState {
   isConnected: boolean;
@@ -21,22 +22,7 @@ interface TrackedGenerationState extends DocumentGenerationEventsState {
 }
 
 function documentEventsUrl(generationJobId: string): string {
-  const envHost = process.env.NEXT_PUBLIC_WS_HOST || process.env.NEXT_PUBLIC_MEETASR_API || process.env.MEETASR_API || "http://56.10.9.132:8000";
-
-  let raw = envHost.trim();
-  if (!/^https?:\/\//i.test(raw) && !/^wss?:\/\//i.test(raw)) {
-    raw = `http://${raw}`;
-  }
-
-  try {
-    const parsed = new URL(raw);
-    const isHttps = typeof window !== "undefined" && window.location.protocol === "https:";
-    const wsScheme = isHttps ? "wss:" : "ws:";
-    return `${wsScheme}//${parsed.host}/v1/document-jobs/${generationJobId}/events`;
-  } catch (err) {
-    console.error("Failed to parse WS URL for document events:", envHost, err);
-    return `ws://56.10.9.132:8000/v1/document-jobs/${generationJobId}/events`;
-  }
+  return `${getWebSocketBase()}/v1/document-jobs/${generationJobId}/events`;
 }
 
 export function useDocumentGenerationEvents(

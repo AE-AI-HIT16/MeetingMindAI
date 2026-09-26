@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { mapTranscriptSegment } from "./mappers";
 import type { ApiTranscriptSegment } from "./types";
+import { getWebSocketBase } from "./runtime";
 
 // ----------------------------------------------------------------
 // Types
@@ -56,24 +57,7 @@ export interface RealtimeStreamActions {
 
 /** Build the WebSocket URL based on the unified API base URL. */
 async function buildWsUrl(): Promise<string> {
-  const envHost = process.env.NEXT_PUBLIC_WS_HOST || process.env.NEXT_PUBLIC_MEETASR_API || process.env.MEETASR_API || "http://127.0.0.1:8000";
-
-  let raw = envHost.trim().replace(/^["']|["']$/g, "");
-  if (!/^https?:\/\//i.test(raw) && !/^wss?:\/\//i.test(raw)) {
-    raw = `http://${raw}`;
-  }
-
-  try {
-    const parsed = new URL(raw);
-    const isHttps = typeof window !== "undefined" && window.location.protocol === "https:";
-    const wsScheme = isHttps ? "wss:" : "ws:";
-    return `${wsScheme}//${parsed.host}/v1/realtime/stream`;
-  } catch (err) {
-    console.error("Failed to parse WS URL from:", envHost, err);
-    const isHttps = typeof window !== "undefined" && window.location.protocol === "https:";
-    const wsScheme = isHttps ? "wss:" : "ws:";
-    return `${wsScheme}//56.10.9.132:8000/v1/realtime/stream`;
-  }
+  return `${getWebSocketBase()}/v1/realtime/stream`;
 }
 
 // ----------------------------------------------------------------

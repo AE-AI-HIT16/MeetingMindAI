@@ -8,6 +8,7 @@ import type {
   ProcessingStage,
   TranscriptSegment,
 } from "./types";
+import { getWebSocketBase } from "./runtime";
 
 export interface JobEventsState {
   isConnected: boolean;
@@ -21,24 +22,7 @@ export interface JobEventsState {
 }
 
 async function jobEventsUrl(jobId: string): Promise<string> {
-  const envHost = process.env.NEXT_PUBLIC_WS_HOST || process.env.NEXT_PUBLIC_MEETASR_API || process.env.MEETASR_API || "http://127.0.0.1:8000";
-
-  let raw = envHost.trim().replace(/^["']|["']$/g, "");
-  if (!/^https?:\/\//i.test(raw) && !/^wss?:\/\//i.test(raw)) {
-    raw = `https://${raw}`;
-  }
-
-  try {
-    const parsed = new URL(raw);
-    const isHttps = typeof window !== "undefined" && window.location.protocol === "https:";
-    const wsScheme = isHttps ? "wss:" : "ws:";
-    const wsUrl = `${wsScheme}//${parsed.host}/v1/jobs/${jobId}/events`;
-    console.log(`[useJobEvents] Connecting to Job Events WS URL: ${wsUrl}`);
-    return wsUrl;
-  } catch (err) {
-    console.error("[useJobEvents] Failed to parse WS URL for job events:", envHost, err);
-    return `wss://qr0omrgs411iat-8000.proxy.runpod.net/v1/jobs/${jobId}/events`;
-  }
+  return `${getWebSocketBase()}/v1/jobs/${jobId}/events`;
 }
 
 export function useJobEvents(jobId: string | null): JobEventsState {

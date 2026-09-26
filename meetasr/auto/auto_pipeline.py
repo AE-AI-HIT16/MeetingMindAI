@@ -47,7 +47,9 @@ class AutoPipeline:
         if "asr" not in config:
             raise ValueError("Config must have an 'asr' section with a 'model' key.")
 
-        device = config.get("device", "cpu")
+        device = config.get("device", "auto")
+        if device == "auto":
+            device = cls._auto_detect_device()
 
         # Build ASR (required)
         asr_cfg = dict(config["asr"])
@@ -120,6 +122,16 @@ class AutoPipeline:
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _auto_detect_device() -> str:
+        """Automatically detect available hardware accelerator (CUDA, MPS, or CPU)."""
+        import torch
+        if torch.cuda.is_available():
+            return "cuda:0"
+        if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            return "mps"
+        return "cpu"
 
     @staticmethod
     def _build_optional(config: dict, key: str, device: str) -> Any:
