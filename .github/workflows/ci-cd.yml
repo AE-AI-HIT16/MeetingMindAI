@@ -16,6 +16,8 @@ on:
 env:
   BACKEND_IMAGE: khanhsayhi/meetasr-backend
   RUNPOD_IMAGE: khanhsayhi/meetasr-runpod
+  EC2_HOST: 98.93.139.11
+  EC2_USERNAME: ubuntu
 
 jobs:
 
@@ -239,9 +241,10 @@ jobs:
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USERNAME }}
+          host: ${{ env.EC2_HOST }}
+          username: ${{ env.EC2_USERNAME }}
           key: ${{ secrets.EC2_SSH_KEY }}
+          port: 22
           script: |
             set -e
 
