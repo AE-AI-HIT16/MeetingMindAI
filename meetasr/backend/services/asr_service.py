@@ -77,12 +77,18 @@ class ASRService:
 
     def _get_candidate_urls(self, target_url: str) -> list[str]:
         from urllib.parse import urlparse
-        parsed = urlparse(target_url)
-        path = parsed.path
-        if parsed.query:
-            path += f"?{parsed.query}"
+        base = self.runpod_url.rstrip("/")
 
-        candidates = [self.runpod_url.rstrip("/")]
+        # Extract only the path suffix relative to base to avoid duplication
+        if target_url.startswith(base):
+            path = target_url[len(base):]
+        else:
+            parsed = urlparse(target_url)
+            path = parsed.path
+            if parsed.query:
+                path += f"?{parsed.query}"
+
+        candidates = [base]
         is_local_url = any(
             h in self.runpod_url
             for h in ("localhost", "127.0.0.1", "host.docker.internal", "meetasr_runpod")
