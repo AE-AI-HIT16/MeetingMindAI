@@ -26,6 +26,7 @@ COPY meetasr ./meetasr
 # Install MeetASR dependencies without re-downloading PyTorch/CUDA wheels
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
     pip install --no-cache-dir .[gpu,vad-test] && \
+    pip install --no-cache-dir runpod && \
     find /opt/conda -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
 
 CMD ["python", "meetasr/runpod/handler.py"]
