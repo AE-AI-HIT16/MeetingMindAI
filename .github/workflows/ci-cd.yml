@@ -14,9 +14,9 @@ on:
   workflow_dispatch:
 
 env:
-  BACKEND_IMAGE: khanhsayhi/meetasr-backend
-  RUNPOD_IMAGE: khanhsayhi/meetasr-runpod
-  EC2_HOST: 98.93.139.11
+  BACKEND_IMAGE: tutrananh444/meetasr-backend
+  RUNPOD_IMAGE: tutrananh444/meetasr-runpod
+  EC2_HOST: 32.198.120.120
   EC2_USERNAME: ubuntu
 
 jobs:
@@ -255,10 +255,10 @@ jobs:
             cd /home/ubuntu/Backend
 
             echo "Pull latest compose image..."
-            docker compose pull meetasr_backend
+            docker compose -f docker-compose.prod.yml pull meetasr_backend
 
             echo "Restart backend..."
-            docker compose up -d --no-deps meetasr_backend
+            docker compose -f docker-compose.prod.yml up -d --no-deps meetasr_backend
 
             echo "Cleanup old images..."
             docker image prune -f
