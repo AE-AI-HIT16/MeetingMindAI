@@ -7,7 +7,7 @@
 """
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 
 from sqlalchemy import UniqueConstraint
@@ -96,7 +96,7 @@ class Source(SQLModel, table=True):
     media_type: str                              # "audio" | "video"
     duration: Optional[float] = None            # seconds; None until extracted
     storage_path: str                           # local path or MinIO object key
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     # Relationships
     job: Optional["Job"] = Relationship(
@@ -128,8 +128,8 @@ class Job(SQLModel, table=True):
     progress: float = Field(default=0.0)                # 0.0 → 1.0
     error: Optional[str] = None                         # set only when status=failed
 
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     # Relationships
     source: Source = Relationship(back_populates="job")
@@ -184,8 +184,8 @@ class Document(SQLModel, table=True):
 
     mode: str = Field(default=DocumentMode.LIVE)    # see DocumentMode
     markdown: str = Field(default="")               # full markdown content
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     # Relationships
     source: Source = Relationship(back_populates="documents")
@@ -211,8 +211,8 @@ class DocumentGenerationJob(SQLModel, table=True):
     stage: str = Field(default=DocumentGenerationStage.QUEUED)
     progress: float = Field(default=0.0)
     error: Optional[str] = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     source: Source = Relationship(
         back_populates="document_generation_jobs"
@@ -231,5 +231,5 @@ class DocumentDuplicateArchive(SQLModel, table=True):
     markdown: str
     original_created_at: datetime
     original_updated_at: datetime
-    archived_at: datetime = Field(default_factory=datetime.utcnow)
+    archived_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 

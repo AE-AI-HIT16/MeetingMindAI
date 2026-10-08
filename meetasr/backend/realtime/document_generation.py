@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy.exc import IntegrityError
@@ -125,7 +125,7 @@ class DocumentGenerationQueue:
                     generation.stage = DocumentGenerationStage.DONE
                     generation.progress = 1.0
                     generation.error = None
-                    generation.updated_at = datetime.utcnow()
+                    generation.updated_at = datetime.now(timezone.utc)
                 db.add(generation)
                 db.commit()
                 db.refresh(generation)
@@ -165,7 +165,7 @@ class DocumentGenerationQueue:
                 generation.stage = DocumentGenerationStage.QUEUED
                 generation.progress = 0.0
                 generation.error = None
-                generation.updated_at = datetime.utcnow()
+                generation.updated_at = datetime.now(timezone.utc)
                 should_enqueue = True
 
             db.add(generation)
@@ -307,7 +307,7 @@ class DocumentGenerationQueue:
             generation.stage = DocumentGenerationStage.GENERATING
             generation.progress = 0.1
             generation.error = None
-            generation.updated_at = datetime.utcnow()
+            generation.updated_at = datetime.now(timezone.utc)
             db.add(generation)
             db.commit()
             db.refresh(generation)
@@ -336,7 +336,7 @@ class DocumentGenerationQueue:
                 return None
             generation.stage = stage
             generation.progress = progress
-            generation.updated_at = datetime.utcnow()
+            generation.updated_at = datetime.now(timezone.utc)
             db.add(generation)
             db.commit()
             db.refresh(generation)
@@ -357,7 +357,7 @@ class DocumentGenerationQueue:
             generation.stage = DocumentGenerationStage.DONE
             generation.progress = 1.0
             generation.error = None
-            generation.updated_at = datetime.utcnow()
+            generation.updated_at = datetime.now(timezone.utc)
             db.add(generation)
             db.commit()
             db.refresh(generation)
@@ -388,7 +388,7 @@ class DocumentGenerationQueue:
             generation.status = DocumentGenerationStatus.FAILED
             generation.stage = DocumentGenerationStage.FAILED
             generation.error = message
-            generation.updated_at = datetime.utcnow()
+            generation.updated_at = datetime.now(timezone.utc)
             db.add(generation)
             db.commit()
             db.refresh(generation)

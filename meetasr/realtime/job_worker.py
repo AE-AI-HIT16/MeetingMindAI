@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import tempfile
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from sqlmodel import Session, select
@@ -239,7 +239,7 @@ class JobQueue:
             job.stage = JobStage.EXTRACTING_AUDIO
             job.progress = 0.0
             job.error = None
-            job.updated_at = datetime.utcnow()
+            job.updated_at = datetime.now(timezone.utc)
             db.add(job)
             db.commit()
             db.refresh(source)
@@ -351,7 +351,7 @@ class JobQueue:
             job.status = JobStatus.PROCESSING
             job.stage = stage
             job.progress = progress
-            job.updated_at = datetime.utcnow()
+            job.updated_at = datetime.now(timezone.utc)
             db.add(job)
             db.commit()
 
@@ -365,7 +365,7 @@ class JobQueue:
             job.status = JobStatus.DONE
             job.stage = JobStage.GENERATING_DOC
             job.progress = 1.0
-            job.updated_at = datetime.utcnow()
+            job.updated_at = datetime.now(timezone.utc)
             db.add(source)
             db.add(job)
             db.commit()
@@ -377,7 +377,7 @@ class JobQueue:
                 return
             job.status = JobStatus.FAILED
             job.error = message or "Job xử lý thất bại."
-            job.updated_at = datetime.utcnow()
+            job.updated_at = datetime.now(timezone.utc)
             db.add(job)
             db.commit()
 

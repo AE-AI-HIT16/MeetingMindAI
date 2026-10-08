@@ -142,7 +142,7 @@ async def sync_user(
         user.name = body.name
         user.email = body.email
         user.avatar_url = body.avatar_url
-        user.last_login_at = datetime.utcnow()
+        user.last_login_at = datetime.now(timezone.utc)
         logger.info("User dang nhap lai: provider=%s email=%s", body.provider, body.email)
 
     db.commit()
@@ -221,7 +221,7 @@ def refresh_token(
         )
 
     # Cập nhật last_login_at mỗi lần refresh thành công
-    current_user.last_login_at = datetime.utcnow()
+    current_user.last_login_at = datetime.now(timezone.utc)
 
     # Ký JWT mới với thời hạn đầy đủ
     token, expires_in = _create_jwt(current_user)
