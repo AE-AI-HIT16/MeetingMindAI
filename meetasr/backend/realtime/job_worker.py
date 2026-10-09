@@ -94,23 +94,25 @@ class JobQueue:
 
             prepared = None
             if getattr(self._asr_service, "_is_serverless", False):
-                # RunPod Serverless: single call, no incremental state
-                result = await self._asr_service.transcribe(
-                    audio_source,
-                    key=source.filename,
-                )
+                # RunPod Serverless: stream segments per chunk as they complete
                 persisted: list[TranscriptSegmentPayload] = []
-                total = max(len(result.segments), 1)
-                for i, seg in enumerate(result.segments, 1):
-                    persisted_chunk = self._persist_segments(job_id, [seg])
-                    persisted.extend(persisted_chunk)
-                    for s in persisted_chunk:
+
+                async def on_chunk(chunk_idx: int, total_chunks: int, chunk_segs: list) -> None:
+                    stored = self._persist_segments(job_id, chunk_segs)
+                    persisted.extend(stored)
+                    for s in stored:
                         await event_bus.publish(job_id, TranscriptDeltaEvent(segment=s))
                     await self._publish_status(
                         job_id,
                         JobStage.TRANSCRIBING,
-                        0.10 + 0.70 * i / total,
+                        0.10 + 0.70 * (chunk_idx + 1) / total_chunks,
                     )
+
+                await self._asr_service.transcribe(
+                    audio_source,
+                    key=source.filename,
+                    on_chunk_complete=on_chunk,
+                )
                 finalized = persisted
             else:
                 prepared = await self._asr_service.prepare_incremental(audio_source)

@@ -205,6 +205,7 @@ class ASRService:
         *,
         offset_ms: int = 0,
         key: str | None = None,
+        on_chunk_complete: Any | None = None,
     ) -> ASRServiceResult:
         import base64
 
@@ -241,14 +242,18 @@ class ASRService:
                     total_duration_ms += chunk_duration_ms
                     all_text_parts.append(res_json.get("text", ""))
 
+                    chunk_segs: list[TranscriptSegmentPayload] = []
                     for s in res_json.get("sentence_info", []):
                         if s["text"].strip():
-                            all_segments.append(TranscriptSegmentPayload(
+                            chunk_segs.append(TranscriptSegmentPayload(
                                 start_ms=chunk_offset_ms + int(s["start"] * 1000),
                                 end_ms=chunk_offset_ms + int(s["end"] * 1000),
                                 speaker=s.get("speaker"),
                                 text=s["text"],
                             ))
+                    all_segments.extend(chunk_segs)
+                    if on_chunk_complete:
+                        await on_chunk_complete(chunk_idx, len(chunks), chunk_segs)
 
             if not all_segments and any(all_text_parts):
                 all_segments.append(TranscriptSegmentPayload(
