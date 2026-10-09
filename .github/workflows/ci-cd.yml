@@ -13,6 +13,10 @@ on:
 
   workflow_dispatch:
 
+concurrency:
+  group: ci-cd-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   BACKEND_IMAGE: tutrananh444/meetasr-backend
   RUNPOD_IMAGE: tutrananh444/meetasr-runpod
