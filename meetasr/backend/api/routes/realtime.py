@@ -121,7 +121,28 @@ async def realtime_stream(websocket: WebSocket, db: Session = Depends(get_db)):
 
         while True:
 
-            audio = await websocket.receive_bytes()
+            # Dùng receive() generic thay vì receive_bytes(): client có thể gửi
+            # text (control) hoặc close frame — receive_bytes() sẽ KeyError 'bytes'.
+            message = await websocket.receive()
+
+            msg_type = message.get("type")
+            if msg_type == "websocket.disconnect":
+                break
+
+            audio = message.get("bytes")
+            if audio is None:
+                # Text/control message. Handle {"type":"stop"} to finalize;
+                # ignore others (e.g. auth handshake).
+                text = message.get("text")
+                if text:
+                    try:
+                        import json
+                        if json.loads(text).get("type") == "stop":
+                            await websocket.send_json({"type": "stream_stopping"})
+                            break
+                    except Exception:
+                        pass
+                continue
 
             # Lưu toàn bộ audio của phiên realtime
             session.audio_archive.append(audio)
@@ -151,11 +172,24 @@ async def realtime_stream(websocket: WebSocket, db: Session = Depends(get_db)):
 
             await receiver.flush()
 
+            # Chờ transcribe nốt các window còn trong hàng đợi (tối đa ~20s)
+            # rồi báo frontend đã hoàn tất để nó đóng kết nối sạch sẽ.
+            try:
+                await asyncio.wait_for(session.asr_queue.join(), timeout=20.0)
+            except (asyncio.TimeoutError, Exception):
+                pass
+
         except Exception:
 
             logger.exception(
                 "Audio flush failed",
             )
+
+        # Báo frontend realtime đã hoàn tất (frontend chờ event này để kết thúc)
+        try:
+            await websocket.send_json({"type": "stream_stopped"})
+        except Exception:
+            pass
 
         # ===================================================
         # Save PCM audio to Cloudflare R2 and queue offline ASR
