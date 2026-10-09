@@ -447,10 +447,16 @@ class ASRService:
                 for s in res_json["speaker_turns"]
             ]
 
+        distinct_speakers = (
+            sorted({t.speaker for t in speaker_turns})
+            if speaker_turns is not None else None
+        )
         logger.info(
-            "prepare_incremental: %d VAD segment(s), %s speaker turn(s), duration=%dms",
+            "prepare_incremental: %d VAD segment(s), %s speaker turn(s), "
+            "distinct_speakers=%s, duration=%dms",
             len(vad_segments),
             len(speaker_turns) if speaker_turns is not None else "ASR-first",
+            distinct_speakers,
             res_json["duration_ms"],
         )
 
