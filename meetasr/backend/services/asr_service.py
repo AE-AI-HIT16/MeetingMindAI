@@ -225,35 +225,45 @@ class ASRService:
             chunk_samples = 4 * 60 * sample_rate
             chunks = [audio_arr[i:i + chunk_samples] for i in range(0, len(audio_arr), chunk_samples)]
 
+            total_chunks = len(chunks)
+
+            async def _process_chunk(chunk_idx: int, chunk: Any) -> None:
+                chunk_offset_ms = offset_ms + chunk_idx * 4 * 60 * 1000
+                chunk_bytes = numpy_to_wav_bytes(chunk, sample_rate)
+                payload: dict = {"audio_base64": base64.b64encode(chunk_bytes).decode()}
+                if key:
+                    payload["key"] = f"{key}:chunk-{chunk_idx}"
+                res_json = await self._call_serverless("transcribe", payload, timeout=600.0)
+
+                chunk_segs: list[TranscriptSegmentPayload] = []
+                for s in res_json.get("sentence_info", []):
+                    if s["text"].strip():
+                        chunk_segs.append(TranscriptSegmentPayload(
+                            start_ms=chunk_offset_ms + int(s["start"] * 1000),
+                            end_ms=chunk_offset_ms + int(s["end"] * 1000),
+                            speaker=s.get("speaker"),
+                            text=s["text"],
+                        ))
+                # Store results indexed so final assembly stays in order
+                chunk_results[chunk_idx] = (
+                    chunk_segs,
+                    res_json.get("text", ""),
+                    max(0, int(res_json.get("duration", 0) * 1000)),
+                )
+                if on_chunk_complete:
+                    await on_chunk_complete(chunk_idx, total_chunks, chunk_segs)
+
+            chunk_results: dict[int, tuple] = {}
+            await asyncio.gather(*[_process_chunk(i, c) for i, c in enumerate(chunks)])
+
             all_segments: list[TranscriptSegmentPayload] = []
             all_text_parts: list[str] = []
             total_duration_ms = 0
-
-            async with self._transcribe_lock:
-                for chunk_idx, chunk in enumerate(chunks):
-                    chunk_offset_ms = offset_ms + chunk_idx * 4 * 60 * 1000
-                    chunk_bytes = numpy_to_wav_bytes(chunk, sample_rate)
-                    payload: dict = {"audio_base64": base64.b64encode(chunk_bytes).decode()}
-                    if key:
-                        payload["key"] = f"{key}:chunk-{chunk_idx}"
-                    res_json = await self._call_serverless("transcribe", payload, timeout=600.0)
-
-                    chunk_duration_ms = max(0, int(res_json.get("duration", 0) * 1000))
-                    total_duration_ms += chunk_duration_ms
-                    all_text_parts.append(res_json.get("text", ""))
-
-                    chunk_segs: list[TranscriptSegmentPayload] = []
-                    for s in res_json.get("sentence_info", []):
-                        if s["text"].strip():
-                            chunk_segs.append(TranscriptSegmentPayload(
-                                start_ms=chunk_offset_ms + int(s["start"] * 1000),
-                                end_ms=chunk_offset_ms + int(s["end"] * 1000),
-                                speaker=s.get("speaker"),
-                                text=s["text"],
-                            ))
-                    all_segments.extend(chunk_segs)
-                    if on_chunk_complete:
-                        await on_chunk_complete(chunk_idx, len(chunks), chunk_segs)
+            for i in range(total_chunks):
+                segs, text, dur = chunk_results[i]
+                all_segments.extend(segs)
+                all_text_parts.append(text)
+                total_duration_ms += dur
 
             if not all_segments and any(all_text_parts):
                 all_segments.append(TranscriptSegmentPayload(

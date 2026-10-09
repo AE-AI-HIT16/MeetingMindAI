@@ -1,4 +1,4 @@
-# RunPod GPU runtime config — Qwen3-ASR 1.7B
+# RunPod GPU runtime config — Qwen3-ASR 0.5B
 # Qwen3-ASR produces punctuated, mixed-case text natively; no punc model needed.
 
 device: cuda:0
@@ -29,7 +29,7 @@ realtime:
 asr:
   model: qwen3-asr
   hub: none
-  model_size: Qwen/Qwen3-ASR-1.7B
+  model_size: Qwen/Qwen3-ASR-0.5B
   device: cuda:0
   dtype: bfloat16
   max_inference_batch_size: 8
