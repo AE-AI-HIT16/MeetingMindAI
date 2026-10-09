@@ -12,7 +12,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 # Install system dependencies (ffmpeg for audio processing, git, curl, build-essential)
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Remove stale CUDA apt lists that cause GPG errors in pytorch base images
+RUN rm -f /etc/apt/sources.list.d/cuda*.list /etc/apt/sources.list.d/nvidia*.list && \
+    apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     curl \
     git \
