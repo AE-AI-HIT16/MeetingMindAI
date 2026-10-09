@@ -1,5 +1,8 @@
 import asyncio
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from typing import Annotated, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect, status
+from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from meetasr.backend.api.schemas_phase2 import (
@@ -11,13 +14,51 @@ from meetasr.backend.api.schemas_phase2 import (
     TranscriptSegmentPayload,
 )
 from meetasr.backend.db.connection import engine
-from meetasr.backend.db.models_phase2 import Document, DocumentMode, Job, JobStatus, TranscriptSegment
+from meetasr.backend.db.models_phase2 import Document, DocumentMode, Job, JobStatus, Source, TranscriptSegment
 from meetasr.backend.realtime.events import event_bus
 from meetasr.backend.api.routes import sources
 from meetasr.backend.realtime.job_worker import run_job_processing
+from meetasr.backend.api.auth_deps import get_current_user
+from meetasr.backend.db.user_model import User
 
 
 router = APIRouter(prefix="/v1/jobs", tags=["jobs"])
+
+
+class SegmentUpdate(BaseModel):
+    """Body cho sửa transcript — text và/hoặc speaker."""
+    text: Optional[str] = None
+    speaker: Optional[int] = None
+
+
+@router.patch("/{job_id}/segments/{segment_id}", response_model=TranscriptSegmentPayload)
+def update_segment(
+    job_id: str,
+    segment_id: int,
+    payload: SegmentUpdate,
+    current_user: Annotated[Optional[User], Depends(get_current_user)],
+) -> TranscriptSegmentPayload:
+    """Sửa nội dung (hoặc người nói) của một câu transcript rồi lưu."""
+    with Session(engine) as db:
+        segment = db.get(TranscriptSegment, segment_id)
+        if segment is None or segment.job_id != job_id:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Câu transcript không tồn tại.")
+
+        # Quyền: chỉ chủ sở hữu source mới được sửa
+        job = db.get(Job, job_id)
+        source = db.get(Source, job.source_id) if job else None
+        if source and source.user_id is not None:
+            if current_user is None or source.user_id != current_user.id:
+                raise HTTPException(status.HTTP_403_FORBIDDEN, "Không có quyền sửa.")
+
+        if payload.text is not None:
+            segment.text = payload.text
+        if payload.speaker is not None:
+            segment.speaker = payload.speaker
+        db.add(segment)
+        db.commit()
+        db.refresh(segment)
+        return TranscriptSegmentPayload.from_db(segment)
 
 
 def _job_snapshot(job_id: str) -> list[dict]:

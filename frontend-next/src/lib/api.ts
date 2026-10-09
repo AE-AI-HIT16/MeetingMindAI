@@ -11,6 +11,7 @@
  */
 
 import type {
+  ApiTranscriptSegment,
   CreateSourceResponse,
   DocMode,
   DocumentData,
@@ -217,6 +218,27 @@ export async function getStorageSummary(token?: string): Promise<StorageSummary>
   } catch {
     return { used_bytes: 0, quota_bytes: 20 * 1024 * 1024 * 1024 };
   }
+}
+
+/**
+ * Sửa nội dung (hoặc người nói) một câu transcript rồi lưu.
+ * Tương đương: PATCH /v1/jobs/{jobId}/segments/{segmentId}
+ */
+export async function updateSegment(
+  jobId: string,
+  segmentId: number,
+  patch: { text?: string; speaker?: number },
+  token?: string,
+): Promise<ApiTranscriptSegment> {
+  return apiFetch<ApiTranscriptSegment>(
+    `/v1/jobs/${jobId}/segments/${segmentId}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    },
+    token,
+  );
 }
 
 /**

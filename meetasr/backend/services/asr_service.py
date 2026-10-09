@@ -472,10 +472,18 @@ class ASRService:
         prepared: PreparedTranscription,
         segment: Segment,
         *,
-        language: str = "auto",
+        language: str | None = None,
         key: str | None = None,
     ) -> list[SentenceInfo]:
-        """Slice local audio buffer and call RunPod to transcribe segment."""
+        """Slice local audio buffer and call RunPod to transcribe segment.
+
+        Default language is Vietnamese (env ASR_LANGUAGE), not "auto": Qwen3-ASR
+        is multilingual and on "auto" sometimes mis-detects Vietnamese speech as
+        Chinese. Pinning the language avoids that. Set ASR_LANGUAGE=auto to
+        restore auto-detection.
+        """
+        if language is None:
+            language = os.environ.get("ASR_LANGUAGE", "vi")
         start = int(segment.start_ms / 1000 * 16000)
         end = int(segment.end_ms / 1000 * 16000)
         chunk = prepared.audio[start:end]

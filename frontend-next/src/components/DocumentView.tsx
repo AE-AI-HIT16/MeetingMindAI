@@ -9,7 +9,8 @@ import type {
   PdfExportPreset,
   Source,
 } from "@/lib/types";
-import { documentExportUrl, mediaUrl } from "@/lib/api";
+import { documentExportUrl, mediaUrl, updateSegment } from "@/lib/api";
+import { useSession } from "next-auth/react";
 import { formatDuration, formatStamp } from "@/lib/format";
 import { useJobEvents } from "@/lib/useJobEvents";
 import { MarkdownLite } from "@/components/MarkdownLite";
@@ -80,6 +81,33 @@ export function DocumentView({
   const videoRef = useRef<HTMLVideoElement>(null);
   const segmentRefs = useRef(new Map<string, HTMLDivElement>());
   const { segments } = useJobEvents(source.jobId);
+
+  const { data: authSession } = useSession();
+  // Local overrides for edited segments (keyed by segment id) + edit state
+  const [edits, setEdits] = useState<Map<number, string>>(new Map());
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editDraft, setEditDraft] = useState("");
+  const [savingId, setSavingId] = useState<number | null>(null);
+
+  async function saveSegmentEdit(segmentId: number) {
+    if (!source.jobId) return;
+    setSavingId(segmentId);
+    try {
+      const updated = await updateSegment(
+        source.jobId,
+        segmentId,
+        { text: editDraft },
+        authSession?.accessToken,
+      );
+      setEdits((prev) => new Map(prev).set(segmentId, updated.text));
+      setEditingId(null);
+    } catch (err) {
+      console.error("[DocumentView] save segment failed:", err);
+      alert("Không thể lưu chỉnh sửa. Vui lòng thử lại.");
+    } finally {
+      setSavingId(null);
+    }
+  }
 
   const selectedPreset =
     exportFormat === "pdf"
@@ -431,15 +459,59 @@ export function DocumentView({
                           </span>
                         )}
                       </div>
-                      <p
-                        className={`mt-1 leading-relaxed text-ink transition-all duration-300 ${
-                          isActive
-                            ? "text-base font-semibold"
-                            : "text-[15px]"
-                        }`}
-                      >
-                        {seg.text}
-                      </p>
+                      {editingId !== null && seg.id === editingId ? (
+                        <div className="mt-1">
+                          <textarea
+                            value={editDraft}
+                            onChange={(e) => setEditDraft(e.target.value)}
+                            rows={2}
+                            autoFocus
+                            className="w-full resize-y rounded-lg border border-brand/40 bg-surface px-2.5 py-1.5 text-[15px] leading-relaxed text-ink focus:border-brand focus:outline-none"
+                          />
+                          <div className="mt-1.5 flex gap-2">
+                            <button
+                              type="button"
+                              onClick={() => seg.id !== null && saveSegmentEdit(seg.id)}
+                              disabled={savingId === seg.id}
+                              className="rounded-md bg-brand px-3 py-1 text-xs font-medium text-white transition hover:bg-brand-ink disabled:opacity-50"
+                            >
+                              {savingId === seg.id ? "Đang lưu…" : "Lưu"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setEditingId(null)}
+                              className="rounded-md border border-line px-3 py-1 text-xs text-ink-soft transition hover:bg-surface-2"
+                            >
+                              Hủy
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <p
+                          className={`group mt-1 leading-relaxed text-ink transition-all duration-300 ${
+                            isActive
+                              ? "text-base font-semibold"
+                              : "text-[15px]"
+                          }`}
+                        >
+                          {seg.id !== null ? (edits.get(seg.id) ?? seg.text) : seg.text}
+                          {seg.id !== null && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingId(seg.id);
+                                setEditDraft(
+                                  seg.id !== null ? (edits.get(seg.id) ?? seg.text) : seg.text,
+                                );
+                              }}
+                              title="Sửa câu này"
+                              className="ml-2 align-middle text-xs text-ink-faint opacity-0 transition hover:text-brand group-hover:opacity-100"
+                            >
+                              ✎ sửa
+                            </button>
+                          )}
+                        </p>
+                      )}
                     </div>
                   </div>
                 );
