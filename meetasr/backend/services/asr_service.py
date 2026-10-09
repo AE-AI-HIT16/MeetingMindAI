@@ -509,11 +509,14 @@ class ASRService:
                 )
                 res_json = response.json()
 
+        # ASR timestamps are relative to the sliced chunk (starts at 0). Shift the
+        # sentence start/end back onto the full-file timeline by the turn's offset.
+        offset_s = segment.start_ms / 1000.0
         return [
             SentenceInfo(
                 text=s["text"],
-                start=s["start"],
-                end=s["end"],
+                start=s["start"] + offset_s,
+                end=s["end"] + offset_s,
                 speaker=s.get("speaker"),
                 char_timestamps=s.get("char_timestamps", []),
             )
