@@ -40,13 +40,40 @@ def numpy_to_wav_bytes(audio: np.ndarray, sample_rate: int = 16000) -> bytes:
     return buf.getvalue()
 
 
-def numpy_to_flac_bytes(audio: np.ndarray, sample_rate: int = 16000) -> bytes:
-    """Compress audio to FLAC (lossless, ~50% of WAV) for large diarization payloads.
+def numpy_to_diarization_audio_bytes(audio: np.ndarray, sample_rate: int = 16000) -> bytes:
+    """Compress whole-file audio for the diarization (prepare) step.
 
-    Falls back to WAV if soundfile/FLAC is unavailable.
+    Diarization/VAD don't need full-fidelity audio, so we encode heavily with
+    OGG/Vorbis (~24 kbps) to stay well under RunPod's 20 MiB request limit even
+    for long recordings. libsndfile reads OGG/Vorbis, so the RunPod handler's
+    soundfile-based loader decodes it fine. Falls back to FLAC, then WAV.
     """
+    import io
+    import shutil
+    import subprocess
+
+    ffmpeg = shutil.which("ffmpeg")
+    if ffmpeg is not None:
+        try:
+            if audio.dtype != np.float32:
+                audio = audio.astype(np.float32)
+            proc = subprocess.run(
+                [
+                    ffmpeg, "-nostdin", "-v", "error",
+                    "-f", "f32le", "-ar", str(sample_rate), "-ac", "1", "-i", "pipe:0",
+                    "-c:a", "libvorbis", "-b:a", "24k",
+                    "-f", "ogg", "pipe:1",
+                ],
+                input=audio.tobytes(),
+                capture_output=True,
+                check=True,
+            )
+            if proc.stdout:
+                return proc.stdout
+        except Exception as exc:  # pragma: no cover - fallback path
+            logger.warning("ffmpeg OGG/Vorbis encode failed (%s); trying FLAC.", exc)
+
     try:
-        import io
         import soundfile as sf
         buf = io.BytesIO()
         sf.write(buf, audio, sample_rate, format="FLAC")
@@ -387,7 +414,7 @@ class ASRService:
         if self._is_serverless:
             # Compress whole-file audio (FLAC) to stay under RunPod's request limit.
             import base64
-            audio_b64 = base64.b64encode(numpy_to_flac_bytes(audio)).decode()
+            audio_b64 = base64.b64encode(numpy_to_diarization_audio_bytes(audio)).decode()
             res_json = await self._call_serverless(
                 "prepare_incremental",
                 {"audio_base64": audio_b64},
@@ -514,7 +541,7 @@ class ASRService:
                 )
             else:
                 # ASR-first fallback: re-diarize whole file + punctuation.
-                audio_b64 = base64.b64encode(numpy_to_flac_bytes(prepared.audio)).decode()
+                audio_b64 = base64.b64encode(numpy_to_diarization_audio_bytes(prepared.audio)).decode()
                 vad_data = [
                     {"start_ms": v.start_ms, "end_ms": v.end_ms}
                     for v in prepared.vad_segments
