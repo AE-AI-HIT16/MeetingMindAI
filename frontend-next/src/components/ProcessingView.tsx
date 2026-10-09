@@ -25,6 +25,7 @@ export function ProcessingView({
     stage,
     progress,
     segments,
+    snapshotCount,
     sections,
     done,
     liveDocumentId,
@@ -118,10 +119,16 @@ export function ProcessingView({
           <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-5">
             {segments.map((seg, i) => {
               const last = i === segments.length - 1;
+              const fromSnapshot = i < snapshotCount;
+              // Snapshot segments: stagger 30ms each, capped at 600ms total
+              const delayMs = fromSnapshot
+                ? Math.min(i * 30, 600)
+                : 0;
               return (
                 <div
                   key={seg.id ?? `${seg.startMs}-${i}`}
                   className="animate-rise"
+                  style={delayMs > 0 ? { animationDelay: `${delayMs}ms` } : undefined}
                 >
                   <div className="mb-1 flex items-center gap-2.5">
                     <SpeakerChip speaker={seg.speaker} />
@@ -162,7 +169,7 @@ export function ProcessingView({
               return (
                 <article
                   key={sec.id}
-                  className="animate-rise rounded-xl p-3 -mx-3"
+                  className="animate-rise -mx-3 rounded-xl p-3"
                   style={
                     writing
                       ? { animation: "writing 1.6s ease-in-out infinite" }
@@ -173,7 +180,7 @@ export function ProcessingView({
                     {sec.heading}
                   </h2>
                   <div className="mt-1.5">
-                    <MarkdownLite text={sec.markdown} />
+                    <MarkdownLite text={sec.markdown} live={writing} />
                   </div>
                 </article>
               );

@@ -15,6 +15,8 @@ export interface JobEventsState {
   stage: ProcessingStage;
   progress: number;
   segments: TranscriptSegment[];
+  /** Index below which segments came from snapshot (no live-delta animation) */
+  snapshotCount: number;
   sections: DocSection[];
   done: boolean;
   liveDocumentId: string | null;
@@ -30,6 +32,7 @@ export function useJobEvents(jobId: string | null): JobEventsState {
   const [stage, setStage] = useState<ProcessingStage>("extracting_audio");
   const [progress, setProgress] = useState(0);
   const [segments, setSegments] = useState<TranscriptSegment[]>([]);
+  const [snapshotCount, setSnapshotCount] = useState(0);
   const [sections, setSections] = useState<DocSection[]>([]);
   const [done, setDone] = useState(false);
   const [liveDocumentId, setLiveDocumentId] = useState<string | null>(null);
@@ -42,6 +45,7 @@ export function useJobEvents(jobId: string | null): JobEventsState {
     setStage("extracting_audio");
     setProgress(0);
     setSegments([]);
+    setSnapshotCount(0);
     setSections([]);
     setDone(false);
     setLiveDocumentId(null);
@@ -116,6 +120,7 @@ export function useJobEvents(jobId: string | null): JobEventsState {
               (left, right) =>
                 left.startMs - right.startMs || left.endMs - right.endMs,
             );
+          setSnapshotCount(snapshot.length);
           setSegments(snapshot);
           return;
         }
@@ -227,6 +232,7 @@ export function useJobEvents(jobId: string | null): JobEventsState {
     stage,
     progress,
     segments,
+    snapshotCount,
     sections,
     done,
     liveDocumentId,
