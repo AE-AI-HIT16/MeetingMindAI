@@ -24,16 +24,22 @@ class BackendPipeline:
         if not os.path.exists(yaml_path):
             raise FileNotFoundError(f"Config file not found: {yaml_path}")
         cfg = OmegaConf.load(yaml_path)
-        cfg_dict = OmegaConf.to_container(cfg, resolve=True)
+        cfg_dict = OmegaConf.to_container(cfg, resolve=False)
         return cls.from_config(cfg_dict)
 
     @classmethod
     def from_config(cls, config: dict) -> BackendPipeline:
         summarizer = None
         doc_planner = None
-        if "llm" in config and config["llm"]:
-            summarizer = cls._build_llm(config["llm"])
-            doc_planner = cls._build_doc_planner(config["llm"])
+        llm_cfg = config.get("llm") or {}
+        api_key_available = bool(
+            (llm_cfg.get("api_key") or os.environ.get("GROQ_API_KEY", "")).strip()
+        )
+        if llm_cfg and api_key_available:
+            summarizer = cls._build_llm(llm_cfg)
+            doc_planner = cls._build_doc_planner(llm_cfg)
+        elif llm_cfg:
+            logger.warning("LLM config found but api_key missing; skipping LLM init.")
         return cls(summarizer=summarizer, doc_planner=doc_planner)
 
     @staticmethod
@@ -48,9 +54,9 @@ class BackendPipeline:
             if k not in ("provider", "language", "temperature", "max_tokens", "use_planner")
         }
         if "api_key" in client_kwargs:
-            key_val = client_kwargs["api_key"]
-            if isinstance(key_val, str) and key_val.startswith("${"):
-                client_kwargs["api_key"] = os.environ.get(key_val[2:-1], "")
+            key_val = client_kwargs.get("api_key")
+            if not key_val or (isinstance(key_val, str) and key_val.startswith("${")):
+                client_kwargs["api_key"] = os.environ.get("GROQ_API_KEY", "")
 
         client = llm_class(**client_kwargs)
         return DocumentPlanner(
@@ -78,10 +84,9 @@ class BackendPipeline:
             )
         }
         if "api_key" in client_kwargs:
-            key_val = client_kwargs["api_key"]
-            if isinstance(key_val, str) and key_val.startswith("${"):
-                env_name = key_val[2:-1]
-                client_kwargs["api_key"] = os.environ.get(env_name, "")
+            key_val = client_kwargs.get("api_key")
+            if not key_val or (isinstance(key_val, str) and key_val.startswith("${")):
+                client_kwargs["api_key"] = os.environ.get("GROQ_API_KEY", "")
 
         client = llm_class(**client_kwargs)
 
