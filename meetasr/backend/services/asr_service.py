@@ -123,10 +123,11 @@ class ASRService:
             result = response.json()
             status = result.get("status")
 
-            # If still running, poll /status/{id} until completed
-            if status == "IN_PROGRESS" and result.get("id"):
+            # If not finished within the runsync window (queued or still running),
+            # poll /status/{id} until it completes.
+            if status in ("IN_PROGRESS", "IN_QUEUE") and result.get("id"):
                 job_id = result["id"]
-                logger.info("RunPod job %s still IN_PROGRESS after %ds, polling /status...", job_id, rp_timeout)
+                logger.info("RunPod job %s status=%s after %ds, polling /status...", job_id, status, rp_timeout)
                 result = await self._poll_runpod_status(job_id, poll_timeout=timeout)
                 status = result.get("status")
 
