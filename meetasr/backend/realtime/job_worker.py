@@ -117,41 +117,51 @@ class JobQueue:
                 job_id, speaker_first, chunk_count,
             )
 
-            for index, (transcription_segment, speaker) in enumerate(
-                work_items,
-                start=1,
-            ):
-                chunk_sentences = await self._asr_service.transcribe_segment(
-                    prepared,
-                    transcription_segment,
-                    key=f"{source.filename}:turn-{index}",
-                )
-                if speaker_first:
-                    for sentence in chunk_sentences:
-                        sentence.speaker = speaker
-                provisional_sentences.extend(chunk_sentences)
-                chunk_payloads = [
-                    _sentence_to_payload(
-                        sentence,
-                        speaker=sentence.speaker if speaker_first else None,
+            # Transcribe turns in parallel batches to cut wall-clock time on long
+            # files. ASR per turn is independent (speaker already assigned), so we
+            # fan out CONCURRENCY turns at once, then persist/stream each batch in
+            # timeline order so the UI still fills top-to-bottom.
+            CONCURRENCY = 4
+            completed = 0
+            for batch_start in range(0, len(work_items), CONCURRENCY):
+                batch = work_items[batch_start:batch_start + CONCURRENCY]
+                batch_results = await asyncio.gather(*[
+                    self._asr_service.transcribe_segment(
+                        prepared,
+                        seg,
+                        key=f"{source.filename}:turn-{batch_start + i + 1}",
                     )
-                    for sentence in chunk_sentences
-                ]
-                persisted_chunk = self._persist_segments(
-                    job_id,
-                    chunk_payloads,
-                )
-                persisted.extend(persisted_chunk)
+                    for i, (seg, _spk) in enumerate(batch)
+                ])
 
-                for segment in persisted_chunk:
-                    await event_bus.publish(
+                for (transcription_segment, speaker), chunk_sentences in zip(batch, batch_results):
+                    if speaker_first:
+                        for sentence in chunk_sentences:
+                            sentence.speaker = speaker
+                    provisional_sentences.extend(chunk_sentences)
+                    chunk_payloads = [
+                        _sentence_to_payload(
+                            sentence,
+                            speaker=sentence.speaker if speaker_first else None,
+                        )
+                        for sentence in chunk_sentences
+                    ]
+                    persisted_chunk = self._persist_segments(
                         job_id,
-                        TranscriptDeltaEvent(segment=segment),
+                        chunk_payloads,
                     )
+                    persisted.extend(persisted_chunk)
+                    for segment in persisted_chunk:
+                        await event_bus.publish(
+                            job_id,
+                            TranscriptDeltaEvent(segment=segment),
+                        )
+
+                completed += len(batch)
                 await self._publish_status(
                     job_id,
                     JobStage.TRANSCRIBING,
-                    0.15 + 0.65 * index / chunk_count,
+                    0.15 + 0.65 * completed / chunk_count,
                 )
 
             finalized_sentences = await self._asr_service.finalize_incremental(
