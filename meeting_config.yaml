@@ -27,7 +27,7 @@ punc:
 llm:
   provider: groq
   model: openai/gpt-oss-20b
-  api_key: ${oc.env:GROQ_API_KEY,null}
+  api_key: ~
   language: vi
   temperature: 0.3
   max_tokens: 4096

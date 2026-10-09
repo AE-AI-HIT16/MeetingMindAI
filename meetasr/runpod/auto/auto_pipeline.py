@@ -59,14 +59,17 @@ class AutoPipeline:
         punc_model = cls._build_optional(config, "punc", device)
         spk_model = cls._build_optional(config, "spk", device)
 
-        # Only build LLM components if a real API key is present
+        # Only build LLM components if a real API key is available
         llm_cfg = config.get("llm") or {}
-        if llm_cfg and llm_cfg.get("api_key"):
+        api_key_available = bool(
+            (llm_cfg.get("api_key") or os.environ.get("GROQ_API_KEY", "")).strip()
+        )
+        if llm_cfg and api_key_available:
             summarizer = cls._build_llm(llm_cfg)
             doc_planner = cls._build_doc_planner(llm_cfg)
         else:
             if llm_cfg:
-                logging.warning("LLM config found but api_key is missing or empty; skipping LLM init.")
+                logging.warning("LLM config found but api_key missing; skipping LLM init.")
             summarizer = None
             doc_planner = None
 
@@ -151,9 +154,9 @@ class AutoPipeline:
             if k not in ("provider", "language", "temperature", "max_tokens", "use_planner")
         }
         if "api_key" in client_kwargs:
-            key_val = client_kwargs["api_key"]
-            if isinstance(key_val, str) and key_val.startswith("${"):
-                client_kwargs["api_key"] = os.environ.get(key_val[2:-1], "")
+            key_val = client_kwargs.get("api_key")
+            if not key_val or (isinstance(key_val, str) and key_val.startswith("${")):
+                client_kwargs["api_key"] = os.environ.get("GROQ_API_KEY", "")
 
         client = llm_class(**client_kwargs)
         return DocumentPlanner(
@@ -185,12 +188,10 @@ class AutoPipeline:
                 "provider", "language", "temperature", "max_tokens", "use_planner"
             )
         }
-        # Resolve env vars in api_key
         if "api_key" in client_kwargs:
-            key_val = client_kwargs["api_key"]
-            if isinstance(key_val, str) and key_val.startswith("${"):
-                env_name = key_val[2:-1]
-                client_kwargs["api_key"] = os.environ.get(env_name, "")
+            key_val = client_kwargs.get("api_key")
+            if not key_val or (isinstance(key_val, str) and key_val.startswith("${")):
+                client_kwargs["api_key"] = os.environ.get("GROQ_API_KEY", "")
 
         client = llm_class(**client_kwargs)
 
