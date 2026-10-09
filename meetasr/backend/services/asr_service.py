@@ -75,7 +75,10 @@ class ASRService:
             status = result.get("status")
             if status == "FAILED":
                 raise RuntimeError(f"RunPod job failed: {result.get('error', result)}")
-            return result.get("output", result)
+            output = result.get("output", result)
+            sentence_count = len(output.get("sentence_info", [])) if isinstance(output, dict) else "N/A"
+            logger.info("RunPod /runsync response: status=%s action=%s sentence_info_count=%s", status, action, sentence_count)
+            return output
         response.raise_for_status()
 
     def _ensure_local_port_8001(self) -> None:

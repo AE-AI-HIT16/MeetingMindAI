@@ -98,8 +98,10 @@ class JobQueue:
                 persisted: list[TranscriptSegmentPayload] = []
 
                 async def on_chunk(chunk_idx: int, total_chunks: int, chunk_segs: list) -> None:
+                    logger.info("on_chunk called: chunk=%d/%d segs=%d", chunk_idx + 1, total_chunks, len(chunk_segs))
                     stored = self._persist_segments(job_id, chunk_segs)
                     persisted.extend(stored)
+                    logger.info("on_chunk persisted: chunk=%d stored=%d total_so_far=%d", chunk_idx + 1, len(stored), len(persisted))
                     for s in stored:
                         await event_bus.publish(job_id, TranscriptDeltaEvent(segment=s))
                     await self._publish_status(
