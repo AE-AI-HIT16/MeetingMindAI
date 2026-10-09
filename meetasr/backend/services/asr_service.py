@@ -209,11 +209,52 @@ class ASRService:
             file_bytes = numpy_to_wav_bytes(audio_arr)
 
         if self._is_serverless:
-            payload: dict = {"audio_base64": base64.b64encode(file_bytes).decode()}
-            if key:
-                payload["key"] = key
+            # Load as 16kHz mono numpy for chunking
+            audio_arr = load_audio(file_bytes if not isinstance(audio_source, str) else audio_source)
+            sample_rate = 16000
+            # 4-minute chunks → ~7.7MB WAV → ~10MB base64, under 20MB limit
+            chunk_samples = 4 * 60 * sample_rate
+            chunks = [audio_arr[i:i + chunk_samples] for i in range(0, len(audio_arr), chunk_samples)]
+
+            all_segments: list[TranscriptSegmentPayload] = []
+            all_text_parts: list[str] = []
+            total_duration_ms = 0
+
             async with self._transcribe_lock:
-                res_json = await self._call_serverless("transcribe", payload, timeout=600.0)
+                for chunk_idx, chunk in enumerate(chunks):
+                    chunk_offset_ms = offset_ms + chunk_idx * 4 * 60 * 1000
+                    chunk_bytes = numpy_to_wav_bytes(chunk, sample_rate)
+                    payload: dict = {"audio_base64": base64.b64encode(chunk_bytes).decode()}
+                    if key:
+                        payload["key"] = f"{key}:chunk-{chunk_idx}"
+                    res_json = await self._call_serverless("transcribe", payload, timeout=600.0)
+
+                    chunk_duration_ms = max(0, int(res_json.get("duration", 0) * 1000))
+                    total_duration_ms += chunk_duration_ms
+                    all_text_parts.append(res_json.get("text", ""))
+
+                    for s in res_json.get("sentence_info", []):
+                        if s["text"].strip():
+                            all_segments.append(TranscriptSegmentPayload(
+                                start_ms=chunk_offset_ms + int(s["start"] * 1000),
+                                end_ms=chunk_offset_ms + int(s["end"] * 1000),
+                                speaker=s.get("speaker"),
+                                text=s["text"],
+                            ))
+
+            if not all_segments and any(all_text_parts):
+                all_segments.append(TranscriptSegmentPayload(
+                    start_ms=offset_ms,
+                    end_ms=offset_ms + total_duration_ms,
+                    speaker=None,
+                    text=" ".join(t for t in all_text_parts if t.strip()),
+                ))
+
+            return ASRServiceResult(
+                segments=all_segments,
+                text=" ".join(t for t in all_text_parts if t.strip()),
+                duration_ms=total_duration_ms,
+            )
         else:
             files = {"file": ("audio.wav", file_bytes)}
             async with self._transcribe_lock:
