@@ -21,7 +21,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Copy project metadata & source
 COPY pyproject.toml README.md ./
-COPY meeting_config.yaml config.yaml
+COPY configs/runpod_gpu.yaml config.yaml
 COPY meetasr ./meetasr
 
 # Install MeetASR dependencies without re-downloading PyTorch/CUDA wheels
