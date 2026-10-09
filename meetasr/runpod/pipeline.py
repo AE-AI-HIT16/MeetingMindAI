@@ -642,6 +642,10 @@ class MeetPipeline:
         if not embeddings:
             return []
         all_embs = torch.cat(embeddings, dim=0)
+        logging.info(
+            "SPK diarize: %d VAD seg -> %d chunks -> %d embeddings",
+            len(segments), len(all_chunks), all_embs.shape[0],
+        )
         labels = self.spk.cluster(all_embs)
         usable_count = min(len(embedded_chunks), len(labels))
         if usable_count != len(embedded_chunks):

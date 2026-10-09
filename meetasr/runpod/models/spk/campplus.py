@@ -117,8 +117,16 @@ class CAMPlusPlus(AbsSpk):
             if oracle_num is not None:
                 kwargs["speaker_num"] = oracle_num
             labels = cc(X, **kwargs)
-            return labels.tolist()
+            labels_list = labels.tolist()
+            uniq = sorted(set(labels_list))
+            logging.info(
+                "SPK clustering: %d embeddings -> %d speaker(s) %s (config=%s)",
+                X.shape[0], len(uniq), uniq, self._cluster_config,
+            )
+            return labels_list
         except Exception as e:
-            logging.warning(f"Speaker clustering failed: {e}. Assigning all to Speaker 0.")
+            logging.exception(
+                "Speaker clustering FAILED (%s). Assigning all to Speaker 0.", e
+            )
             n = embeddings.shape[0] if hasattr(embeddings, "shape") else 1
             return [0] * n
