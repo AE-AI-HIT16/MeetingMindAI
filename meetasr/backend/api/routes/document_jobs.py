@@ -13,6 +13,7 @@ from meetasr.backend.api.schemas_phase2 import (
 from meetasr.backend.db.connection import engine
 from meetasr.backend.db.models_phase2 import (
     DocumentGenerationJob,
+    DocumentGenerationStage,
     DocumentGenerationStatus,
 )
 from meetasr.backend.realtime.events import event_bus
@@ -98,7 +99,11 @@ async def document_generation_events(
     if planner is not None:
         with Session(engine) as db:
             generation = db.get(DocumentGenerationJob, generation_id)
-            if generation and generation.status in [DocumentGenerationStatus.QUEUED, DocumentGenerationStatus.FAILED]:
+            if generation and generation.status in [
+                DocumentGenerationStatus.QUEUED,
+                DocumentGenerationStatus.FAILED,
+                DocumentGenerationStatus.PROCESSING,  # re-trigger if previous task was cancelled
+            ]:
                 generation.status = DocumentGenerationStatus.PROCESSING
                 db.add(generation)
                 db.commit()
@@ -146,3 +151,11 @@ async def document_generation_events(
         if generation_id not in event_bus._subscribers:
             if processing_task and not processing_task.done():
                 processing_task.cancel()
+                # Reset to QUEUED so the next reconnect can re-trigger generation
+                with Session(engine) as db:
+                    gen = db.get(DocumentGenerationJob, generation_id)
+                    if gen and gen.status == DocumentGenerationStatus.PROCESSING:
+                        gen.status = DocumentGenerationStatus.QUEUED
+                        gen.stage = DocumentGenerationStage.QUEUED
+                        db.add(gen)
+                        db.commit()
