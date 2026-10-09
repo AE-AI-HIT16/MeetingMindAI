@@ -92,6 +92,7 @@ class JobQueue:
                 0.10,
             )
 
+            prepared = None
             if getattr(self._asr_service, "_is_serverless", False):
                 # RunPod Serverless: single call, no incremental state
                 result = await self._asr_service.transcribe(
@@ -210,7 +211,11 @@ class JobQueue:
                 DocDeltaEvent(section_id="live", markdown=markdown),
             )
 
-            duration_ms = prepared.duration_ms
+            duration_ms = (
+                prepared.duration_ms
+                if prepared is not None
+                else max((seg.end_ms for seg in finalized), default=0)
+            )
             self._finish_job(job_id, source.id, duration_ms)
             await event_bus.publish(
                 job_id,
