@@ -92,93 +92,76 @@ class JobQueue:
                 0.10,
             )
 
-            prepared = None
-            if getattr(self._asr_service, "_is_serverless", False):
-                # RunPod Serverless: stream segments per chunk as they complete
-                persisted: list[TranscriptSegmentPayload] = []
+            # Diarization-first pipeline (works for both RunPod serverless and local):
+            #  1. VAD + speaker diarization on the WHOLE file -> consistent speakers
+            #  2. transcribe each speaker turn, streaming segments as they complete
+            #  3. finalize (punctuation / speaker projection)
+            prepared = await self._asr_service.prepare_incremental(audio_source)
+            provisional_sentences: list[SentenceInfo] = []
+            persisted: list[TranscriptSegmentPayload] = []
+            speaker_first = prepared.speaker_turns is not None
+            work_items = (
+                [
+                    (turn.to_segment(), turn.speaker)
+                    for turn in prepared.speaker_turns
+                ]
+                if speaker_first
+                else [
+                    (vad_segment, None)
+                    for vad_segment in prepared.vad_segments
+                ]
+            )
+            chunk_count = max(len(work_items), 1)
+            logger.info(
+                "Job %s: diarization-first, speaker_first=%s, %d turn(s)",
+                job_id, speaker_first, chunk_count,
+            )
 
-                async def on_chunk(chunk_idx: int, total_chunks: int, chunk_segs: list) -> None:
-                    logger.info("on_chunk called: chunk=%d/%d segs=%d", chunk_idx + 1, total_chunks, len(chunk_segs))
-                    stored = self._persist_segments(job_id, chunk_segs)
-                    persisted.extend(stored)
-                    logger.info("on_chunk persisted: chunk=%d stored=%d total_so_far=%d", chunk_idx + 1, len(stored), len(persisted))
-                    for s in stored:
-                        await event_bus.publish(job_id, TranscriptDeltaEvent(segment=s))
-                    await self._publish_status(
-                        job_id,
-                        JobStage.TRANSCRIBING,
-                        0.10 + 0.70 * (chunk_idx + 1) / total_chunks,
-                    )
-
-                await self._asr_service.transcribe(
-                    audio_source,
-                    key=source.filename,
-                    on_chunk_complete=on_chunk,
-                )
-                finalized = persisted
-            else:
-                prepared = await self._asr_service.prepare_incremental(audio_source)
-                provisional_sentences: list[SentenceInfo] = []
-                persisted = []
-                speaker_first = prepared.speaker_turns is not None
-                work_items = (
-                    [
-                        (turn.to_segment(), turn.speaker)
-                        for turn in prepared.speaker_turns
-                    ]
-                    if speaker_first
-                    else [
-                        (vad_segment, None)
-                        for vad_segment in prepared.vad_segments
-                    ]
-                )
-                chunk_count = max(len(work_items), 1)
-
-                for index, (transcription_segment, speaker) in enumerate(
-                    work_items,
-                    start=1,
-                ):
-                    chunk_sentences = await self._asr_service.transcribe_segment(
-                        prepared,
-                        transcription_segment,
-                        key=f"{source.filename}:chunk-{index}",
-                    )
-                    if speaker_first:
-                        for sentence in chunk_sentences:
-                            sentence.speaker = speaker
-                    provisional_sentences.extend(chunk_sentences)
-                    chunk_payloads = [
-                        _sentence_to_payload(
-                            sentence,
-                            speaker=sentence.speaker if speaker_first else None,
-                        )
-                        for sentence in chunk_sentences
-                    ]
-                    persisted_chunk = self._persist_segments(
-                        job_id,
-                        chunk_payloads,
-                    )
-                    persisted.extend(persisted_chunk)
-
-                    for segment in persisted_chunk:
-                        await event_bus.publish(
-                            job_id,
-                            TranscriptDeltaEvent(segment=segment),
-                        )
-                    await self._publish_status(
-                        job_id,
-                        JobStage.TRANSCRIBING,
-                        0.15 + 0.65 * index / chunk_count,
-                    )
-
-                finalized_sentences = await self._asr_service.finalize_incremental(
+            for index, (transcription_segment, speaker) in enumerate(
+                work_items,
+                start=1,
+            ):
+                chunk_sentences = await self._asr_service.transcribe_segment(
                     prepared,
-                    provisional_sentences,
+                    transcription_segment,
+                    key=f"{source.filename}:turn-{index}",
                 )
-                finalized = self._apply_finalized_segments(
-                    persisted,
-                    finalized_sentences,
+                if speaker_first:
+                    for sentence in chunk_sentences:
+                        sentence.speaker = speaker
+                provisional_sentences.extend(chunk_sentences)
+                chunk_payloads = [
+                    _sentence_to_payload(
+                        sentence,
+                        speaker=sentence.speaker if speaker_first else None,
+                    )
+                    for sentence in chunk_sentences
+                ]
+                persisted_chunk = self._persist_segments(
+                    job_id,
+                    chunk_payloads,
                 )
+                persisted.extend(persisted_chunk)
+
+                for segment in persisted_chunk:
+                    await event_bus.publish(
+                        job_id,
+                        TranscriptDeltaEvent(segment=segment),
+                    )
+                await self._publish_status(
+                    job_id,
+                    JobStage.TRANSCRIBING,
+                    0.15 + 0.65 * index / chunk_count,
+                )
+
+            finalized_sentences = await self._asr_service.finalize_incremental(
+                prepared,
+                provisional_sentences,
+            )
+            finalized = self._apply_finalized_segments(
+                persisted,
+                finalized_sentences,
+            )
 
             speaker_updates = [
                 SpeakerAssignment(

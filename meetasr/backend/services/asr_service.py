@@ -39,6 +39,22 @@ def numpy_to_wav_bytes(audio: np.ndarray, sample_rate: int = 16000) -> bytes:
     wavfile.write(buf, sample_rate, audio_int16)
     return buf.getvalue()
 
+
+def numpy_to_flac_bytes(audio: np.ndarray, sample_rate: int = 16000) -> bytes:
+    """Compress audio to FLAC (lossless, ~50% of WAV) for large diarization payloads.
+
+    Falls back to WAV if soundfile/FLAC is unavailable.
+    """
+    try:
+        import io
+        import soundfile as sf
+        buf = io.BytesIO()
+        sf.write(buf, audio, sample_rate, format="FLAC")
+        return buf.getvalue()
+    except Exception as exc:  # pragma: no cover - fallback path
+        logger.warning("FLAC compression failed (%s); falling back to WAV.", exc)
+        return numpy_to_wav_bytes(audio, sample_rate)
+
 class ASRService:
     """Run one shared pipeline via RunPod HTTP API and normalize its result."""
 
@@ -361,18 +377,32 @@ class ASRService:
         self,
         audio_source: Any,
     ) -> PreparedTranscription:
-        """Decode audio locally first, and call RunPod to run VAD/Diarization."""
-        audio = load_audio(audio_source)
-        wav_bytes = numpy_to_wav_bytes(audio)
-        files = {"file": ("audio.wav", wav_bytes)}
+        """Decode audio locally, run VAD + diarization on the WHOLE file once.
 
-        async with self._transcribe_lock:
-            response = await self._post_with_retry(
-                f"{self.runpod_url}/v1/prepare_incremental",
-                files=files,
+        This is the first stage of the diarization-first pipeline: speaker labels
+        are assigned consistently across the entire recording before any ASR runs.
+        """
+        audio = load_audio(audio_source)
+
+        if self._is_serverless:
+            # Compress whole-file audio (FLAC) to stay under RunPod's request limit.
+            import base64
+            audio_b64 = base64.b64encode(numpy_to_flac_bytes(audio)).decode()
+            res_json = await self._call_serverless(
+                "prepare_incremental",
+                {"audio_base64": audio_b64},
                 timeout=600.0,
             )
-            res_json = response.json()
+        else:
+            wav_bytes = numpy_to_wav_bytes(audio)
+            files = {"file": ("audio.wav", wav_bytes)}
+            async with self._transcribe_lock:
+                response = await self._post_with_retry(
+                    f"{self.runpod_url}/v1/prepare_incremental",
+                    files=files,
+                    timeout=600.0,
+                )
+                res_json = response.json()
 
         vad_segments = [
             Segment(start_ms=s["start_ms"], end_ms=s["end_ms"])
@@ -388,6 +418,13 @@ class ASRService:
                 )
                 for s in res_json["speaker_turns"]
             ]
+
+        logger.info(
+            "prepare_incremental: %d VAD segment(s), %s speaker turn(s), duration=%dms",
+            len(vad_segments),
+            len(speaker_turns) if speaker_turns is not None else "ASR-first",
+            res_json["duration_ms"],
+        )
 
         return PreparedTranscription(
             audio=audio,
@@ -411,20 +448,32 @@ class ASRService:
         if len(chunk) == 0:
             return []
 
-        wav_bytes = numpy_to_wav_bytes(chunk)
-        files = {"file": ("chunk.wav", wav_bytes)}
-        data = {"language": language}
-        if key:
-            data["key"] = key
-
-        async with self._transcribe_lock:
-            response = await self._post_with_retry(
-                f"{self.runpod_url}/v1/transcribe_segment",
-                files=files,
-                data=data,
-                timeout=120.0,
+        if self._is_serverless:
+            import base64
+            # Each turn is <=15s so an uncompressed WAV stays tiny.
+            chunk_b64 = base64.b64encode(numpy_to_wav_bytes(chunk)).decode()
+            payload: dict = {"audio_base64": chunk_b64, "language": language}
+            if key:
+                payload["key"] = key
+            res_json = await self._call_serverless(
+                "transcribe_segment",
+                payload,
+                timeout=300.0,
             )
-            res_json = response.json()
+        else:
+            wav_bytes = numpy_to_wav_bytes(chunk)
+            files = {"file": ("chunk.wav", wav_bytes)}
+            data = {"language": language}
+            if key:
+                data["key"] = key
+            async with self._transcribe_lock:
+                response = await self._post_with_retry(
+                    f"{self.runpod_url}/v1/transcribe_segment",
+                    files=files,
+                    data=data,
+                    timeout=120.0,
+                )
+                res_json = response.json()
 
         return [
             SentenceInfo(
@@ -454,33 +503,58 @@ class ASRService:
             for s in sentences
         ]
 
-        async with self._transcribe_lock:
+        if self._is_serverless:
+            import base64
             if prepared.speaker_turns is not None:
-                payload = {"sentences": sentences_data}
-                response = await self._post_with_retry(
-                    f"{self.runpod_url}/v1/finalize_incremental",
-                    json_payload=payload,
+                # Speaker-first: turns already carry speakers; only restore punctuation.
+                res_json = await self._call_serverless(
+                    "finalize_incremental",
+                    {"sentences": sentences_data},
                     timeout=300.0,
                 )
             else:
-                wav_bytes = numpy_to_wav_bytes(prepared.audio)
-                files = {"file": ("audio.wav", wav_bytes)}
+                # ASR-first fallback: re-diarize whole file + punctuation.
+                audio_b64 = base64.b64encode(numpy_to_flac_bytes(prepared.audio)).decode()
                 vad_data = [
                     {"start_ms": v.start_ms, "end_ms": v.end_ms}
                     for v in prepared.vad_segments
                 ]
-                data = {
-                    "sentences_json": json.dumps(sentences_data),
-                    "vad_segments_json": json.dumps(vad_data)
-                }
-                response = await self._post_with_retry(
-                    f"{self.runpod_url}/v1/finalize_incremental",
-                    files=files,
-                    data=data,
+                res_json = await self._call_serverless(
+                    "finalize_incremental",
+                    {
+                        "sentences": sentences_data,
+                        "audio_base64": audio_b64,
+                        "vad_segments": vad_data,
+                    },
                     timeout=300.0,
                 )
-
-            res_json = response.json()
+        else:
+            async with self._transcribe_lock:
+                if prepared.speaker_turns is not None:
+                    payload = {"sentences": sentences_data}
+                    response = await self._post_with_retry(
+                        f"{self.runpod_url}/v1/finalize_incremental",
+                        json_payload=payload,
+                        timeout=300.0,
+                    )
+                else:
+                    wav_bytes = numpy_to_wav_bytes(prepared.audio)
+                    files = {"file": ("audio.wav", wav_bytes)}
+                    vad_data = [
+                        {"start_ms": v.start_ms, "end_ms": v.end_ms}
+                        for v in prepared.vad_segments
+                    ]
+                    data = {
+                        "sentences_json": json.dumps(sentences_data),
+                        "vad_segments_json": json.dumps(vad_data)
+                    }
+                    response = await self._post_with_retry(
+                        f"{self.runpod_url}/v1/finalize_incremental",
+                        files=files,
+                        data=data,
+                        timeout=300.0,
+                    )
+                res_json = response.json()
 
         return [
             SentenceInfo(
