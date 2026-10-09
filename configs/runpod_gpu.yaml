@@ -29,7 +29,7 @@ realtime:
 asr:
   model: qwen3-asr
   hub: none
-  model_size: Qwen/Qwen3-ASR-0.5B
+  model_size: Qwen/Qwen3-ASR-0.6B
   device: cuda:0
   dtype: bfloat16
   max_inference_batch_size: 8
