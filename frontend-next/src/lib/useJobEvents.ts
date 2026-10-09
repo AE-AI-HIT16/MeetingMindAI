@@ -38,6 +38,15 @@ export function useJobEvents(jobId: string | null): JobEventsState {
   useEffect(() => {
     if (!jobId) return;
 
+    // Reset state when jobId changes (new job), not on reconnect
+    setStage("extracting_audio");
+    setProgress(0);
+    setSegments([]);
+    setSections([]);
+    setDone(false);
+    setLiveDocumentId(null);
+    setError(null);
+
     let socket: WebSocket | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let stopped = false;
@@ -51,12 +60,6 @@ export function useJobEvents(jobId: string | null): JobEventsState {
       socket.onopen = () => {
         setIsConnected(true);
         setError(null);
-        setDone(false);
-        setStage("extracting_audio");
-        setProgress(0);
-        setSegments([]);
-        setSections([]);
-        setLiveDocumentId(null);
       };
       socket.onmessage = (message) => {
         let event: JobEvent;

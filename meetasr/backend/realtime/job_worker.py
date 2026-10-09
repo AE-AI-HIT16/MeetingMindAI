@@ -100,12 +100,17 @@ class JobQueue:
                     key=source.filename,
                 )
                 persisted: list[TranscriptSegmentPayload] = []
-                for seg in result.segments:
+                total = max(len(result.segments), 1)
+                for i, seg in enumerate(result.segments, 1):
                     persisted_chunk = self._persist_segments(job_id, [seg])
                     persisted.extend(persisted_chunk)
                     for s in persisted_chunk:
                         await event_bus.publish(job_id, TranscriptDeltaEvent(segment=s))
-                await self._publish_status(job_id, JobStage.TRANSCRIBING, 0.80)
+                    await self._publish_status(
+                        job_id,
+                        JobStage.TRANSCRIBING,
+                        0.10 + 0.70 * i / total,
+                    )
                 finalized = persisted
             else:
                 prepared = await self._asr_service.prepare_incremental(audio_source)
