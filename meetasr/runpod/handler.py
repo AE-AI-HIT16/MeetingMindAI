@@ -180,8 +180,8 @@ async def run_handler(job):
         return {"error": f"Unknown action: {action}"}
 
 
-def handler(job):
-    return asyncio.run(run_handler(job))
+async def handler(job):
+    return await run_handler(job)
 
 
 logger.info("Handler module loaded — starting RunPod serverless worker.")
