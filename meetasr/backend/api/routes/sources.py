@@ -70,6 +70,7 @@ class SourceResponse(BaseModel):
     jobId: Optional[str]        # Job để frontend kết nối WebSocket
     docs: List[str]             # ["live", "summary", "full_text"]
     documents: List[SourceDocumentRef]
+    fileSizeBytes: Optional[int] = None  # original upload size
 
     @classmethod
     def from_orm(cls, source: Source) -> "SourceResponse":
@@ -113,6 +114,7 @@ class SourceResponse(BaseModel):
             jobId=job.id if job is not None else None,
             docs=docs,
             documents=documents,
+            fileSizeBytes=source.file_size_bytes,
         )
 
 
@@ -137,6 +139,28 @@ def list_sources(
         .order_by(Source.created_at.desc())
     ).all()
     return [SourceResponse.from_orm(s) for s in sources]
+
+
+# ---------------------------------------------------------------------------
+# GET /v1/sources/storage — tổng dung lượng của người dùng hiện tại
+# ---------------------------------------------------------------------------
+
+QUOTA_BYTES = 20 * 1024 * 1024 * 1024  # 20 GB default quota
+
+@router.get("/storage")
+def get_storage_summary(
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[Optional[User], Depends(get_current_user)],
+) -> dict:
+    """Trả về tổng dung lượng đã dùng và quota của người dùng."""
+    if not current_user:
+        return {"used_bytes": 0, "quota_bytes": QUOTA_BYTES}
+    result = db.exec(
+        select(Source.file_size_bytes)
+        .where(Source.user_id == current_user.id)
+    ).all()
+    used_bytes = sum(s for s in result if s is not None)
+    return {"used_bytes": used_bytes, "quota_bytes": QUOTA_BYTES}
 
 
 # ---------------------------------------------------------------------------
@@ -183,8 +207,12 @@ async def create_source(
         media_type = MediaType.AUDIO
 
     # Lưu file lên Storage (stream để tránh OOM với file lớn)
+    file_size_bytes: Optional[int] = None
     try:
-        storage_key = await storage.save(file.file, file.filename)
+        file_bytes = await file.read()
+        file_size_bytes = len(file_bytes)
+        import io
+        storage_key = await storage.save(io.BytesIO(file_bytes), file.filename)
     except Exception as exc:
         logger.error("Lỗi lưu file '%s': %s", file.filename, exc)
         raise HTTPException(
@@ -197,6 +225,7 @@ async def create_source(
         filename=file.filename,
         media_type=media_type,
         storage_path=storage_key,
+        file_size_bytes=file_size_bytes,
         user_id=current_user.id if current_user else None,
     )
     db.add(source)

@@ -37,6 +37,12 @@ export interface Source {
   docs: DocMode[];
   /** IDs needed to reopen a persisted document from the Library. */
   documents: SourceDocumentRef[];
+  fileSizeBytes: number | null;
+}
+
+export interface StorageSummary {
+  used_bytes: number;
+  quota_bytes: number;
 }
 
 /** Transcript segment exactly as returned by the backend API/WebSocket. */

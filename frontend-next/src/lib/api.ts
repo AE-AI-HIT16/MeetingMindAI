@@ -18,6 +18,7 @@ import type {
   ExportFormat,
   ExportPreset,
   Source,
+  StorageSummary,
 } from "./types";
 import { getApiBase } from "./runtime";
 
@@ -202,8 +203,20 @@ export async function uploadSource(
  * Xóa một Source cùng toàn bộ dữ liệu liên quan.
  * Tương đương: DELETE /v1/sources/{id}
  */
-export async function deleteSource(id: string): Promise<void> {
-  await apiFetch<void>(`/v1/sources/${id}`, { method: "DELETE" });
+export async function deleteSource(id: string, token?: string): Promise<void> {
+  await apiFetch<void>(`/v1/sources/${id}`, { method: "DELETE" }, token);
+}
+
+/**
+ * Lấy tổng dung lượng đã dùng và quota của người dùng hiện tại.
+ * Tương đương: GET /v1/sources/storage
+ */
+export async function getStorageSummary(token?: string): Promise<StorageSummary> {
+  try {
+    return await apiFetch<StorageSummary>("/v1/sources/storage", { cache: "no-store" }, token);
+  } catch {
+    return { used_bytes: 0, quota_bytes: 20 * 1024 * 1024 * 1024 };
+  }
 }
 
 /**

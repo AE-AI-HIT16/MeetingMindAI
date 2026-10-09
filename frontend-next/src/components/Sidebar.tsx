@@ -4,6 +4,9 @@ import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
+import { useState, useEffect } from "react";
+import { getStorageSummary } from "@/lib/api";
+import type { StorageSummary } from "@/lib/types";
 
 const NAV = [
   { href: "/", label: "Thư viện", icon: LibraryIcon },
@@ -58,19 +61,46 @@ export function Sidebar() {
       <UserSection />
 
       {/* Storage */}
-      <div className="mt-4 rounded-xl border border-line bg-surface-2 p-4">
-        <div className="flex items-center justify-between">
-          <p className="eyebrow">Dung luong</p>
-          <span className="font-mono text-xs text-ink-soft">6.2 / 20 GB</span>
-        </div>
-        <div className="mt-2.5 h-1.5 overflow-hidden rounded-full bg-line">
-          <div className="h-full w-[31%] rounded-full bg-brand" />
-        </div>
-        <p className="mt-2 text-xs text-ink-faint">
-          Audio, video va tai lieu duoc luu tren may chu.
-        </p>
-      </div>
+      <StorageWidget />
     </aside>
+  );
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
+function StorageWidget() {
+  const { data: session } = useSession();
+  const [storage, setStorage] = useState<StorageSummary | null>(null);
+
+  useEffect(() => {
+    if (!session?.accessToken) return;
+    getStorageSummary(session.accessToken).then(setStorage).catch(() => {});
+  }, [session?.accessToken]);
+
+  const used = storage?.used_bytes ?? 0;
+  const quota = storage?.quota_bytes ?? 20 * 1024 * 1024 * 1024;
+  const pct = quota > 0 ? Math.min((used / quota) * 100, 100) : 0;
+
+  return (
+    <div className="mt-4 rounded-xl border border-line bg-surface-2 p-4">
+      <div className="flex items-center justify-between">
+        <p className="eyebrow">Dung lượng</p>
+        <span className="font-mono text-xs text-ink-soft">
+          {formatBytes(used)} / {formatBytes(quota)}
+        </span>
+      </div>
+      <div className="mt-2.5 h-1.5 overflow-hidden rounded-full bg-line">
+        <div className="h-full rounded-full bg-brand transition-all" style={{ width: `${pct}%` }} />
+      </div>
+      <p className="mt-2 text-xs text-ink-faint">
+        Audio, video và tài liệu được lưu trên máy chủ.
+      </p>
+    </div>
   );
 }
 

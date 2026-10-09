@@ -96,6 +96,7 @@ class Source(SQLModel, table=True):
     media_type: str                              # "audio" | "video"
     duration: Optional[float] = None            # seconds; None until extracted
     storage_path: str                           # local path or MinIO object key
+    file_size_bytes: Optional[int] = None       # original upload size in bytes
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     # Relationships
