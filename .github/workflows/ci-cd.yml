@@ -188,7 +188,7 @@ jobs:
 
           DIGEST="${{ steps.build-runpod.outputs.digest }}"
           IMAGE="${{ env.RUNPOD_IMAGE }}@${DIGEST}"
-          echo "Updating RunPod endpoint ${RUNPOD_ENDPOINT_ID} → ${IMAGE}"
+          echo "Updating RunPod endpoint ${RUNPOD_ENDPOINT_ID} -> ${IMAGE}"
 
           # Fetch current endpoint name (required by saveEndpoint mutation)
           QUERY_RESP=$(curl -s -X POST \
@@ -196,34 +196,22 @@ jobs:
             -H "Authorization: Bearer ${RUNPOD_API_KEY}" \
             -d '{"query":"query { myself { endpoints { id name } } }"}' \
             "https://api.runpod.io/graphql")
+          echo "Query response: ${QUERY_RESP}"
 
-          ENDPOINT_NAME=$(echo "${QUERY_RESP}" | python3 -c "
-import json, sys
-data = json.load(sys.stdin)
-for ep in data['data']['myself']['endpoints']:
-    if ep['id'] == '${RUNPOD_ENDPOINT_ID}':
-        print(ep['name'])
-        break
-" 2>/dev/null)
+          ENDPOINT_NAME=$(echo "${QUERY_RESP}" | python3 -c "import json,sys; eps=json.load(sys.stdin)['data']['myself']['endpoints']; [print(e['name']) for e in eps if e['id']=='${RUNPOD_ENDPOINT_ID}']" 2>/dev/null)
 
           if [ -z "${ENDPOINT_NAME}" ]; then
             echo "ERROR: Could not find endpoint name for ID ${RUNPOD_ENDPOINT_ID}"
-            echo "Query response: ${QUERY_RESP}"
             exit 1
           fi
           echo "Endpoint name: ${ENDPOINT_NAME}"
 
           # Update endpoint with new image digest
-          MUTATION=$(cat <<EOF
-{"query":"mutation { saveEndpoint(input: { id: \"${RUNPOD_ENDPOINT_ID}\", name: \"${ENDPOINT_NAME}\", imageName: \"${IMAGE}\" }) { id imageName } }"}
-EOF
-)
           RESPONSE=$(curl -s -X POST \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer ${RUNPOD_API_KEY}" \
-            -d "${MUTATION}" \
+            -d "{\"query\":\"mutation { saveEndpoint(input: { id: \\\"${RUNPOD_ENDPOINT_ID}\\\", name: \\\"${ENDPOINT_NAME}\\\", imageName: \\\"${IMAGE}\\\" }) { id imageName } }\"}" \
             "https://api.runpod.io/graphql")
-
           echo "Response: ${RESPONSE}"
 
           if echo "${RESPONSE}" | grep -q '"errors"'; then
