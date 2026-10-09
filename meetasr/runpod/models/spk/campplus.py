@@ -111,7 +111,14 @@ class CAMPlusPlus(AbsSpk):
         try:
             from meetasr.runpod.models.spk.cluster import CommonClustering
 
-            X = embeddings.numpy() if hasattr(embeddings, "numpy") else np.array(embeddings)
+            if hasattr(embeddings, "detach"):
+                # Move off GPU before numpy: .numpy() raises on CUDA tensors,
+                # which the broad except below would silently turn into 1 speaker.
+                X = embeddings.detach().cpu().numpy()
+            elif hasattr(embeddings, "numpy"):
+                X = embeddings.numpy()
+            else:
+                X = np.array(embeddings)
             cc = CommonClustering(**self._cluster_config)
             kwargs = {}
             if oracle_num is not None:
