@@ -1,7 +1,9 @@
-"""Update RunPod serverless endpoint to use a newly built Docker image.
+"""Update RunPod serverless endpoint image by updating its bound template.
 
-For endpoints with a bound template, updates the template image in-place.
-Uses RunPod GraphQL API directly via requests (no SDK internals dependency).
+Strategy:
+1. Query endpoint to get its bound templateId
+2. Query that template's full details (name, containerDiskInGb, etc.)
+3. Re-save the template with the new imageName, keeping all other fields
 
 Required env vars:
     RUNPOD_API_KEY      - RunPod API key
@@ -26,19 +28,20 @@ if not all([api_key, endpoint_id, image]):
 headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
 
 
-def gql(query, variables=None):
-    payload = {"query": query}
-    if variables:
-        payload["variables"] = variables
-    resp = requests.post(GRAPHQL_URL, headers=headers, json=payload, timeout=30)
-    resp.raise_for_status()
+def gql(query):
+    resp = requests.post(GRAPHQL_URL, headers=headers,
+                         json={"query": query}, timeout=30)
+    if not resp.ok:
+        print(f"HTTP {resp.status_code}: {resp.text}", file=sys.stderr)
+        sys.exit(1)
     data = resp.json()
-    if "errors" in data:
-        raise RuntimeError(f"GraphQL error: {data['errors']}")
+    if data.get("errors"):
+        print(f"GraphQL errors: {json.dumps(data['errors'], indent=2)}", file=sys.stderr)
+        sys.exit(1)
     return data.get("data", {})
 
 
-# Step 1: get the template ID bound to this endpoint
+# Step 1: get endpoint's bound templateId
 data = gql("""
 {
     myself {
@@ -61,21 +64,49 @@ if not template_id:
     sys.exit(1)
 
 print(f"Bound template: {template_id}")
-print(f"New image: {image}")
 
-# Step 2: update the bound template's image in-place
-data = gql("""
-mutation($id: String!, $imageName: String!) {
-    saveTemplate(input: {
-        id: $id,
-        imageName: $imageName,
-        isServerless: true
-    }) {
+# Step 2: get the template's current fields (name is required by saveTemplate)
+data = gql(f"""
+{{
+    myself {{
+        podTemplates {{
+            id
+            name
+            containerDiskInGb
+            imageName
+            isServerless
+        }}
+    }}
+}}
+""")
+templates = data.get("myself", {}).get("podTemplates", [])
+tmpl = next((t for t in templates if t.get("id") == template_id), None)
+
+if tmpl:
+    name = tmpl["name"]
+    disk = tmpl.get("containerDiskInGb") or 10
+    print(f"Template name: {name!r}, disk: {disk}GB")
+else:
+    # podTemplates doesn't expose serverless templates — use sensible defaults
+    name = f"meetasr-{template_id}"
+    disk = 10
+    print(f"Template not in podTemplates; using defaults name={name!r} disk={disk}GB")
+
+# Step 3: update the template image in-place
+data = gql(f"""
+mutation {{
+    saveTemplate(input: {{
+        id: "{template_id}",
+        name: "{name}",
+        imageName: "{image}",
+        isServerless: true,
+        containerDiskInGb: {disk}
+    }}) {{
         id
         imageName
-    }
-}
-""", {"id": template_id, "imageName": image})
+    }}
+}}
+""")
 
 result = data.get("saveTemplate", {})
 print(f"Template {result.get('id')} updated -> {result.get('imageName')}")
