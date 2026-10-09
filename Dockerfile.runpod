@@ -2,7 +2,7 @@
 # GPU Model Server Image for RunPod
 # Uses official PyTorch runtime base image with CUDA 12.1 pre-installed
 # ============================================================
-FROM pytorch/pytorch:2.4.0-cuda12.1-cudnn9-runtime
+FROM pytorch/pytorch:2.6.0-cuda12.4-cudnn9-runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
