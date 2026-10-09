@@ -57,8 +57,14 @@ class ASRService:
         self._is_serverless = "api.runpod.ai" in self.runpod_url
 
     async def _call_serverless(self, action: str, payload: dict, timeout: float = 600.0) -> dict:
-        """Call RunPod Serverless /runsync and return the output dict."""
-        url = f"{self.runpod_url}/runsync"
+        """Call RunPod Serverless /runsync and return the output dict.
+
+        /runsync blocks up to `rp_timeout` seconds; if the job is still running it
+        returns IN_PROGRESS with a job `id`.  We then poll /status/{id} until done.
+        """
+        # RunPod runsync timeout param (max 300s per RunPod docs)
+        rp_timeout = 270
+        url = f"{self.runpod_url}/runsync?timeout={rp_timeout}"
         body = {"input": {"action": action, **payload}}
         for attempt in range(3):
             async with httpx.AsyncClient(timeout=timeout, headers=self.headers) as client:
@@ -73,6 +79,14 @@ class ASRService:
             response.raise_for_status()
             result = response.json()
             status = result.get("status")
+
+            # If still running, poll /status/{id} until completed
+            if status == "IN_PROGRESS" and result.get("id"):
+                job_id = result["id"]
+                logger.info("RunPod job %s still IN_PROGRESS after %ds, polling /status...", job_id, rp_timeout)
+                result = await self._poll_runpod_status(job_id, poll_timeout=timeout)
+                status = result.get("status")
+
             if status == "FAILED":
                 raise RuntimeError(f"RunPod job failed: {result.get('error', result)}")
             output = result.get("output", result)
@@ -80,6 +94,26 @@ class ASRService:
             logger.info("RunPod /runsync response: status=%s action=%s sentence_info_count=%s", status, action, sentence_count)
             return output
         response.raise_for_status()
+
+    async def _poll_runpod_status(self, job_id: str, poll_timeout: float = 600.0) -> dict:
+        """Poll RunPod /status/{job_id} until COMPLETED or FAILED."""
+        status_url = f"{self.runpod_url}/status/{job_id}"
+        deadline = asyncio.get_event_loop().time() + poll_timeout
+        poll_interval = 5.0
+        while asyncio.get_event_loop().time() < deadline:
+            await asyncio.sleep(poll_interval)
+            async with httpx.AsyncClient(timeout=30.0, headers=self.headers) as client:
+                resp = await client.get(status_url)
+            if not resp.is_success:
+                logger.warning("RunPod status poll %s returned %s", status_url, resp.status_code)
+                continue
+            result = resp.json()
+            status = result.get("status")
+            logger.info("RunPod poll job=%s status=%s", job_id, status)
+            if status in ("COMPLETED", "FAILED", "CANCELLED", "TIMED_OUT"):
+                return result
+            poll_interval = min(poll_interval * 1.2, 15.0)
+        raise RuntimeError(f"RunPod job {job_id} did not complete within {poll_timeout}s")
 
     def _ensure_local_port_8001(self) -> None:
         """Auto-spawn GPU ML Engine on port 8001 if calling outside Docker and port 8001 is closed."""
