@@ -7,11 +7,15 @@ import os
 import numpy as np
 
 from meetasr.backend.api.schemas_phase2 import TranscriptSegmentPayload
-from meetasr.backend.services.asr_service import ASRServiceResult, numpy_to_wav_bytes
+from meetasr.backend.services.asr_service import ASRService, ASRServiceResult, numpy_to_wav_bytes
 
 class RealtimeASRService:
     """
-    Adapter for realtime ASRPipeline running on RunPod.
+    Adapter for realtime ASR running on RunPod.
+
+    On RunPod Serverless (api.runpod.ai) it speaks /runsync with the
+    "realtime_transcribe" action (base64 audio). On a local HTTP ASR server it
+    keeps the old multipart /v1/realtime/* endpoints.
     """
 
     def __init__(self, runpod_url: str | None = None, api_key: str | None = None):
@@ -26,6 +30,9 @@ class RealtimeASRService:
         self.api_key = api_key or os.environ.get("RUNPOD_API_KEY", "")
         self.headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
         self._lock = asyncio.Lock()
+        self._is_serverless = "api.runpod.ai" in self.runpod_url
+        # Reuse ASRService's /runsync caller (handles IN_QUEUE/IN_PROGRESS polling)
+        self._serverless = ASRService(runpod_url=self.runpod_url, api_key=self.api_key)
 
     async def transcribe(
         self,
@@ -35,21 +42,32 @@ class RealtimeASRService:
         key: str | None = None,
     ) -> ASRServiceResult:
 
-        wav_bytes = numpy_to_wav_bytes(audio)
-        files = {"file": ("audio.wav", wav_bytes)}
-        data = {}
-        if key:
-            data["key"] = key
-
-        async with self._lock:
-            async with httpx.AsyncClient(timeout=60.0, headers=self.headers) as client:
-                response = await client.post(
-                    f"{self.runpod_url}/v1/realtime/transcribe",
-                    files=files,
-                    data=data
-                )
-                response.raise_for_status()
-                res_json = response.json()
+        if self._is_serverless:
+            import base64
+            payload: dict = {
+                "audio_base64": base64.b64encode(numpy_to_wav_bytes(audio)).decode(),
+                "language": os.environ.get("ASR_LANGUAGE", "vi"),
+            }
+            if key:
+                payload["key"] = key
+            res_json = await self._serverless._call_serverless(
+                "realtime_transcribe", payload, timeout=120.0,
+            )
+        else:
+            wav_bytes = numpy_to_wav_bytes(audio)
+            files = {"file": ("audio.wav", wav_bytes)}
+            data = {}
+            if key:
+                data["key"] = key
+            async with self._lock:
+                async with httpx.AsyncClient(timeout=60.0, headers=self.headers) as client:
+                    response = await client.post(
+                        f"{self.runpod_url}/v1/realtime/transcribe",
+                        files=files,
+                        data=data
+                    )
+                    response.raise_for_status()
+                    res_json = response.json()
 
         # Parse sentences
         sentence_info = res_json.get("sentence_info", [])

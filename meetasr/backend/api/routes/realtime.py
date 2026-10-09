@@ -2,8 +2,6 @@ from meetasr.backend.streaming.session import StreamSession
 from meetasr.backend.streaming.worker import AudioWorker
 from meetasr.backend.streaming.audio_receiver import AudioReceiver
 from meetasr.backend.streaming.asr_worker import ASRWorker
-from meetasr.backend.streaming.temp_asr_woker import TempASRWorker
-from meetasr.backend.streaming.partial_buffer_cleaner import PartialBufferCleaner
 from meetasr.backend.streaming.window_builder import SegmentWindowBuilder
 import io
 import wave
@@ -103,22 +101,9 @@ async def realtime_stream(websocket: WebSocket, db: Session = Depends(get_db)):
         asr_worker.run()
     )
 
-    temp_asr_worker = TempASRWorker(
-        session,
-        pipeline,
-    )
-
-    session.temp_asr_task = asyncio.create_task(
-        temp_asr_worker.run()
-    )
-
-    partial_buffer_cleaner = PartialBufferCleaner(
-        session,
-    )
-
-    session.partial_cleaner_task = asyncio.create_task(
-        partial_buffer_cleaner.run()
-    )
+    # Sentence-level realtime: partial (live word-by-word) ASR is disabled on
+    # production. It would call RunPod every ~1s (costly + ~1-2s network latency
+    # each, so not truly live). We only run the final per-window ASR below.
 
     worker = AudioWorker(
         session,

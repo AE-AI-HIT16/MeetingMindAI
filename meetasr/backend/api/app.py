@@ -120,6 +120,13 @@ async def lifespan(app: FastAPI):
     app.state.asr_service = ASRService(runpod_url=runpod_url, api_key=runpod_api_key)
     app.state.realtime_asr_service = RealtimeASRService(runpod_url=runpod_url, api_key=runpod_api_key)
 
+    # Realtime (sentence-level): segmentation uses a fixed-window splitter on CPU,
+    # so no local VAD/ASR model is needed here — ASR itself goes through RunPod via
+    # realtime_asr_service. A lightweight stub object just has to expose a non-None
+    # `.vad` so StreamingProcessor runs. (EC2 has no GPU for a real local pipeline.)
+    from types import SimpleNamespace
+    app.state.realtime_pipeline = SimpleNamespace(vad=SimpleNamespace(name="fixed-window"))
+
     print(logger.level)
     print(logger.getEffectiveLevel())
 

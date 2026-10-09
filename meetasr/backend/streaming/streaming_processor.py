@@ -72,15 +72,8 @@ class StreamingProcessor:
 
         self.session.ready_segments.append(audio)
 
-        # Đẩy dữ liệu vào queue, để có kết quả sớm cho fe
-        try:
-            if self.session.temp_asr_queue.empty():
-                self.session.temp_asr_queue.put_nowait(None)
-
-        except asyncio.QueueFull:
-            logger.warning(
-                "Temp ASR queue full, dropping segment"
-            )
+        # Partial (live) ASR disabled on production — only the final per-window
+        # ASR runs (see realtime route). ready_segments feeds the window builder.
 
         self._remove_processed_audio(
                 first_segment,
