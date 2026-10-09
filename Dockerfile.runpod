@@ -29,5 +29,8 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
     pip install --no-cache-dir runpod && \
     find /opt/conda -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
 
-CMD ["python", "/app/meetasr/runpod/handler.py"]
+# Verify handler exists so the build fails fast if something is wrong
+RUN ls -la /app/meetasr/runpod/handler.py
+
+CMD ["sh", "-c", "echo 'Container started' && ls /app/meetasr/runpod/ && exec python /app/meetasr/runpod/handler.py"]
 
