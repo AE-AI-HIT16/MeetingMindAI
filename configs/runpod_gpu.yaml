@@ -51,7 +51,20 @@ spk:
   hub: ms
   device: cuda:0
   cluster_type: spectral
-  min_cluster_size: 4
+  # --- Tinh chỉnh diarization (khớp người nói) ---
+  # min_cluster_size: cụm ≤ số này bị gộp vào cụm lớn hơn.
+  #   Giảm (2) = giữ được người nói ÍT câu; tăng (4+) = bỏ qua phát biểu ngắn.
+  min_cluster_size: 2
+  # mer_cos: cosine ≥ số này thì gộp 2 người thành 1.
+  #   Tăng (0.85) = tách nhạy hơn (người giọng giống vẫn tách);
+  #   giảm (0.75) = gộp mạnh hơn (tránh 1 người bị chia đôi).
+  mer_cos: 0.80
+  # pval: cắt tỉa ma trận tương đồng của spectral clustering.
+  #   Giảm (0.008) = dễ tách thành NHIỀU người; tăng (0.02) = gộp lại.
+  pval: 0.012
+  # Giới hạn số người tự phát hiện (họp thường ≤ 8).
+  max_num_spks: 8
+  min_num_spks: 1
 
 llm:
   provider: groq

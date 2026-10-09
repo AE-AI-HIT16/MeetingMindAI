@@ -32,6 +32,9 @@ class CAMPlusPlus(AbsSpk):
         cluster_line: int = 40,
         mer_cos: float = 0.8,
         min_cluster_size: int = 4,
+        pval: float = 0.012,
+        max_num_spks: int = 15,
+        min_num_spks: int = 1,
         **kwargs,
     ):
         """Initialize CAM++.
@@ -39,6 +42,15 @@ class CAMPlusPlus(AbsSpk):
         Args:
             model_path: Local path to downloaded model directory.
             device: Torch device string.
+            cluster_type: "spectral" (long audio) or "AHC".
+            cluster_line: segment-count threshold to switch spectral/AHC.
+            mer_cos: cosine ≥ this merges two speakers into one (lower = merge
+                more aggressively → fewer speakers; higher = split more).
+            min_cluster_size: clusters with ≤ this many chunks are absorbed into
+                the nearest bigger one (lower = keep speakers who talk little).
+            pval: spectral affinity pruning (lower = keep fewer edges → split
+                into more speakers; higher = merge).
+            max_num_spks / min_num_spks: bounds on auto-detected speaker count.
             **kwargs: Additional model config.
         """
         self.model_path = model_path
@@ -50,6 +62,9 @@ class CAMPlusPlus(AbsSpk):
             "cluster_line": cluster_line,
             "mer_cos": mer_cos,
             "min_cluster_size": min_cluster_size,
+            "pval": pval,
+            "max_num_spks": max_num_spks,
+            "min_num_spks": min_num_spks,
         }
 
     def _ensure_loaded(self) -> None:
