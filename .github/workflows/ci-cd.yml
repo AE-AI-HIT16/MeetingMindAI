@@ -176,6 +176,34 @@ jobs:
           pull: true
           no-cache: true
 
+      - name: Update RunPod Endpoint Image
+        env:
+          RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+          RUNPOD_ENDPOINT_ID: ${{ secrets.RUNPOD_ENDPOINT_ID }}
+        run: |
+          if [ -z "${RUNPOD_API_KEY}" ] || [ -z "${RUNPOD_ENDPOINT_ID}" ]; then
+            echo "[SKIP] RUNPOD_API_KEY or RUNPOD_ENDPOINT_ID not set, skipping endpoint update."
+            exit 0
+          fi
+
+          DIGEST="${{ steps.build-runpod.outputs.digest }}"
+          IMAGE="${{ env.RUNPOD_IMAGE }}@${DIGEST}"
+          echo "Updating RunPod endpoint ${RUNPOD_ENDPOINT_ID} → ${IMAGE}"
+
+          RESPONSE=$(curl -s -X POST \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${RUNPOD_API_KEY}" \
+            -d "{\"query\": \"mutation { saveEndpoint(input: { id: \\\"${RUNPOD_ENDPOINT_ID}\\\", dockerImage: \\\"${IMAGE}\\\" }) { id dockerImage } }\"}" \
+            "https://api.runpod.io/graphql")
+
+          echo "Response: ${RESPONSE}"
+
+          if echo "${RESPONSE}" | grep -q '"errors"'; then
+            echo "ERROR: RunPod endpoint update failed"
+            exit 1
+          fi
+          echo "RunPod endpoint updated successfully."
+
       - name: Show Docker state after build
         if: always()
         run: |
