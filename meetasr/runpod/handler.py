@@ -12,6 +12,16 @@ logger = logging.getLogger(__name__)
 
 logger.info("Handler starting — importing dependencies...")
 
+# Cache models on Network Volume if mounted, so cold starts skip HuggingFace download
+import os as _os
+_NV = "/runpod-volume"
+if _os.path.isdir(_NV):
+    _os.environ.setdefault("HF_HOME", f"{_NV}/hf_cache")
+    _os.environ.setdefault("MODELSCOPE_CACHE", f"{_NV}/ms_cache")
+    logger.info("Network Volume detected — using %s/hf_cache for model cache.", _NV)
+else:
+    logger.info("No Network Volume — models will be downloaded to container cache.")
+
 try:
     import runpod
     import base64
