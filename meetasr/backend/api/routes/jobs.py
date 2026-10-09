@@ -32,8 +32,9 @@ def _job_snapshot(job_id: str) -> list[dict]:
                 ).model_dump(mode="json")
             ]
 
+        _STREAMABLE_STAGES = {"extracting_audio", "transcribing", "generating_doc"}
         events: list[dict] = []
-        if job.stage:
+        if job.stage and job.stage in _STREAMABLE_STAGES:
             events.append(
                 StatusEvent(
                     stage=job.stage,

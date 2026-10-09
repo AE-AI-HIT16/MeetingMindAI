@@ -59,16 +59,24 @@ class ASRService:
     async def _call_serverless(self, action: str, payload: dict, timeout: float = 600.0) -> dict:
         """Call RunPod Serverless /runsync and return the output dict."""
         url = f"{self.runpod_url}/runsync"
-        async with httpx.AsyncClient(timeout=timeout, headers=self.headers) as client:
-            response = await client.post(url, json={"input": {"action": action, **payload}})
+        body = {"input": {"action": action, **payload}}
+        for attempt in range(3):
+            async with httpx.AsyncClient(timeout=timeout, headers=self.headers) as client:
+                response = await client.post(url, json=body)
+            if response.status_code in (502, 503, 504):
+                wait = 5 * (attempt + 1)
+                logger.warning("RunPod %s returned %s, retry %d/3 in %ds", url, response.status_code, attempt + 1, wait)
+                await asyncio.sleep(wait)
+                continue
             if not response.is_success:
                 logger.error("RunPod %s error: status=%s body=%s", url, response.status_code, response.text[:500])
             response.raise_for_status()
             result = response.json()
-        status = result.get("status")
-        if status == "FAILED":
-            raise RuntimeError(f"RunPod job failed: {result.get('error', result)}")
-        return result.get("output", result)
+            status = result.get("status")
+            if status == "FAILED":
+                raise RuntimeError(f"RunPod job failed: {result.get('error', result)}")
+            return result.get("output", result)
+        response.raise_for_status()
 
     def _ensure_local_port_8001(self) -> None:
         """Auto-spawn GPU ML Engine on port 8001 if calling outside Docker and port 8001 is closed."""
