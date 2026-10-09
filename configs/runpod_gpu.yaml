@@ -32,7 +32,7 @@ asr:
   model_size: Qwen/Qwen3-ASR-1.7B
   device: cuda:0
   dtype: bfloat16
-  max_inference_batch_size: 1
+  max_inference_batch_size: 8
   max_new_tokens: 512
 
 vad:
