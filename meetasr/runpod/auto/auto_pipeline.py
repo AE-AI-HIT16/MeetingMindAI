@@ -59,12 +59,16 @@ class AutoPipeline:
         punc_model = cls._build_optional(config, "punc", device)
         spk_model = cls._build_optional(config, "spk", device)
 
-        # Build LLM summarizer
-        summarizer = None
-        doc_planner = None
-        if "llm" in config and config["llm"]:
-            summarizer = cls._build_llm(config["llm"])
-            doc_planner = cls._build_doc_planner(config["llm"])
+        # Only build LLM components if a real API key is present
+        llm_cfg = config.get("llm") or {}
+        if llm_cfg and llm_cfg.get("api_key"):
+            summarizer = cls._build_llm(llm_cfg)
+            doc_planner = cls._build_doc_planner(llm_cfg)
+        else:
+            if llm_cfg:
+                logging.warning("LLM config found but api_key is missing or empty; skipping LLM init.")
+            summarizer = None
+            doc_planner = None
 
         pipeline_cfg = config.get("pipeline") or {}
         gap_rescue_cfg = pipeline_cfg.get("gap_rescue") or {}
