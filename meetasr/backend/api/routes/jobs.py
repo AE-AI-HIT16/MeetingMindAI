@@ -133,7 +133,7 @@ async def job_events(websocket: WebSocket, job_id: str) -> None:
         return
     finally:
         await event_bus.unsubscribe(job_id, queue)
-        # If this is the last client connected, cancel the processing task
-        if job_id not in event_bus._subscribers:
-            if processing_task and not processing_task.done():
-                processing_task.cancel()
+        # Do NOT cancel processing_task on disconnect — RunPod job must run to
+        # completion regardless of WebSocket lifecycle. The next reconnect will
+        # find status=PROCESSING and skip re-triggering; _job_snapshot will
+        # replay all persisted state when the client reconnects.

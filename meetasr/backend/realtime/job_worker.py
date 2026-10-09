@@ -450,5 +450,4 @@ async def run_job_processing(job_id: str, asr_service: ASRService, storage: Stor
         await job_queue._process(job_id)
     except asyncio.CancelledError:
         logger.info(f"Job processing {job_id} cancelled.")
-        job_queue._fail_job(job_id, "Cancelled: Client disconnected.")
         raise
