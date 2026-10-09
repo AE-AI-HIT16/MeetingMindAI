@@ -61,8 +61,12 @@ class AutoPipeline:
 
         # Only build LLM components if a real API key is available
         llm_cfg = config.get("llm") or {}
+        raw_key = llm_cfg.get("api_key") or ""
+        # Treat unresolved OmegaConf interpolations (${...}) as absent
+        if isinstance(raw_key, str) and raw_key.startswith("${"):
+            raw_key = ""
         api_key_available = bool(
-            (llm_cfg.get("api_key") or os.environ.get("GROQ_API_KEY", "")).strip()
+            (raw_key or os.environ.get("GROQ_API_KEY", "")).strip()
         )
         if llm_cfg and api_key_available:
             summarizer = cls._build_llm(llm_cfg)
@@ -121,7 +125,7 @@ class AutoPipeline:
         if not os.path.exists(yaml_path):
             raise FileNotFoundError(f"Config file not found: {yaml_path}")
         cfg = OmegaConf.load(yaml_path)
-        cfg_dict = OmegaConf.to_container(cfg, resolve=True)
+        cfg_dict = OmegaConf.to_container(cfg, resolve=False)
         return cls.from_config(cfg_dict)
 
     # ------------------------------------------------------------------
