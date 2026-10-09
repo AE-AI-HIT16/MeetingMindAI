@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { useSession } from "next-auth/react";
 import type { Source } from "@/lib/types";
 import { formatDate, formatDuration } from "@/lib/format";
 import { StatusBadge, Waveform } from "@/components/ui";
@@ -16,6 +17,7 @@ const DOC_LABEL: Record<string, string> = {
 
 export function SourceCard({ source }: { source: Source }) {
   const router = useRouter();
+  const { data: session } = useSession();
   const [deleting, setDeleting] = useState(false);
 
   const isVideo = source.mediaType === "video";
@@ -32,9 +34,11 @@ export function SourceCard({ source }: { source: Source }) {
     if (!confirm(`Xóa "${source.title}"?`)) return;
     setDeleting(true);
     try {
-      await deleteSource(source.id);
+      await deleteSource(source.id, session?.accessToken);
       router.refresh();
-    } catch {
+    } catch (err) {
+      console.error("[SourceCard] delete failed:", err);
+      alert("Không thể xóa tài liệu. Vui lòng thử lại.");
       setDeleting(false);
     }
   }
