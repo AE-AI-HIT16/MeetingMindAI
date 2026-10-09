@@ -102,12 +102,7 @@ async def document_generation_events(
             if generation and generation.status in [
                 DocumentGenerationStatus.QUEUED,
                 DocumentGenerationStatus.FAILED,
-                DocumentGenerationStatus.PROCESSING,  # re-trigger if previous task was cancelled
             ]:
-                generation.status = DocumentGenerationStatus.PROCESSING
-                db.add(generation)
-                db.commit()
-
                 processing_task = asyncio.create_task(
                     run_document_generation(generation_id, planner)
                 )
