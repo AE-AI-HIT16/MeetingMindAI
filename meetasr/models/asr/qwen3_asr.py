@@ -16,6 +16,7 @@ Config example:
 from __future__ import annotations
 
 import logging
+import threading
 from typing import Any
 
 import numpy as np
@@ -104,12 +105,25 @@ class Qwen3ASR(AbsASR):
         self.max_new_tokens = max_new_tokens
         self.model_kwargs = dict(model_kwargs or {})
         self._model = None
+        self._load_lock = threading.Lock()
+        self._inference_lock = threading.Lock()
         self._kwargs = kwargs
 
     def _ensure_loaded(self) -> None:
         """Lazy-load the Qwen3-ASR model."""
         if self._model is not None:
             return
+        with self._load_lock:
+            if self._model is not None:
+                return
+            self._load_model()
+
+    def warm_up(self) -> None:
+        """Load model weights before the first user audio reaches the server."""
+        self._ensure_loaded()
+
+    def _load_model(self) -> None:
+        """Load Qwen once while Transformers mutates its meta-init context."""
         try:
             import torch
             from qwen_asr import Qwen3ASRModel
@@ -202,12 +216,13 @@ class Qwen3ASR(AbsASR):
                 )
                 continue
 
-            transcription = self._model.transcribe(
-                audio=[(chunk, SAMPLE_RATE)],
-                context=kwargs.get("context", ""),
-                language=[qwen_language] if qwen_language else None,
-                return_time_stamps=use_timestamps,
-            )
+            with self._inference_lock:
+                transcription = self._model.transcribe(
+                    audio=[(chunk, SAMPLE_RATE)],
+                    context=kwargs.get("context", ""),
+                    language=[qwen_language] if qwen_language else None,
+                    return_time_stamps=use_timestamps,
+                )
 
             if not transcription:
                 results.append(

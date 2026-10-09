@@ -15,6 +15,7 @@ import { StatusBadge, Waveform } from "@/components/ui";
 export default function RealtimePage() {
   const {
     isRecording,
+    isFinalizing,
     isConnected,
     transcripts,
     elapsedMs,
@@ -50,7 +51,7 @@ export default function RealtimePage() {
           </h1>
         </div>
         <div className="flex items-center gap-3">
-          <StatusBadge status={isRecording ? "processing" : "done"} />
+          <StatusBadge status={isRecording || isFinalizing ? "processing" : "done"} />
           {isRecording && (
             <span className="hidden font-mono text-sm text-signal-ink sm:inline">
               {formatDuration(elapsedMs)}
@@ -65,14 +66,18 @@ export default function RealtimePage() {
           {/* Left: info */}
           <div className="text-center sm:text-left">
             <p className="font-display text-lg font-semibold text-ink">
-              {isRecording
+              {isFinalizing
+                ? "Đang hoàn tất phần audio cuối…"
+                : isRecording
                 ? "Đang ghi âm và nhận dạng…"
                 : transcripts.length > 0
                   ? "Ghi âm đã kết thúc"
                   : "Nhấn nút để bắt đầu ghi âm"}
             </p>
             <p className="mt-1 text-sm text-ink-soft">
-              {isRecording
+              {isFinalizing
+                ? "Server đang chốt transcript đã nhận; vui lòng giữ trang này mở."
+                : isRecording
                 ? "Audio được stream realtime tới server, transcript hiện dần bên dưới."
                 : "Microphone → WebSocket → ASR pipeline → Transcript"}
             </p>
@@ -90,6 +95,7 @@ export default function RealtimePage() {
             <button
               id="record-btn"
               onClick={isRecording ? stop : () => start(audioSource)}
+              disabled={isFinalizing}
               className="group relative flex h-16 w-16 items-center justify-center rounded-full transition-shadow"
               style={{
                 background: isRecording
@@ -99,7 +105,13 @@ export default function RealtimePage() {
                   ? "0 0 0 4px var(--color-signal-wash)"
                   : "0 2px 8px rgba(44,62,224,0.25)",
               }}
-              aria-label={isRecording ? "Dừng ghi âm" : "Bắt đầu ghi âm"}
+              aria-label={
+                isFinalizing
+                  ? "Đang hoàn tất audio"
+                  : isRecording
+                    ? "Dừng ghi âm"
+                    : "Bắt đầu ghi âm"
+              }
             >
               {/* Expanding ring when recording */}
               {isRecording && <span className="recording-ring absolute inset-0 rounded-full" />}
@@ -138,7 +150,7 @@ export default function RealtimePage() {
           </div>
         </div>
 
-        {!isRecording && (
+        {!isRecording && !isFinalizing && (
           <div className="mt-5 flex flex-wrap gap-2" role="radiogroup" aria-label="Nguồn âm thanh">
             <SourceOption label="Microphone" selected={audioSource === "microphone"} onClick={() => setAudioSource("microphone")} />
             <SourceOption label="Âm thanh từ tab" selected={audioSource === "tab"} onClick={() => setAudioSource("tab")} />
@@ -146,7 +158,7 @@ export default function RealtimePage() {
         )}
 
         {/* Connection status bar */}
-        {isRecording && (
+        {(isRecording || isFinalizing) && (
           <div className="mt-4 flex items-center gap-2 rounded-lg bg-surface-2 px-3 py-2">
             <span
               className={`h-2 w-2 rounded-full ${
@@ -154,7 +166,9 @@ export default function RealtimePage() {
               }`}
             />
             <span className="font-mono text-xs text-ink-faint">
-              {isConnected
+              {isFinalizing
+                ? "Đang chờ server xử lý phần audio cuối…"
+                : isConnected
                 ? "WebSocket kết nối · PCM16 mono 16kHz"
                 : "Đang kết nối…"}
             </span>
@@ -166,7 +180,7 @@ export default function RealtimePage() {
       </div>
 
       {/* ---- Navigation to document page after recording ---- */}
-      {!isRecording && transcripts.length > 0 && sourceId && (
+      {!isRecording && !isFinalizing && transcripts.length > 0 && sourceId && (
         <div className="mt-4 flex items-center justify-center gap-3 rounded-2xl border border-line bg-surface p-4">
           <div className="flex-1 text-center sm:text-left">
             <p className="font-display text-sm font-medium text-ink">

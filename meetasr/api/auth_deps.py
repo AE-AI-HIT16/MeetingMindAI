@@ -17,10 +17,10 @@ from typing import Annotated, Optional
 import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlmodel import Session
 
 from meetasr.db.connection import get_db
 from meetasr.db.user_model import User
-from sqlmodel import Session, select
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +49,11 @@ def get_current_user(
     if not credentials or not credentials.credentials:
         return None
 
-    token = credentials.credentials
+    return resolve_token_user(credentials.credentials, db)
+
+
+def resolve_token_user(token: str, db: Session) -> User:
+    """Validate one internal JWT outside the HTTP Bearer dependency."""
     try:
         payload = jwt.decode(token, _JWT_SECRET, algorithms=[_JWT_ALGORITHM])
         user_id: str = payload.get("sub", "")

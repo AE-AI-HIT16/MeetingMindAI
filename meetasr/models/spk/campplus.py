@@ -119,6 +119,4 @@ class CAMPlusPlus(AbsSpk):
             labels = cc(X, **kwargs)
             return labels.tolist()
         except Exception as e:
-            logging.warning(f"Speaker clustering failed: {e}. Assigning all to Speaker 0.")
-            n = embeddings.shape[0] if hasattr(embeddings, "shape") else 1
-            return [0] * n
+            raise RuntimeError(f"Speaker clustering failed: {e}") from e

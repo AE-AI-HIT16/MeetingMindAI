@@ -16,6 +16,8 @@ class PCMProcessor extends AudioWorkletProcessor {
     this._nativeSR = 48000; // default; overwritten by init message
     this._targetSR = 16000;
     this._resampleRatio = 1;
+    this._inputAccumulator = new Float32Array(0);
+    this._resamplePosition = 0;
     this._accumulator = new Float32Array(0);
 
     // Buffer to accumulate enough samples before posting.
@@ -26,8 +28,49 @@ class PCMProcessor extends AudioWorkletProcessor {
       if (e.data.command === "init") {
         this._nativeSR = e.data.sampleRate;
         this._resampleRatio = this._nativeSR / this._targetSR;
+        this._inputAccumulator = new Float32Array(0);
+        this._resamplePosition = 0;
+        this._accumulator = new Float32Array(0);
       }
     };
+  }
+
+  /**
+   * Resample one input block while retaining fractional source position.
+   * The last source sample is kept so interpolation can cross callbacks.
+   */
+  _resample(mono) {
+    const previous = this._inputAccumulator;
+    const input = new Float32Array(previous.length + mono.length);
+    input.set(previous, 0);
+    input.set(mono, previous.length);
+
+    const capacity = Math.ceil(
+      Math.max(0, input.length - this._resamplePosition) /
+        this._resampleRatio,
+    );
+    const output = new Float32Array(capacity);
+    let outputLength = 0;
+
+    while (this._resamplePosition < input.length) {
+      const lo = Math.floor(this._resamplePosition);
+      const frac = this._resamplePosition - lo;
+      if (frac > 0 && lo + 1 >= input.length) break;
+
+      const hi = Math.min(lo + 1, input.length - 1);
+      output[outputLength] =
+        input[lo] * (1 - frac) + input[hi] * frac;
+      outputLength += 1;
+      this._resamplePosition += this._resampleRatio;
+    }
+
+    const consumed = Math.min(
+      Math.floor(this._resamplePosition),
+      Math.max(0, input.length - 1),
+    );
+    this._inputAccumulator = input.slice(consumed);
+    this._resamplePosition -= consumed;
+    return output.slice(0, outputLength);
   }
 
   /**
@@ -39,18 +82,8 @@ class PCMProcessor extends AudioWorkletProcessor {
 
     const mono = input[0]; // Float32Array, native sample rate
 
-    // ---- Simple linear-interpolation downsampling ----
-    const outLen = Math.floor(mono.length / this._resampleRatio);
-    if (outLen === 0) return true;
-
-    const resampled = new Float32Array(outLen);
-    for (let i = 0; i < outLen; i++) {
-      const srcIdx = i * this._resampleRatio;
-      const lo = Math.floor(srcIdx);
-      const hi = Math.min(lo + 1, mono.length - 1);
-      const frac = srcIdx - lo;
-      resampled[i] = mono[lo] * (1 - frac) + mono[hi] * frac;
-    }
+    const resampled = this._resample(mono);
+    if (resampled.length === 0) return true;
 
     // Accumulate
     const prev = this._accumulator;

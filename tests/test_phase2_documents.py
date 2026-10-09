@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from io import BytesIO
 from types import SimpleNamespace
+from zipfile import ZipFile
 
 import pytest
+from fastapi import HTTPException
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine
 
@@ -21,6 +24,7 @@ from meetasr.db.models_phase2 import (
     Source,
     TranscriptSegment,
 )
+from meetasr.db.user_model import User
 from meetasr.realtime.document_generation import DocumentGenerationQueue
 from meetasr.schemas_doc import DocSection, DocumentReport
 from meetasr.services import document_service
@@ -284,6 +288,83 @@ def test_export_markdown_returns_attachment(document_context) -> None:
     assert "attachment" in response.headers["content-disposition"]
 
 
+def test_full_text_export_uses_friendly_title_and_filename(document_context) -> None:
+    _, db, source_id, _ = document_context
+    document = Document(
+        source_id=source_id,
+        mode=DocumentMode.FULL_TEXT,
+        markdown="# Toàn văn: meeting.wav\n\nNội dung.",
+    )
+    db.add(document)
+    db.commit()
+    db.refresh(document)
+
+    artifact = DocumentService(db).export_document(document.id, "md")
+
+    assert artifact.filename == "Toàn văn - meeting.md"
+    assert artifact.content.startswith("# Toàn văn cuộc họp".encode())
+    assert b"To\xc3\xa0n v\xc4\x83n: meeting.wav" not in artifact.content
+    assert "_Nguồn: meeting_".encode() in artifact.content
+
+
+def test_export_route_passes_selected_pdf_preset(document_context) -> None:
+    _, db, _, live_id = document_context
+
+    response = documents_phase2.export_document(
+        live_id,
+        db,
+        "pdf",
+        "blue_modern",
+    )
+
+    assert response.media_type == "application/pdf"
+    assert response.body.startswith(b"%PDF-")
+
+
+def test_export_route_rejects_preset_from_another_format(document_context) -> None:
+    _, db, _, live_id = document_context
+
+    with pytest.raises(HTTPException) as exc_info:
+        documents_phase2.export_document(
+            live_id,
+            db,
+            "docx",
+            "blue_modern",
+        )
+
+    assert exc_info.value.status_code == 400
+    assert "Unsupported preset 'blue_modern' for format 'docx'" in str(
+        exc_info.value.detail
+    )
+
+
+def test_docx_modern_uses_source_owner_as_author(document_context) -> None:
+    _, db, source_id, live_id = document_context
+    owner = User(
+        provider="google",
+        provider_id="export-owner",
+        email="owner@example.com",
+        name="Anh Tú",
+    )
+    db.add(owner)
+    db.flush()
+    source = db.get(Source, source_id)
+    assert source is not None
+    source.user_id = owner.id
+    db.add(source)
+    db.commit()
+
+    artifact = DocumentService(db).export_document(
+        live_id,
+        "docx",
+        "modern",
+    )
+    with ZipFile(BytesIO(artifact.content)) as archive:
+        document_xml = archive.read("word/document.xml").decode("utf-8")
+
+    assert "Anh Tú" in document_xml
+
+
 def test_document_service_rehydrates_canonical_transcript(
     document_context,
 ) -> None:
@@ -296,3 +377,8 @@ def test_document_service_rehydrates_canonical_transcript(
     assert transcript.duration == 3.0
     assert transcript.sentence_info[0].start == 0.0
     assert transcript.sentence_info[0].end == 3.0
+
+    markdown = DocumentService.full_text_markdown(transcript)
+    assert markdown.startswith("# Toàn văn cuộc họp\n")
+    assert "_Nguồn: meeting_" in markdown
+    assert "Toàn văn: meeting.wav" not in markdown

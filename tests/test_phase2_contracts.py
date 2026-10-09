@@ -13,6 +13,7 @@ from meetasr.api.schemas_phase2 import (
     StatusEvent,
     TranscriptDeltaEvent,
     TranscriptSegmentPayload,
+    TranscriptSnapshotEvent,
 )
 from meetasr.db.models_phase2 import TranscriptSegment
 from meetasr.realtime.events import EventBus
@@ -81,6 +82,10 @@ def test_job_event_contracts_serialize_expected_discriminators() -> None:
     assert TranscriptDeltaEvent(segment=segment).model_dump()["type"] == (
         "transcript_delta"
     )
+    assert TranscriptSnapshotEvent(segments=[segment]).model_dump() == {
+        "type": "transcript_snapshot",
+        "segments": [segment.model_dump()],
+    }
     assert DoneEvent(duration_ms=1000, num_segments=1).model_dump()["type"] == (
         "done"
     )
@@ -115,9 +120,19 @@ async def test_live_mic_sends_canonical_transcript_delta_segment() -> None:
         async def send_json(self, payload):
             sent.append(payload)
 
+    class FakeTranscriptService:
+        async def persist_and_publish(self, job_id, segment, websocket):
+            assert job_id == "job-live"
+            persisted = segment.model_copy(update={"id": 41})
+            await websocket.send_json(
+                TranscriptDeltaEvent(segment=persisted).model_dump(mode="json")
+            )
+            return persisted
+
     worker = ASRWorker(
-        SimpleNamespace(websocket=FakeWebSocket()),
+        SimpleNamespace(websocket=FakeWebSocket(), job_id="job-live"),
         asr_service=None,
+        transcript_service=FakeTranscriptService(),
     )
     result = ASRServiceResult(
         segments=[
@@ -138,7 +153,7 @@ async def test_live_mic_sends_canonical_transcript_delta_segment() -> None:
         {
             "type": "transcript_delta",
             "segment": {
-                "id": None,
+                "id": 41,
                 "start_ms": 1000,
                 "end_ms": 2500,
                 "speaker": None,

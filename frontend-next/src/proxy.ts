@@ -1,5 +1,5 @@
 /**
- * Middleware Next.js — bao ve cac route can dang nhap.
+ * Next.js Proxy — bao ve cac route can dang nhap.
  *
  * Logic:
  *  1. /login va /api/auth/* luon cho phep (public).
@@ -10,7 +10,7 @@
 import { getToken } from "next-auth/jwt";
 import { NextRequest, NextResponse } from "next/server";
 
-export async function middleware(req: NextRequest) {
+export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
   // Cac route luon public

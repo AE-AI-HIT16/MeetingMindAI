@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import sys
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from types import ModuleType, SimpleNamespace
 
 import numpy as np
@@ -72,6 +75,79 @@ def test_qwen3_asr_loads_resolved_local_path_with_explicit_options(monkeypatch):
     assert captured["kwargs"]["low_cpu_mem_usage"] is True
     assert captured["kwargs"]["forced_aligner"] == "/models/qwen3-forced-aligner"
     assert captured["kwargs"]["forced_aligner_kwargs"]["device_map"] == "cuda:0"
+
+
+def test_qwen3_asr_lazy_load_is_serialized_across_workers(monkeypatch):
+    calls = 0
+    loaded_model = object()
+
+    class _SlowFakeLoader:
+        @classmethod
+        def from_pretrained(cls, checkpoint, **kwargs):
+            nonlocal calls
+            calls += 1
+            time.sleep(0.05)
+            return loaded_model
+
+    fake_qwen_module = ModuleType("qwen_asr")
+    fake_qwen_module.Qwen3ASRModel = _SlowFakeLoader
+    monkeypatch.setitem(sys.modules, "qwen_asr", fake_qwen_module)
+    model = Qwen3ASR(device="cuda:0")
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [executor.submit(model._ensure_loaded) for _ in range(2)]
+        for future in futures:
+            future.result()
+
+    assert calls == 1
+    assert model._model is loaded_model
+
+
+def test_qwen3_asr_warm_up_loads_weights_without_running_inference(monkeypatch):
+    model = Qwen3ASR()
+    loaded_model = _FakeQwenModel()
+    calls = 0
+
+    def fake_load() -> None:
+        nonlocal calls
+        calls += 1
+        model._model = loaded_model
+
+    monkeypatch.setattr(model, "_load_model", fake_load)
+
+    model.warm_up()
+    model.warm_up()
+
+    assert calls == 1
+    assert loaded_model.calls == []
+
+
+def test_qwen3_asr_inference_is_serialized_across_workers():
+    active = 0
+    max_active = 0
+    guard = threading.Lock()
+
+    class _ConcurrentFakeModel(_FakeQwenModel):
+        def transcribe(self, **kwargs):
+            nonlocal active, max_active
+            with guard:
+                active += 1
+                max_active = max(max_active, active)
+            time.sleep(0.05)
+            with guard:
+                active -= 1
+            return self.results
+
+    model = Qwen3ASR()
+    model._model = _ConcurrentFakeModel()
+    audio = np.zeros(1600, dtype=np.float32)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [executor.submit(model.recognize, audio) for _ in range(2)]
+        for future in futures:
+            future.result()
+
+    assert max_active == 1
 
 
 def test_qwen3_asr_recognize_normalizes_audio_and_language():

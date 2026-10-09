@@ -9,6 +9,7 @@ import { SpeakerChip, StatusBadge, Waveform } from "@/components/ui";
 import { StageProgress } from "@/components/StageProgress";
 import { MarkdownLite } from "@/components/MarkdownLite";
 import { FinalizeDialog } from "@/components/FinalizeDialog";
+import { mediaUrl } from "@/lib/api";
 
 export function ProcessingView({
   source,
@@ -75,6 +76,27 @@ export function ProcessingView({
           progress={progress}
         />
       </div>
+
+      {(done || source.status === "done") && (
+        <div className="mt-4 rounded-2xl border border-line bg-surface p-4">
+          <p className="eyebrow mb-3">Audio đã ghi</p>
+          {source.mediaType === "video" ? (
+            <video
+              controls
+              preload="metadata"
+              className="max-h-64 w-full rounded-xl bg-black"
+              src={mediaUrl(source.id)}
+            />
+          ) : (
+            <audio
+              controls
+              preload="metadata"
+              className="w-full"
+              src={mediaUrl(source.id)}
+            />
+          )}
+        </div>
+      )}
 
       {error && (
         <p

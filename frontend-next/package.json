@@ -11,7 +11,9 @@
     "desktop:dev": "concurrently -k \"next dev\" \"wait-on http://127.0.0.1:3000 && electron desktop/main.cjs\"",
     "desktop:build": "next build",
     "desktop:start": "electron desktop/main.cjs",
-    "desktop:dist": "next build && electron-builder"
+    "desktop:dist": "next build && electron-builder",
+    "test:pcm": "node --test tests/pcm-processor.test.mjs",
+    "test:realtime-state": "node --test tests/realtime-transcript-state.test.mjs"
   },
   "build": {
     "appId": "com.meetingmind.app",

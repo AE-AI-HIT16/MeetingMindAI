@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import time
+
 from meetasr.streaming.validate import validate_audio
 
 
@@ -29,6 +31,8 @@ class AudioReceiver:
         """
 
         audio = validate_audio(audio)
+        if getattr(self.session, "first_audio_received_at", None) is None:
+            self.session.first_audio_received_at = time.perf_counter()
 
         # Ghép frame vào buffer (ring buffer float32 được worker ghi)
         self._buffer.extend(audio)
@@ -38,7 +42,11 @@ class AudioReceiver:
             chunk = bytes(self._buffer[: self.chunk_size])
             del self._buffer[: self.chunk_size]
 
-            await self.session.audio_queue.put(chunk)
+            accepted = await self.session.audio_queue.put(chunk)
+            if accepted is False:
+                coverage = getattr(self.session, "coverage", None)
+                if coverage is not None:
+                    coverage.record_audio_drop()
 
     async def flush(self) -> None:
         """
@@ -46,7 +54,11 @@ class AudioReceiver:
         """
 
         if self._buffer:
-            await self.session.audio_queue.put(bytes(self._buffer))
+            accepted = await self.session.audio_queue.put(bytes(self._buffer))
+            if accepted is False:
+                coverage = getattr(self.session, "coverage", None)
+                if coverage is not None:
+                    coverage.record_audio_drop()
             self._buffer.clear()
 
     def reset(self) -> None:

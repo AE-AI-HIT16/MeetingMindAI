@@ -173,6 +173,10 @@ class SileroVAD(AbsVAD):
             min_segment_ms=min_speech_ms,
         )
 
+    def create_streaming_predictor(self) -> "SileroStreamingPredictor":
+        """Create an isolated recurrent state for one realtime session."""
+        return SileroStreamingPredictor(self)
+
     @staticmethod
     def _validate_audio(audio: np.ndarray) -> None:
         if not isinstance(audio, np.ndarray):
@@ -183,6 +187,69 @@ class SileroVAD(AbsVAD):
             raise ValueError(f"audio must be mono 1-D array, got shape {audio.shape}")
         if audio.dtype != np.float32:
             raise ValueError(f"audio must have dtype np.float32, got {audio.dtype}")
+
+
+class SileroStreamingPredictor:
+    """Session-local recurrent state over one shared serialized Silero model."""
+
+    _STATE_ATTRIBUTES = (
+        "_state",
+        "_context",
+        "_last_sr",
+        "_last_batch_size",
+    )
+
+    def __init__(self, vad: SileroVAD) -> None:
+        self.vad = vad
+        self._state: dict[str, Any] | None = None
+
+    def predict(self, frame: np.ndarray) -> float:
+        """Return a speech probability for one exact 32 ms frame."""
+        self.vad._validate_audio(frame)
+        if frame.size != 512:
+            raise ValueError("Silero streaming frames must contain 512 samples")
+
+        self.vad._ensure_loaded()
+        import torch
+
+        model = self.vad._model
+        with self.vad._inference_lock:
+            if self._state is None:
+                model.reset_states()
+            else:
+                self._restore_model_state(model)
+            probability = float(
+                model(torch.from_numpy(np.ascontiguousarray(frame)), SAMPLE_RATE).item()
+            )
+            self._state = self._snapshot_model_state(model)
+            model.reset_states()
+        return probability
+
+    def reset(self) -> None:
+        """Forget this session without mutating another session's state."""
+        self._state = None
+
+    def _snapshot_model_state(self, model: Any) -> dict[str, Any]:
+        try:
+            return {
+                attribute: self._clone_value(getattr(model, attribute))
+                for attribute in self._STATE_ATTRIBUTES
+            }
+        except AttributeError as exc:
+            raise RuntimeError(
+                "Loaded Silero backend does not expose isolatable streaming state."
+            ) from exc
+
+    def _restore_model_state(self, model: Any) -> None:
+        if self._state is None:
+            return
+        for attribute, value in self._state.items():
+            setattr(model, attribute, self._clone_value(value))
+
+    @staticmethod
+    def _clone_value(value: Any) -> Any:
+        clone = getattr(value, "clone", None)
+        return clone() if callable(clone) else value
 
 
 def _normalize_timestamps(

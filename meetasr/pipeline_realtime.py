@@ -10,8 +10,6 @@ import numpy as np
 
 from meetasr.schemas import Segment, SentenceInfo, TranscriptResult
 from meetasr.utils.audio import load_audio
-from meetasr.utils.timestamp import merge_vad_segments
-
 
 VAD_PADDING_MS = 100
 SAMPLE_RATE = 16000
@@ -35,10 +33,14 @@ class ASRPipeline:
         asr_model,
         vad_model=None,
         device: str = "cpu",
+        realtime_config: dict | None = None,
+        transcription_language: str = "auto",
     ):
         self.asr = asr_model
         self.vad = vad_model
         self.device = device
+        self.realtime_config = realtime_config or {}
+        self.transcription_language = transcription_language
 
 
     # -------------------------------------------------------------
@@ -57,7 +59,12 @@ class ASRPipeline:
 
         duration = len(audio) / SAMPLE_RATE
 
-        segments = self._run_vad(audio)
+        skip_vad = bool(kwargs.pop("skip_vad", False))
+        segments = (
+            [Segment(0, int(duration * 1000))]
+            if skip_vad
+            else self._run_vad(audio)
+        )
 
         sentence_info = []
 

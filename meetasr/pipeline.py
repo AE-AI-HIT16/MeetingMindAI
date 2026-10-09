@@ -16,6 +16,7 @@ from meetasr.schemas import (
     Segment,
     SentenceInfo,
     SpeakerTurn,
+    TargetedSegmentPlan,
     TranscriptResult,
 )
 from meetasr.utils.audio import load_audio
@@ -27,6 +28,10 @@ from meetasr.utils.diarization import (
     compressed_seg,
     map_chars_to_speakers,
     split_at_speaker_turns,
+)
+from meetasr.utils.speaker_overlap import classify_speaker_overlap
+from meetasr.utils.targeted_retranscription import (
+    build_targeted_retranscription_plan,
 )
 from meetasr.utils.timestamp import (
     build_sentence_info,
@@ -71,6 +76,7 @@ class MeetPipeline:
         speaker_turn_boundary_search_ms: int = 2000,
         speaker_turn_min_chunk_ms: int = 1000,
         transcription_language: str = "auto",
+        realtime_config: dict | None = None,
     ):
         """Initialize MeetPipeline with pre-built model instances.
 
@@ -89,6 +95,7 @@ class MeetPipeline:
             speaker_turn_boundary_search_ms: Backward low-energy search window.
             speaker_turn_min_chunk_ms: Minimum tail duration when splitting turns.
             transcription_language: Default language used by upload jobs.
+            realtime_config: Streaming VAD and ASR timing overrides.
         """
         if speaker_turn_max_chunk_ms <= 0:
             raise ValueError("speaker_turn_max_chunk_ms must be positive")
@@ -115,6 +122,7 @@ class MeetPipeline:
         self.speaker_turn_boundary_search_ms = speaker_turn_boundary_search_ms
         self.speaker_turn_min_chunk_ms = speaker_turn_min_chunk_ms
         self.transcription_language = transcription_language
+        self.realtime_config = realtime_config or {}
 
     # ------------------------------------------------------------------
     # Public API
@@ -346,6 +354,86 @@ class MeetPipeline:
             finalized = self._run_punc(finalized)
 
         return finalized
+
+    def finalize_realtime_transcript(
+        self,
+        audio: np.ndarray,
+        sentence_info: list[SentenceInfo],
+        vad_segments: list[Segment],
+    ) -> list[SentenceInfo]:
+        """Assign speakers conservatively without splitting persisted text."""
+        finalized = copy.deepcopy(sentence_info)
+        if self.spk is not None and finalized:
+            try:
+                diar_segments = self._realtime_diarization_segments(
+                    audio,
+                    vad_segments,
+                )
+                counts = {"single": 0, "mixed": 0, "uncertain": 0}
+                for sentence in finalized:
+                    decision = classify_speaker_overlap(
+                        max(0, int(sentence.start * 1000)),
+                        max(0, int(sentence.end * 1000)),
+                        diar_segments,
+                    )
+                    sentence.speaker = decision.speaker
+                    counts[decision.kind] += 1
+                logging.info(
+                    "Realtime diarization: single=%d mixed=%d uncertain=%d",
+                    counts["single"],
+                    counts["mixed"],
+                    counts["uncertain"],
+                )
+            except Exception as exc:
+                logging.warning(
+                    "Realtime diarization failed: %s. Keeping speaker unknown.",
+                    exc,
+                )
+                for sentence in finalized:
+                    sentence.speaker = None
+
+        if (
+            self.punc is not None
+            and not getattr(self.asr, "has_native_punctuation", False)
+        ):
+            finalized = self._run_punc(finalized)
+        return finalized
+
+    def prepare_realtime_targeted_retranscription(
+        self,
+        audio: np.ndarray,
+        sentence_info: list[SentenceInfo],
+        vad_segments: list[Segment],
+    ) -> list[TargetedSegmentPlan]:
+        """Plan ASR retries for mixed realtime segments without decoding them."""
+        diar_segments: list[list] = []
+        if self.spk is not None and sentence_info:
+            try:
+                diar_segments = self._realtime_diarization_segments(
+                    audio,
+                    vad_segments,
+                )
+            except Exception as exc:
+                logging.warning(
+                    "Realtime diarization planning failed: %s. Keeping "
+                    "persisted text as unknown.",
+                    exc,
+                )
+
+        plans = build_targeted_retranscription_plan(
+            sentence_info,
+            diar_segments,
+        )
+        counts = {"keep": 0, "retranscribe": 0, "fallback": 0}
+        for plan in plans:
+            counts[plan.action] += 1
+        logging.info(
+            "Realtime targeted plan: keep=%d retranscribe=%d fallback=%d",
+            counts["keep"],
+            counts["retranscribe"],
+            counts["fallback"],
+        )
+        return plans
 
     def finalize_preassigned_transcript(
         self,
@@ -658,6 +746,19 @@ class MeetPipeline:
             )
         ]
         return compressed_seg(diar_segs)
+
+    def _realtime_diarization_segments(
+        self,
+        audio: np.ndarray,
+        vad_segments: list[Segment],
+    ) -> list[list]:
+        """Refresh full-file VAD and return the final speaker timeline."""
+        diarization_ranges = vad_segments
+        if self.vad is not None:
+            refreshed_ranges = self.vad.detect(audio)
+            if refreshed_ranges:
+                diarization_ranges = refreshed_ranges
+        return self._diarize_segments(audio, diarization_ranges)
 
 
 # ------------------------------------------------------------------

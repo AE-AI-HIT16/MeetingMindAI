@@ -2,7 +2,13 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import type { DocumentData, Source } from "@/lib/types";
+import type {
+  DocxExportPreset,
+  DocumentData,
+  ExportFormat,
+  PdfExportPreset,
+  Source,
+} from "@/lib/types";
 import { documentExportUrl, mediaUrl } from "@/lib/api";
 import { formatDuration, formatStamp } from "@/lib/format";
 import { useJobEvents } from "@/lib/useJobEvents";
@@ -10,6 +16,46 @@ import { MarkdownLite } from "@/components/MarkdownLite";
 import { SpeakerChip } from "@/components/ui";
 
 type Tab = "doc" | "transcript" | "media";
+
+const EXPORT_FORMATS: { value: ExportFormat; label: string }[] = [
+  { value: "pdf", label: "PDF" },
+  { value: "docx", label: "DOCX" },
+  { value: "md", label: "Markdown" },
+];
+
+const PDF_PRESETS: {
+  value: PdfExportPreset;
+  label: string;
+  description: string;
+}[] = [
+  {
+    value: "minimal",
+    label: "Tối giản",
+    description: "Sạch và tập trung vào nội dung",
+  },
+  {
+    value: "blue_modern",
+    label: "Xanh hiện đại",
+    description: "Bố cục báo cáo mang màu MeetingMind",
+  },
+];
+
+const DOCX_PRESETS: {
+  value: DocxExportPreset;
+  label: string;
+  description: string;
+}[] = [
+  {
+    value: "minimal",
+    label: "Tối giản",
+    description: "Tài liệu Word cơ bản, dễ chỉnh sửa",
+  },
+  {
+    value: "modern",
+    label: "Hiện đại",
+    description: "Trang bìa kèm ngày tạo và tác giả",
+  },
+];
 
 function segmentKey(id: number | null, startMs: number) {
   return id === null ? `start-${startMs}` : `id-${id}`;
@@ -24,11 +70,29 @@ export function DocumentView({
 }) {
   const [tab, setTab] = useState<Tab>("doc");
   const [exportOpen, setExportOpen] = useState(false);
+  const [exportFormat, setExportFormat] = useState<ExportFormat>("pdf");
+  const [pdfPreset, setPdfPreset] =
+    useState<PdfExportPreset>("minimal");
+  const [docxPreset, setDocxPreset] =
+    useState<DocxExportPreset>("minimal");
   const [playbackMs, setPlaybackMs] = useState<number | null>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const segmentRefs = useRef(new Map<string, HTMLDivElement>());
   const { segments } = useJobEvents(source.jobId);
+
+  const selectedPreset =
+    exportFormat === "pdf"
+      ? pdfPreset
+      : exportFormat === "docx"
+        ? docxPreset
+        : undefined;
+  const exportPresets =
+    exportFormat === "pdf"
+      ? PDF_PRESETS
+      : exportFormat === "docx"
+        ? DOCX_PRESETS
+        : [];
 
   const activeSegmentKey = useMemo(() => {
     if (playbackMs === null) return null;
@@ -114,7 +178,7 @@ export function DocumentView({
         </div>
 
         {/* Export */}
-        <div className="relative">
+        <div className="relative z-30">
           <button
             onClick={() => setExportOpen((v) => !v)}
             className="flex items-center gap-2 rounded-xl bg-brand px-4 py-2.5 text-sm font-medium text-white transition hover:bg-brand-ink"
@@ -126,26 +190,94 @@ export function DocumentView({
             Xuất
           </button>
           {exportOpen && (
-            <div className="absolute right-0 z-10 mt-2 w-40 overflow-hidden rounded-xl border border-line bg-surface py-1 shadow-[var(--shadow-lift)]">
-              {(
-                [
-                  ["PDF", "pdf"],
-                  ["DOCX", "docx"],
-                  ["Markdown", "md"],
-                ] as const
-              ).map(([label, format]) => (
-                <a
-                  key={format}
-                  href={documentExportUrl(document.id, format)}
-                  onClick={() => setExportOpen(false)}
-                  className="flex w-full items-center justify-between px-4 py-2 text-sm text-ink-soft hover:bg-surface-2 hover:text-ink"
-                >
-                  {label}
-                  <span className="font-mono text-[10px] text-ink-faint">
-                    .{format}
-                  </span>
-                </a>
-              ))}
+            <div className="absolute right-0 z-30 mt-2 w-80 max-w-[calc(100vw-3rem)] rounded-2xl border border-line bg-surface p-4 shadow-[var(--shadow-lift)]">
+              <fieldset>
+                <legend className="eyebrow">Định dạng</legend>
+                <div className="mt-2 grid grid-cols-3 gap-1 rounded-xl bg-surface-2 p-1">
+                  {EXPORT_FORMATS.map(({ value, label }) => (
+                    <button
+                      key={value}
+                      type="button"
+                      aria-pressed={exportFormat === value}
+                      onClick={() => setExportFormat(value)}
+                      className={`rounded-lg px-2 py-2 text-xs font-medium transition ${
+                        exportFormat === value
+                          ? "bg-surface text-brand-ink shadow-sm"
+                          : "text-ink-faint hover:text-ink"
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </fieldset>
+
+              {exportFormat !== "md" ? (
+                <fieldset className="mt-4">
+                  <legend className="eyebrow">Mẫu trình bày</legend>
+                  <div className="mt-2 space-y-2">
+                    {exportPresets.map((preset) => {
+                      const selected = selectedPreset === preset.value;
+                      return (
+                        <button
+                          key={preset.value}
+                          type="button"
+                          aria-pressed={selected}
+                          onClick={() => {
+                            if (exportFormat === "pdf") {
+                              setPdfPreset(preset.value as PdfExportPreset);
+                            } else {
+                              setDocxPreset(preset.value as DocxExportPreset);
+                            }
+                          }}
+                          className={`flex w-full items-start gap-3 rounded-xl border p-3 text-left transition ${
+                            selected
+                              ? "border-brand bg-brand-wash"
+                              : "border-line hover:border-brand/40 hover:bg-surface-2"
+                          }`}
+                        >
+                          <span
+                            aria-hidden="true"
+                            className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${
+                              selected
+                                ? "border-brand bg-brand"
+                                : "border-ink-faint"
+                            }`}
+                          >
+                            {selected && (
+                              <span className="h-1.5 w-1.5 rounded-full bg-white" />
+                            )}
+                          </span>
+                          <span>
+                            <span className="block text-sm font-medium text-ink">
+                              {preset.label}
+                            </span>
+                            <span className="mt-0.5 block text-xs leading-relaxed text-ink-faint">
+                              {preset.description}
+                            </span>
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </fieldset>
+              ) : (
+                <p className="mt-4 rounded-xl bg-surface-2 px-3 py-3 text-xs leading-relaxed text-ink-soft">
+                  Tải nội dung Markdown nguyên bản để tiếp tục chỉnh sửa.
+                </p>
+              )}
+
+              <a
+                href={documentExportUrl(
+                  document.id,
+                  exportFormat,
+                  selectedPreset,
+                )}
+                onClick={() => setExportOpen(false)}
+                className="mt-4 flex w-full items-center justify-center rounded-xl bg-brand px-4 py-2.5 text-sm font-medium text-white transition hover:bg-brand-ink"
+              >
+                Tải xuống .{exportFormat}
+              </a>
             </div>
           )}
         </div>

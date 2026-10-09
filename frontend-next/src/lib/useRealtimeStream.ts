@@ -1,39 +1,29 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { getSession } from "next-auth/react";
 import { mapTranscriptSegment } from "./mappers";
+import { reduceRealtimeTranscripts } from "./realtimeTranscriptState";
+import type {
+  RealtimeTranscriptType,
+  TranscriptDelta,
+} from "./realtimeTranscriptState";
 import type { ApiTranscriptSegment } from "./types";
 import { getWebSocketBase } from "./runtime";
+
+export type { SentenceInfo, TranscriptDelta } from "./realtimeTranscriptState";
 
 // ----------------------------------------------------------------
 // Types
 // ----------------------------------------------------------------
-
-export interface TranscriptDelta {
-  text: string;
-  sentenceInfo: SentenceInfo[];
-  receivedAt: number;
-
-  startMs: number;
-  endMs: number;
-  speaker: number | null;
-
-  // thêm để biết loại transcript
-  type: "transcript_delta" | "transcript_partial";
-}
-
-export interface SentenceInfo {
-  text: string;
-  start: number;
-  end: number;
-  speaker: string | number | null;
-}
 
 export type AudioSource = "microphone" | "tab";
 
 export interface RealtimeStreamState {
   /** Whether the mic is currently recording + streaming. */
   isRecording: boolean;
+  /** Whether the server is draining accepted audio after stop. */
+  isFinalizing: boolean;
   /** Whether the WebSocket is connected and healthy. */
   isConnected: boolean;
   /** Ordered list of transcript deltas received from the backend. */
@@ -72,10 +62,14 @@ export function useRealtimeStream(): RealtimeStreamState &
   const workletNodeRef = useRef<AudioWorkletNode | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const finalizationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const startTimeRef = useRef<number>(0);
+  const acceptAudioRef = useRef(false);
+  const finalizingRef = useRef(false);
 
   // --- State ---
   const [isRecording, setIsRecording] = useState(false);
+  const [isFinalizing, setIsFinalizing] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
   const [transcripts, setTranscripts] = useState<TranscriptDelta[]>([]);
   const [elapsedMs, setElapsedMs] = useState(0);
@@ -85,7 +79,9 @@ export function useRealtimeStream(): RealtimeStreamState &
   // ------------------------------------------------------------------
   // Cleanup helper
   // ------------------------------------------------------------------
-  const cleanup = useCallback(() => {
+  const stopCapture = useCallback(() => {
+    acceptAudioRef.current = false;
+
     // Stop timer
     if (timerRef.current) {
       clearInterval(timerRef.current);
@@ -110,6 +106,17 @@ export function useRealtimeStream(): RealtimeStreamState &
       streamRef.current = null;
     }
 
+    setIsRecording(false);
+  }, []);
+
+  const cleanup = useCallback(() => {
+    stopCapture();
+
+    if (finalizationTimerRef.current) {
+      clearTimeout(finalizationTimerRef.current);
+      finalizationTimerRef.current = null;
+    }
+
     // Close WebSocket
     if (wsRef.current) {
       if (
@@ -121,9 +128,10 @@ export function useRealtimeStream(): RealtimeStreamState &
       wsRef.current = null;
     }
 
-    setIsRecording(false);
+    finalizingRef.current = false;
+    setIsFinalizing(false);
     setIsConnected(false);
-  }, []);
+  }, [stopCapture]);
 
   // Cleanup on unmount
   useEffect(() => cleanup, [cleanup]);
@@ -136,6 +144,8 @@ export function useRealtimeStream(): RealtimeStreamState &
     setTranscripts([]);
     setSourceId(null);
     setElapsedMs(0);
+    finalizingRef.current = false;
+    setIsFinalizing(false);
 
     try {
       const stream = source === "microphone"
@@ -171,11 +181,7 @@ export function useRealtimeStream(): RealtimeStreamState &
 
       // 3. Open WebSocket
       const wsUrl = await buildWsUrl();
-      console.log("[RealtimeStream] Opening WebSocket connection...");
-      console.log("[RealtimeStream] Target WS URL:", wsUrl);
-      console.log("[RealtimeStream] NEXT_PUBLIC_MEETASR_API:", process.env.NEXT_PUBLIC_MEETASR_API);
-      console.log("[RealtimeStream] Window Location Origin:", typeof window !== "undefined" ? window.location.origin : "server");
-
+      const authSession = await getSession();
       const ws = new WebSocket(wsUrl);
       ws.binaryType = "arraybuffer";
 
@@ -184,7 +190,12 @@ export function useRealtimeStream(): RealtimeStreamState &
         ws.onopen = () => {
           if (!settled) {
             settled = true;
-            console.log("[RealtimeStream] WebSocket connected successfully to:", wsUrl);
+            ws.send(
+              JSON.stringify({
+                type: "auth",
+                token: authSession?.accessToken ?? null,
+              }),
+            );
             setIsConnected(true);
             resolve();
           }
@@ -223,105 +234,48 @@ export function useRealtimeStream(): RealtimeStreamState &
             return;
           }
 
-          if (data.type === "transcript_delta" && segment) {
-            const mapped = mapTranscriptSegment(segment);
-
-            setTranscripts((prev) => {
-              const item: TranscriptDelta = {
-                text: mapped.text,
-                sentenceInfo: [
-                  {
-                    text: mapped.text,
-                    start: mapped.startMs / 1000,
-                    end: mapped.endMs / 1000,
-                    speaker: mapped.speaker,
-                  },
-                ],
-                receivedAt: Date.now(),
-                startMs: mapped.startMs,
-                endMs: mapped.endMs,
-                speaker: mapped.speaker,
-                type: "transcript_delta",
-              };
-
-              // Find if delta already exists for this exact startMs
-              const deltaIndex = prev.findIndex(
-                (t) => t.type === "transcript_delta" && t.startMs === mapped.startMs,
-              );
-
-              let next: TranscriptDelta[];
-              if (deltaIndex !== -1) {
-                next = [...prev];
-                next[deltaIndex] = item;
-              } else {
-                next = [...prev, item];
-              }
-
-              // Remove only partial segments whose startMs <= this delta's endMs.
-              // These partials are now confirmed/superseded by the delta.
-              // Partials that start AFTER the delta are still in-progress and should remain.
-              next = next.filter(
-                (t) => t.type !== "transcript_partial" || t.startMs > mapped.endMs,
-              );
-
-              next.sort((a, b) => a.startMs - b.startMs);
-              return next;
-            });
+          if (data.type === "stream_stopping") {
+            finalizingRef.current = true;
+            setIsFinalizing(true);
+            return;
           }
 
-          if (data.type === "transcript_partial" && segment) {
+          if (data.type === "stream_stopped") {
+            if (finalizationTimerRef.current) {
+              clearTimeout(finalizationTimerRef.current);
+              finalizationTimerRef.current = null;
+            }
+            finalizingRef.current = false;
+            setIsFinalizing(false);
+            setIsConnected(false);
+            wsRef.current = null;
+            ws.close(1000);
+            return;
+          }
+
+          if (
+            data.type === "error" &&
+            (data.code === "stream_drain_failed" ||
+              data.code === "stream_finalization_failed")
+          ) {
+            setError(data.message ?? "Không thể hoàn tất audio realtime.");
+            cleanup();
+            return;
+          }
+
+          if (
+            (data.type === "transcript_delta" ||
+              data.type === "transcript_partial") &&
+            segment
+          ) {
             const mapped = mapTranscriptSegment(segment);
-
-            setTranscripts((prev) => {
-              // Get max endMs of confirmed transcript_delta segments
-              const maxDeltaEndMs = prev.reduce(
-                (max, t) =>
-                  t.type === "transcript_delta" ? Math.max(max, t.endMs) : max,
-                0,
-              );
-
-              // Ignore stale partials belonging to an already confirmed delta timeframe
-              if (mapped.startMs < maxDeltaEndMs) {
-                return prev;
-              }
-
-              const item: TranscriptDelta = {
-                text: mapped.text,
-                sentenceInfo: [
-                  {
-                    text: mapped.text,
-                    start: mapped.startMs / 1000,
-                    end: mapped.endMs / 1000,
-                    speaker: mapped.speaker,
-                  },
-                ],
+            setTranscripts((prev) =>
+              reduceRealtimeTranscripts(prev, {
+                type: data.type as RealtimeTranscriptType,
                 receivedAt: Date.now(),
-                startMs: mapped.startMs,
-                endMs: mapped.endMs,
-                speaker: mapped.speaker,
-                type: "transcript_partial",
-              };
-
-              // Append partial: if a partial with the same startMs already exists
-              // (same utterance being refined by ASR), update it in place.
-              // Otherwise, add the new partial alongside existing ones so multiple
-              // concurrent partial utterances are visible on the UI.
-              const existingIdx = prev.findIndex(
-                (t) => t.type === "transcript_partial" && t.startMs === mapped.startMs,
-              );
-
-              let next: TranscriptDelta[];
-              if (existingIdx !== -1) {
-                next = [...prev];
-                next[existingIdx] = item;
-              } else {
-                next = [...prev, item];
-              }
-              //               const next = [...prev, item];
-
-              next.sort((a, b) => a.startMs - b.startMs);
-              return next;
-            });
+                segment: mapped,
+              }),
+            );
           }
         } catch {
           // ignore non-JSON
@@ -329,7 +283,20 @@ export function useRealtimeStream(): RealtimeStreamState &
       };
 
       ws.onclose = () => {
+        if (finalizationTimerRef.current) {
+          clearTimeout(finalizationTimerRef.current);
+          finalizationTimerRef.current = null;
+        }
+        if (finalizingRef.current) {
+          setError("Kết nối đóng trước khi server hoàn tất audio.");
+        }
+        finalizingRef.current = false;
+        setIsFinalizing(false);
         setIsConnected(false);
+        stopCapture();
+        if (wsRef.current === ws) {
+          wsRef.current = null;
+        }
       };
 
       ws.onerror = () => {
@@ -340,7 +307,7 @@ export function useRealtimeStream(): RealtimeStreamState &
       // 5. Wire: mic → worklet → WS
       workletNode.port.onmessage = (ev: MessageEvent) => {
         const pcm16: ArrayBuffer = ev.data;
-        if (ws.readyState === WebSocket.OPEN) {
+        if (acceptAudioRef.current && ws.readyState === WebSocket.OPEN) {
           ws.send(pcm16);
         }
       };
@@ -355,23 +322,44 @@ export function useRealtimeStream(): RealtimeStreamState &
       }, 200);
 
       setIsRecording(true);
+      acceptAudioRef.current = true;
     } catch (err: unknown) {
       const msg =
         err instanceof Error ? err.message : "Lỗi không xác định khi ghi âm.";
       setError(msg);
       cleanup();
     }
-  }, [cleanup]);
+  }, [cleanup, stopCapture]);
 
   // ------------------------------------------------------------------
   // STOP
   // ------------------------------------------------------------------
   const stop = useCallback(() => {
-    cleanup();
-  }, [cleanup]);
+    if (!isRecording || finalizingRef.current) {
+      return;
+    }
+
+    const ws = wsRef.current;
+    stopCapture();
+
+    if (ws?.readyState !== WebSocket.OPEN) {
+      setError("WebSocket đã ngắt nên không thể xác nhận audio cuối.");
+      cleanup();
+      return;
+    }
+
+    finalizingRef.current = true;
+    setIsFinalizing(true);
+    ws.send(JSON.stringify({ type: "stop" }));
+    finalizationTimerRef.current = setTimeout(() => {
+      setError("Server mất quá nhiều thời gian để hoàn tất audio.");
+      cleanup();
+    }, 135_000);
+  }, [cleanup, isRecording, stopCapture]);
 
   return {
     isRecording,
+    isFinalizing,
     isConnected,
     transcripts,
     elapsedMs,

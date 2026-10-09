@@ -98,6 +98,7 @@ class AutoPipeline:
                 "transcription_language",
                 "auto",
             ),
+            realtime_config=config.get("realtime") or {},
         )
 
     @classmethod

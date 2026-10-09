@@ -10,12 +10,18 @@ from meetasr.api.schemas_phase2 import (
     TranscriptDeltaEvent,
     TranscriptSegmentPayload,
 )
+from meetasr.api.websocket_events import close_websocket, stream_event_queue
 from meetasr.db.connection import engine
-from meetasr.db.models_phase2 import Document, DocumentMode, Job, JobStatus, TranscriptSegment
+from meetasr.db.models_phase2 import (
+    Document,
+    DocumentMode,
+    Job,
+    JobStatus,
+    TranscriptSegment,
+)
 from meetasr.realtime.events import event_bus
 from meetasr.api.routes import sources
 from meetasr.realtime.job_worker import run_job_processing
-
 
 router = APIRouter(prefix="/v1/jobs", tags=["jobs"])
 
@@ -44,7 +50,7 @@ def _job_snapshot(job_id: str) -> list[dict]:
         segments = db.exec(
             select(TranscriptSegment)
             .where(TranscriptSegment.job_id == job_id)
-            .order_by(TranscriptSegment.id)
+            .order_by(TranscriptSegment.start_ms, TranscriptSegment.id)
         ).all()
         events.extend(
             TranscriptDeltaEvent(
@@ -120,15 +126,17 @@ async def job_events(websocket: WebSocket, job_id: str) -> None:
         for event in snapshot:
             await websocket.send_json(event)
         if snapshot and snapshot[-1].get("code") == "job_not_found":
-            await websocket.close(code=4404)
+            await close_websocket(websocket, code=4404)
+            return
+        if snapshot and snapshot[-1].get("type") in {"done", "error"}:
+            await close_websocket(websocket)
             return
 
-        while True:
-            event = await queue.get()
-            try:
-                await websocket.send_json(event)
-            except Exception:
-                break
+        await stream_event_queue(
+            websocket,
+            queue,
+            terminal_types={"done", "error"},
+        )
     except WebSocketDisconnect:
         return
     finally:

@@ -8,6 +8,11 @@ export type SourceStatus = "processing" | "done" | "failed";
 
 export type DocMode = "live" | "summary" | "full_text";
 
+export type ExportFormat = "md" | "docx" | "pdf";
+export type PdfExportPreset = "minimal" | "blue_modern";
+export type DocxExportPreset = "minimal" | "modern";
+export type ExportPreset = PdfExportPreset | DocxExportPreset;
+
 /** Response returned after a Source and its processing Job are created. */
 export interface CreateSourceResponse {
   sourceId: string;
@@ -90,6 +95,11 @@ export interface TranscriptPartialJobEvent {
   segment: ApiTranscriptSegment;
 }
 
+export interface TranscriptSnapshotJobEvent {
+  type: "transcript_snapshot";
+  segments: ApiTranscriptSegment[];
+}
+
 export interface DocDeltaJobEvent {
   type: "doc_delta";
   section_id: string;
@@ -121,6 +131,7 @@ export type JobEvent =
   | StatusJobEvent
   | TranscriptDeltaJobEvent
   | TranscriptPartialJobEvent
+  | TranscriptSnapshotJobEvent
   | DocDeltaJobEvent
   | SpeakerUpdateJobEvent
   | DoneJobEvent
