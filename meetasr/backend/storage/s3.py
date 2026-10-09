@@ -218,6 +218,9 @@ class S3Storage(StorageBackend):
             if error_code in ("404", "NoSuchBucket"):
                 self._client.create_bucket(Bucket=self._bucket)
                 logger.info("S3Storage: created bucket %r.", self._bucket)
+            elif error_code in ("403", "AccessDenied"):
+                # RustFS returns 403 for existing buckets — treat as exists
+                logger.debug("S3Storage: bucket %r exists (403).", self._bucket)
             else:
                 raise RuntimeError(
                     f"S3Storage: cannot verify bucket {self._bucket!r}: {exc}"

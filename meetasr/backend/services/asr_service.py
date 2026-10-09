@@ -54,6 +54,21 @@ class ASRService:
         self.api_key = api_key or os.environ.get("RUNPOD_API_KEY", "")
         self.headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
         self._transcribe_lock = asyncio.Lock()
+        self._is_serverless = "api.runpod.ai" in self.runpod_url
+
+    async def _call_serverless(self, action: str, payload: dict, timeout: float = 600.0) -> dict:
+        """Call RunPod Serverless /runsync and return the output dict."""
+        url = f"{self.runpod_url}/runsync"
+        async with httpx.AsyncClient(timeout=timeout, headers=self.headers) as client:
+            response = await client.post(url, json={"input": {"action": action, **payload}})
+            if not response.is_success:
+                logger.error("RunPod %s error: status=%s body=%s", url, response.status_code, response.text[:500])
+            response.raise_for_status()
+            result = response.json()
+        status = result.get("status")
+        if status == "FAILED":
+            raise RuntimeError(f"RunPod job failed: {result.get('error', result)}")
+        return result.get("output", result)
 
     def _ensure_local_port_8001(self) -> None:
         """Auto-spawn GPU ML Engine on port 8001 if calling outside Docker and port 8001 is closed."""
@@ -183,25 +198,33 @@ class ASRService:
         offset_ms: int = 0,
         key: str | None = None,
     ) -> ASRServiceResult:
-        # Prepare files dict with raw bytes for safe retries
+        import base64
+
+        # Prepare audio bytes
         if isinstance(audio_source, str) and os.path.exists(audio_source):
             with open(audio_source, "rb") as f:
                 file_bytes = f.read()
-            files = {"file": (os.path.basename(audio_source), file_bytes)}
         else:
             audio_arr = load_audio(audio_source)
-            wav_bytes = numpy_to_wav_bytes(audio_arr)
-            files = {"file": ("audio.wav", wav_bytes)}
+            file_bytes = numpy_to_wav_bytes(audio_arr)
 
-        async with self._transcribe_lock:
-            data = {"key": key} if key else {}
-            response = await self._post_with_retry(
-                f"{self.runpod_url}/v1/transcribe",
-                files=files,
-                data=data,
-                timeout=600.0,
-            )
-            res_json = response.json()
+        if self._is_serverless:
+            payload: dict = {"audio_base64": base64.b64encode(file_bytes).decode()}
+            if key:
+                payload["key"] = key
+            async with self._transcribe_lock:
+                res_json = await self._call_serverless("transcribe", payload, timeout=600.0)
+        else:
+            files = {"file": ("audio.wav", file_bytes)}
+            async with self._transcribe_lock:
+                data = {"key": key} if key else {}
+                response = await self._post_with_retry(
+                    f"{self.runpod_url}/v1/transcribe",
+                    files=files,
+                    data=data,
+                    timeout=600.0,
+                )
+                res_json = response.json()
 
         # Parse output
         sentence_info = res_json.get("sentence_info", [])

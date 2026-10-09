@@ -91,70 +91,84 @@ class JobQueue:
                 JobStage.TRANSCRIBING,
                 0.10,
             )
-            prepared = await self._asr_service.prepare_incremental(audio_source)
-            provisional_sentences: list[SentenceInfo] = []
-            persisted: list[TranscriptSegmentPayload] = []
-            speaker_first = prepared.speaker_turns is not None
-            work_items = (
-                [
-                    (turn.to_segment(), turn.speaker)
-                    for turn in prepared.speaker_turns
-                ]
-                if speaker_first
-                else [
-                    (vad_segment, None)
-                    for vad_segment in prepared.vad_segments
-                ]
-            )
-            chunk_count = max(len(work_items), 1)
 
-            for index, (transcription_segment, speaker) in enumerate(
-                work_items,
-                start=1,
-            ):
-                chunk_sentences = await self._asr_service.transcribe_segment(
-                    prepared,
-                    transcription_segment,
-                    key=f"{source.filename}:chunk-{index}",
+            if getattr(self._asr_service, "_is_serverless", False):
+                # RunPod Serverless: single call, no incremental state
+                result = await self._asr_service.transcribe(
+                    audio_source,
+                    key=source.filename,
                 )
-                if speaker_first:
-                    for sentence in chunk_sentences:
-                        sentence.speaker = speaker
-                provisional_sentences.extend(chunk_sentences)
-                chunk_payloads = [
-                    _sentence_to_payload(
-                        sentence,
-                        speaker=sentence.speaker if speaker_first else None,
+                persisted: list[TranscriptSegmentPayload] = []
+                for seg in result.segments:
+                    persisted_chunk = self._persist_segments(job_id, [seg])
+                    persisted.extend(persisted_chunk)
+                    for s in persisted_chunk:
+                        await event_bus.publish(job_id, TranscriptDeltaEvent(segment=s))
+                await self._publish_status(job_id, JobStage.TRANSCRIBING, 0.80)
+                finalized = persisted
+            else:
+                prepared = await self._asr_service.prepare_incremental(audio_source)
+                provisional_sentences: list[SentenceInfo] = []
+                persisted = []
+                speaker_first = prepared.speaker_turns is not None
+                work_items = (
+                    [
+                        (turn.to_segment(), turn.speaker)
+                        for turn in prepared.speaker_turns
+                    ]
+                    if speaker_first
+                    else [
+                        (vad_segment, None)
+                        for vad_segment in prepared.vad_segments
+                    ]
+                )
+                chunk_count = max(len(work_items), 1)
+
+                for index, (transcription_segment, speaker) in enumerate(
+                    work_items,
+                    start=1,
+                ):
+                    chunk_sentences = await self._asr_service.transcribe_segment(
+                        prepared,
+                        transcription_segment,
+                        key=f"{source.filename}:chunk-{index}",
                     )
-                    for sentence in chunk_sentences
-                ]
-                persisted_chunk = self._persist_segments(
-                    job_id,
-                    chunk_payloads,
-                )
-                persisted.extend(persisted_chunk)
-
-                # Persist first. A reconnect can now replay every event that the
-                # frontend is about to receive.
-                for segment in persisted_chunk:
-                    await event_bus.publish(
+                    if speaker_first:
+                        for sentence in chunk_sentences:
+                            sentence.speaker = speaker
+                    provisional_sentences.extend(chunk_sentences)
+                    chunk_payloads = [
+                        _sentence_to_payload(
+                            sentence,
+                            speaker=sentence.speaker if speaker_first else None,
+                        )
+                        for sentence in chunk_sentences
+                    ]
+                    persisted_chunk = self._persist_segments(
                         job_id,
-                        TranscriptDeltaEvent(segment=segment),
+                        chunk_payloads,
                     )
-                await self._publish_status(
-                    job_id,
-                    JobStage.TRANSCRIBING,
-                    0.15 + 0.65 * index / chunk_count,
-                )
+                    persisted.extend(persisted_chunk)
 
-            finalized_sentences = await self._asr_service.finalize_incremental(
-                prepared,
-                provisional_sentences,
-            )
-            finalized = self._apply_finalized_segments(
-                persisted,
-                finalized_sentences,
-            )
+                    for segment in persisted_chunk:
+                        await event_bus.publish(
+                            job_id,
+                            TranscriptDeltaEvent(segment=segment),
+                        )
+                    await self._publish_status(
+                        job_id,
+                        JobStage.TRANSCRIBING,
+                        0.15 + 0.65 * index / chunk_count,
+                    )
+
+                finalized_sentences = await self._asr_service.finalize_incremental(
+                    prepared,
+                    provisional_sentences,
+                )
+                finalized = self._apply_finalized_segments(
+                    persisted,
+                    finalized_sentences,
+                )
 
             speaker_updates = [
                 SpeakerAssignment(
