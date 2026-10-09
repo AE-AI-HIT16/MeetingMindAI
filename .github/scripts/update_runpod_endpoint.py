@@ -1,10 +1,5 @@
 """Update RunPod serverless endpoint image by updating its bound template.
 
-Strategy:
-1. Query endpoint to get its bound templateId
-2. Query that template's full details (name, containerDiskInGb, etc.)
-3. Re-save the template with the new imageName, keeping all other fields
-
 Required env vars:
     RUNPOD_API_KEY      - RunPod API key
     RUNPOD_ENDPOINT_ID  - Serverless endpoint ID to update
@@ -41,66 +36,72 @@ def gql(query):
     return data.get("data", {})
 
 
-# Step 1: get endpoint's bound templateId
+# Step 1: get endpoint + its bound template's full details
 data = gql("""
 {
     myself {
         endpoints {
             id
-            templateId
+            template {
+                id
+                name
+                imageName
+                dockerArgs
+                volumeInGb
+                containerDiskInGb
+                isServerless
+                env {
+                    key
+                    value
+                }
+            }
         }
     }
 }
 """)
+
 endpoints = data.get("myself", {}).get("endpoints", [])
-template_id = None
+tmpl = None
 for ep in endpoints:
     if ep.get("id") == endpoint_id:
-        template_id = ep.get("templateId")
+        tmpl = ep.get("template")
         break
 
-if not template_id:
-    print(f"ERROR: endpoint {endpoint_id} not found or has no templateId", file=sys.stderr)
+if not tmpl:
+    print(f"ERROR: endpoint {endpoint_id} not found or returned no template", file=sys.stderr)
     sys.exit(1)
 
-print(f"Bound template: {template_id}")
+template_id   = tmpl["id"]
+name          = tmpl.get("name") or f"meetasr-{template_id}"
+docker_args   = tmpl.get("dockerArgs") or ""
+volume_gb     = tmpl.get("volumeInGb") or 0
+disk_gb       = tmpl.get("containerDiskInGb") or 10
+is_serverless = tmpl.get("isServerless", True)
+env_list      = tmpl.get("env") or []
 
-# Step 2: get the template's current fields (name is required by saveTemplate)
-data = gql(f"""
-{{
-    myself {{
-        podTemplates {{
-            id
-            name
-            containerDiskInGb
-            imageName
-            isServerless
-        }}
-    }}
-}}
-""")
-templates = data.get("myself", {}).get("podTemplates", [])
-tmpl = next((t for t in templates if t.get("id") == template_id), None)
+print(f"Bound template: {template_id!r} name={name!r}")
+print(f"  dockerArgs={docker_args!r}  volumeInGb={volume_gb}  containerDiskInGb={disk_gb}")
+print(f"  env vars: {[e['key'] for e in env_list]}")
+print(f"New image: {image}")
 
-if tmpl:
-    name = tmpl["name"]
-    disk = tmpl.get("containerDiskInGb") or 10
-    print(f"Template name: {name!r}, disk: {disk}GB")
-else:
-    # podTemplates doesn't expose serverless templates — use sensible defaults
-    name = f"meetasr-{template_id}"
-    disk = 10
-    print(f"Template not in podTemplates; using defaults name={name!r} disk={disk}GB")
+# Build env array string for GraphQL
+env_gql = ", ".join(
+    f'{{key: "{e["key"]}", value: "{e["value"]}"}}'
+    for e in env_list
+)
 
-# Step 3: update the template image in-place
+# Step 2: update the template image in-place, keeping all other fields
 data = gql(f"""
 mutation {{
     saveTemplate(input: {{
         id: "{template_id}",
         name: "{name}",
         imageName: "{image}",
-        isServerless: true,
-        containerDiskInGb: {disk}
+        dockerArgs: "{docker_args}",
+        volumeInGb: {volume_gb},
+        containerDiskInGb: {disk_gb},
+        isServerless: {str(is_serverless).lower()},
+        env: [{env_gql}]
     }}) {{
         id
         imageName
