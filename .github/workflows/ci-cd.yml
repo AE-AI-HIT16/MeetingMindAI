@@ -190,37 +190,22 @@ jobs:
           IMAGE="${{ env.RUNPOD_IMAGE }}@${DIGEST}"
           echo "Updating RunPod endpoint ${RUNPOD_ENDPOINT_ID} -> ${IMAGE}"
 
-          # Fetch endpoint's templateId (image lives on the template, not the endpoint)
+          # Fetch endpoint's template info in one query (serverless templates differ from podTemplates)
           QUERY_RESP=$(curl -s -X POST \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer ${RUNPOD_API_KEY}" \
-            -d '{"query":"query { myself { endpoints { id name templateId } } }"}' \
+            -d '{"query":"query { myself { endpoints { id name templateId template { id name imageName } } } }"}' \
             "https://api.runpod.io/graphql")
           echo "Query response: ${QUERY_RESP}"
 
           TEMPLATE_ID=$(echo "${QUERY_RESP}" | python3 -c "import json,sys; eps=json.load(sys.stdin)['data']['myself']['endpoints']; [print(e['templateId']) for e in eps if e['id']=='${RUNPOD_ENDPOINT_ID}']" 2>/dev/null)
+          TEMPLATE_NAME=$(echo "${QUERY_RESP}" | python3 -c "import json,sys; eps=json.load(sys.stdin)['data']['myself']['endpoints']; [print(e['template']['name']) for e in eps if e['id']=='${RUNPOD_ENDPOINT_ID}']" 2>/dev/null)
 
-          if [ -z "${TEMPLATE_ID}" ]; then
-            echo "ERROR: Could not find templateId for endpoint ${RUNPOD_ENDPOINT_ID}"
+          if [ -z "${TEMPLATE_ID}" ] || [ -z "${TEMPLATE_NAME}" ]; then
+            echo "ERROR: Could not find template info for endpoint ${RUNPOD_ENDPOINT_ID}"
             exit 1
           fi
-          echo "Template ID: ${TEMPLATE_ID}"
-
-          # Fetch template name (required by saveTemplate mutation)
-          TMPL_RESP=$(curl -s -X POST \
-            -H "Content-Type: application/json" \
-            -H "Authorization: Bearer ${RUNPOD_API_KEY}" \
-            -d "{\"query\":\"query { myself { podTemplates { id name } } }\"}" \
-            "https://api.runpod.io/graphql")
-          echo "Template query response: ${TMPL_RESP}"
-
-          TEMPLATE_NAME=$(echo "${TMPL_RESP}" | python3 -c "import json,sys; ts=json.load(sys.stdin)['data']['myself']['podTemplates']; [print(t['name']) for t in ts if t['id']=='${TEMPLATE_ID}']" 2>/dev/null)
-
-          if [ -z "${TEMPLATE_NAME}" ]; then
-            echo "ERROR: Could not find template name for ID ${TEMPLATE_ID}"
-            exit 1
-          fi
-          echo "Template name: ${TEMPLATE_NAME}"
+          echo "Template ID: ${TEMPLATE_ID}, name: ${TEMPLATE_NAME}"
 
           # Update template with new image digest
           RESPONSE=$(curl -s -X POST \
