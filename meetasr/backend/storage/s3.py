@@ -61,9 +61,11 @@ class S3Storage(StorageBackend):
         bucket: str,
         presign_expires: int = DEFAULT_PRESIGN_EXPIRES,
         region: str = "us-east-1",
+        public_endpoint: Optional[str] = None,
     ) -> None:
         self._bucket = bucket
         self._presign_expires = presign_expires
+        self._public_endpoint = public_endpoint.rstrip("/") if public_endpoint else None
 
         if endpoint_url:
             endpoint_url = endpoint_url.strip().strip('"').strip("'")
@@ -191,6 +193,10 @@ class S3Storage(StorageBackend):
             raise RuntimeError(
                 f"S3Storage: failed to generate presigned URL for {key!r}: {exc}"
             ) from exc
+        # Replace internal endpoint with public-facing URL if configured
+        if self._public_endpoint and self._client.meta.endpoint_url:
+            internal = self._client.meta.endpoint_url.rstrip("/")
+            url = url.replace(internal, self._public_endpoint, 1)
         return url
 
     def needs_redirect(self) -> bool:
@@ -199,10 +205,11 @@ class S3Storage(StorageBackend):
         Khi True, endpoint GET /sources/{id}/media se dung HTTP 307 redirect
         sang presigned URL cua MinIO thay vi doc toan bo bytes vao RAM va stream.
 
-        Returns:
-            True.
+        Returns True only when a public endpoint is configured, meaning the
+        presigned URL will be reachable by browsers. Falls back to streaming
+        through the backend when no public endpoint is set.
         """
-        return True
+        return bool(self._public_endpoint)
 
     # ------------------------------------------------------------------
     # Private helpers

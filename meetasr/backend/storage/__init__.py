@@ -54,6 +54,7 @@ def get_storage() -> StorageBackend:
             access_key=os.environ.get("MINIO_ROOT_USER", "admin"),
             secret_key=os.environ.get("MINIO_ROOT_PASSWORD", "password123"),
             bucket=os.environ.get("MINIO_BUCKET", "meetasr-audio"),
+            public_endpoint=os.environ.get("MINIO_PUBLIC_ENDPOINT"),
         )
 
     raise ValueError(
