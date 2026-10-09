@@ -16,10 +16,12 @@ const nextConfig: NextConfig = {
   async rewrites() {
     return [{ source: "/v1/:path*", destination: `${API}/v1/:path*` }];
   },
-  // Bao Turbopack biet dung root la thu muc frontend-next, tranh nham voi lockfile o thu muc cha
   turbopack: {
     root: path.resolve(__dirname),
   },
+  // Standalone output cho Electron production: tạo .next/standalone/server.js
+  // tự chứa Node.js server không cần node_modules ngoài.
+  output: process.env.ELECTRON_BUILD === "1" ? "standalone" : undefined,
 };
 
 export default nextConfig;

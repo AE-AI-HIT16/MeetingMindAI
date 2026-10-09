@@ -164,6 +164,11 @@ class AutoPipeline:
             if isinstance(key_val, str) and key_val.startswith("${"):
                 client_kwargs["api_key"] = os.environ.get(key_val[2:-1], "")
 
+        api_key = client_kwargs.get("api_key")
+        if not api_key:
+            logging.warning("No LLM API key provided. Skipping DocumentPlanner.")
+            return None
+
         client = llm_class(**client_kwargs)
         return DocumentPlanner(
             client=client,
@@ -200,6 +205,11 @@ class AutoPipeline:
             if isinstance(key_val, str) and key_val.startswith("${"):
                 env_name = key_val[2:-1]
                 client_kwargs["api_key"] = os.environ.get(env_name, "")
+
+        api_key = client_kwargs.get("api_key")
+        if not api_key:
+            logging.warning("No LLM API key provided. Skipping MeetingSummarizer.")
+            return None
 
         client = llm_class(**client_kwargs)
 

@@ -16,7 +16,6 @@ from meetasr.services.inference_coordinator import (
     InferenceKind,
 )
 
-
 @dataclass(frozen=True)
 class ASRServiceResult:
     """Normalized result consumed by both live and upload workers."""
