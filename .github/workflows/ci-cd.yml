@@ -197,6 +197,13 @@ jobs:
           export NEW_IMAGE="${IMAGE}"
           python3 .github/scripts/update_runpod_endpoint.py
 
+          # Purge stale workers so they restart with the new image
+          echo "Purging stale workers..."
+          curl -s -o /dev/null -w "purge-queue HTTP %{http_code}\n" \
+            -X POST \
+            -H "Authorization: Bearer ${RUNPOD_API_KEY}" \
+            "https://api.runpod.ai/v2/${RUNPOD_ENDPOINT_ID}/purge-queue" || true
+
       - name: Show Docker state after build
         if: always()
         run: |
