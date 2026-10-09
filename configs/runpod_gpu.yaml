@@ -49,7 +49,7 @@ vad:
 spk:
   model: cam++
   hub: ms
-  device: cpu
+  device: cuda:0
   cluster_type: spectral
   min_cluster_size: 4
 
