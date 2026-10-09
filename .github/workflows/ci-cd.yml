@@ -190,35 +190,51 @@ jobs:
           IMAGE="${{ env.RUNPOD_IMAGE }}@${DIGEST}"
           echo "Updating RunPod endpoint ${RUNPOD_ENDPOINT_ID} -> ${IMAGE}"
 
-          # Fetch current endpoint name (required by saveEndpoint mutation)
+          # Fetch endpoint's templateId (image lives on the template, not the endpoint)
           QUERY_RESP=$(curl -s -X POST \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer ${RUNPOD_API_KEY}" \
-            -d '{"query":"query { myself { endpoints { id name } } }"}' \
+            -d '{"query":"query { myself { endpoints { id name templateId } } }"}' \
             "https://api.runpod.io/graphql")
           echo "Query response: ${QUERY_RESP}"
 
-          ENDPOINT_NAME=$(echo "${QUERY_RESP}" | python3 -c "import json,sys; eps=json.load(sys.stdin)['data']['myself']['endpoints']; [print(e['name']) for e in eps if e['id']=='${RUNPOD_ENDPOINT_ID}']" 2>/dev/null)
+          TEMPLATE_ID=$(echo "${QUERY_RESP}" | python3 -c "import json,sys; eps=json.load(sys.stdin)['data']['myself']['endpoints']; [print(e['templateId']) for e in eps if e['id']=='${RUNPOD_ENDPOINT_ID}']" 2>/dev/null)
 
-          if [ -z "${ENDPOINT_NAME}" ]; then
-            echo "ERROR: Could not find endpoint name for ID ${RUNPOD_ENDPOINT_ID}"
+          if [ -z "${TEMPLATE_ID}" ]; then
+            echo "ERROR: Could not find templateId for endpoint ${RUNPOD_ENDPOINT_ID}"
             exit 1
           fi
-          echo "Endpoint name: ${ENDPOINT_NAME}"
+          echo "Template ID: ${TEMPLATE_ID}"
 
-          # Update endpoint with new image digest
+          # Fetch template name (required by saveTemplate mutation)
+          TMPL_RESP=$(curl -s -X POST \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${RUNPOD_API_KEY}" \
+            -d "{\"query\":\"query { myself { podTemplates { id name } } }\"}" \
+            "https://api.runpod.io/graphql")
+          echo "Template query response: ${TMPL_RESP}"
+
+          TEMPLATE_NAME=$(echo "${TMPL_RESP}" | python3 -c "import json,sys; ts=json.load(sys.stdin)['data']['myself']['podTemplates']; [print(t['name']) for t in ts if t['id']=='${TEMPLATE_ID}']" 2>/dev/null)
+
+          if [ -z "${TEMPLATE_NAME}" ]; then
+            echo "ERROR: Could not find template name for ID ${TEMPLATE_ID}"
+            exit 1
+          fi
+          echo "Template name: ${TEMPLATE_NAME}"
+
+          # Update template with new image digest
           RESPONSE=$(curl -s -X POST \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer ${RUNPOD_API_KEY}" \
-            -d "{\"query\":\"mutation { saveEndpoint(input: { id: \\\"${RUNPOD_ENDPOINT_ID}\\\", name: \\\"${ENDPOINT_NAME}\\\", imageName: \\\"${IMAGE}\\\" }) { id imageName } }\"}" \
+            -d "{\"query\":\"mutation { saveTemplate(input: { id: \\\"${TEMPLATE_ID}\\\", name: \\\"${TEMPLATE_NAME}\\\", imageName: \\\"${IMAGE}\\\" }) { id imageName } }\"}" \
             "https://api.runpod.io/graphql")
           echo "Response: ${RESPONSE}"
 
           if echo "${RESPONSE}" | grep -q '"errors"'; then
-            echo "ERROR: RunPod endpoint update failed"
+            echo "ERROR: RunPod template update failed"
             exit 1
           fi
-          echo "RunPod endpoint updated successfully."
+          echo "RunPod template updated successfully -> ${IMAGE}"
 
       - name: Show Docker state after build
         if: always()
