@@ -194,13 +194,7 @@ jobs:
           IMAGE="${{ env.RUNPOD_IMAGE }}@${DIGEST}"
           echo "Updating RunPod endpoint ${RUNPOD_ENDPOINT_ID} -> ${IMAGE}"
 
-          pip install runpod --quiet
-
-          SHA_SHORT="${{ github.sha }}"
-          SHA_SHORT="${SHA_SHORT:0:8}"
           export NEW_IMAGE="${IMAGE}"
-          export TEMPLATE_NAME="meetasr-auto-${SHA_SHORT}"
-
           python3 .github/scripts/update_runpod_endpoint.py
 
       - name: Show Docker state after build
