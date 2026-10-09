@@ -282,13 +282,21 @@ export function useRealtimeStream(): RealtimeStreamState &
         }
       };
 
-      ws.onclose = () => {
+      ws.onclose = (ev) => {
         if (finalizationTimerRef.current) {
           clearTimeout(finalizationTimerRef.current);
           finalizationTimerRef.current = null;
         }
         if (finalizingRef.current) {
           setError("Kết nối đóng trước khi server hoàn tất audio.");
+        } else if (ev.code !== 1000 && ev.code !== 1005) {
+          // Abnormal close while recording (e.g. 1013 = realtime pipeline not
+          // ready on the server). Previously this closed silently.
+          setError(
+            ev.code === 1013
+              ? "Máy chủ realtime chưa sẵn sàng. Vui lòng thử lại sau giây lát."
+              : `Kết nối realtime bị đóng (mã ${ev.code}). Vui lòng thử lại.`,
+          );
         }
         finalizingRef.current = false;
         setIsFinalizing(false);
