@@ -41,14 +41,41 @@ _load_stats: dict = {}
 
 
 def _dir_size(path: str) -> int:
+    """Bytes stored under ``path``, counting each file once.
+
+    The Hugging Face cache links ``snapshots/`` to ``blobs/``; following
+    those links counted every model twice (14 GB reported for ~7 GB).
+    """
     total = 0
     for root, _dirs, files in os.walk(path):
         for name in files:
+            file_path = os.path.join(root, name)
             try:
-                total += os.path.getsize(os.path.join(root, name))
+                if not os.path.islink(file_path):
+                    total += os.path.getsize(file_path)
             except OSError:
                 pass
     return total
+
+
+def _stale_asr_caches(hub_dir: str, keep_repo: str) -> list[str]:
+    """Cached Qwen3-ASR checkpoints other than the one in use.
+
+    Args:
+        hub_dir: Hugging Face hub cache directory.
+        keep_repo: Cache folder of the configured model,
+            e.g. ``models--Qwen--Qwen3-ASR-1.7B``.
+
+    Returns:
+        Paths of other ``models--Qwen--Qwen3-ASR-*`` folders.
+    """
+    if not os.path.isdir(hub_dir):
+        return []
+    return sorted(
+        os.path.join(hub_dir, name)
+        for name in os.listdir(hub_dir)
+        if name.startswith("models--Qwen--Qwen3-ASR-") and name != keep_repo
+    )
 
 
 def init_models():
@@ -293,6 +320,25 @@ async def run_handler(job):
             info["volume_free_gb"] = round(usage.free / 1e9, 1)
             info["volume_total_gb"] = round(usage.total / 1e9, 1)
         return info
+
+    elif action == "cleanup_cache":
+        # Delete cached Qwen3-ASR checkpoints the config no longer uses (e.g.
+        # 0.6B after switching to 1.7B). Dry run unless "confirm": true.
+        hub = os.path.join(os.environ.get("HF_HOME", ""), "hub")
+        keep = "models--" + str(getattr(pipeline.asr, "model_name", "")).replace("/", "--")
+        stale = _stale_asr_caches(hub, keep)
+        freed = sum(_dir_size(path) for path in stale)
+        if job_input.get("confirm") is True:
+            import shutil
+            for path in stale:
+                shutil.rmtree(path, ignore_errors=True)
+            logger.info("Cache cleanup removed %s (%.2f GB)", stale, freed / 1e9)
+        return {
+            "kept": keep,
+            "stale": [os.path.basename(path) for path in stale],
+            "freed_gb": round(freed / 1e9, 2),
+            "deleted": job_input.get("confirm") is True,
+        }
 
     elif action == "realtime_recognize":
         audio_bytes = base64.b64decode(job_input['audio_base64'])
