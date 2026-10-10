@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useRealtimeStream } from "@/lib/useRealtimeStream";
+import { useJobEvents } from "@/lib/useJobEvents";
 import type { AudioSource, SentenceInfo } from "@/lib/useRealtimeStream";
 import {
   isTrackCaptionSupported,
@@ -30,6 +31,7 @@ export default function RealtimePage() {
     elapsedMs,
     error,
     sourceId,
+    jobId,
     confirmedEndMs,
     start,
     stop,
@@ -94,6 +96,14 @@ export default function RealtimePage() {
       )
     : [];
   const hasContent = transcripts.length > 0 || captionParagraphs.length > 0;
+
+  // After stop, the offline job (VAD + speaker diarization + ASR) starts right
+  // away on the still-warm RunPod worker. Follow it here and, when it is done,
+  // swap the realtime text for the speaker-labelled transcript.
+  const followJobId = !isRecording && !isFinalizing && hasContent ? jobId : null;
+  const job = useJobEvents(followJobId);
+  const diarized = followJobId && job.done && job.segments.length > 0 ? job.segments : null;
+  const diarizing = followJobId !== null && !job.done && !job.error;
 
   // Auto-scroll transcript panel
   useEffect(() => {
@@ -301,7 +311,28 @@ export default function RealtimePage() {
             <EmptyState isRecording={isRecording} captionActive={captionActive} />
           ) : (
             <div className="space-y-4">
-              {transcripts.map((t, i) => (
+              {diarized?.map((segment, i) => (
+                <TranscriptBlock
+                  key={segment.id ?? `${segment.startMs}-${i}`}
+                  text={segment.text}
+                  sentenceInfo={[
+                    {
+                      text: segment.text,
+                      start: segment.startMs / 1000,
+                      end: segment.endMs / 1000,
+                      speaker: segment.speaker,
+                    },
+                  ]}
+                  index={i}
+                  isLast={i === diarized.length - 1}
+                  isRecording={false}
+                  type="transcript_delta"
+                  speaker={segment.speaker}
+                  startMs={segment.startMs}
+                  endMs={segment.endMs}
+                />
+              ))}
+              {!diarized && transcripts.map((t, i) => (
                 <TranscriptBlock
                   key={`${t.startMs}-${i}`}
                   text={t.text}
@@ -317,7 +348,7 @@ export default function RealtimePage() {
                 />
               ))}
               {captionParagraphs.map((paragraph, i) => (
-                <CaptionParagraphBlock
+                !diarized && <CaptionParagraphBlock
                   key={paragraph.id}
                   paragraph={paragraph}
                   showSeparator={transcripts.length > 0 || i > 0}
@@ -325,6 +356,11 @@ export default function RealtimePage() {
               ))}
               {(isRecording || isFinalizing) && !interimCaption && (
                 <ListeningRow finalizing={isFinalizing} />
+              )}
+              {diarizing && (
+                <ListeningRow
+                  label={`Đang phân biệt người nói… ${Math.round(job.progress * 100)}%`}
+                />
               )}
               <div ref={scrollRef} />
             </div>
@@ -411,17 +447,20 @@ function TranscriptBlock({
   index: number;
   isLast: boolean;
   isRecording: boolean;
-  receivedAt: number;
+  receivedAt?: number;
   type: "transcript_delta" | "transcript_partial";
   speaker: number | null;
   startMs: number;
   endMs: number;
 }) {
-  const timeStr = new Date(receivedAt).toLocaleTimeString("vi-VN", {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
+  const timeStr =
+    receivedAt === undefined
+      ? null
+      : new Date(receivedAt).toLocaleTimeString("vi-VN", {
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+        });
 
   const isPartial = type === "transcript_partial";
 
@@ -453,7 +492,8 @@ function TranscriptBlock({
           {/* Header row: timestamp & status badge */}
           <div className="flex items-center gap-2">
             <span className="font-mono text-[11px] text-ink-faint">
-              {formatStamp(startMs)} - {formatStamp(endMs)} ({timeStr})
+              {formatStamp(startMs)} - {formatStamp(endMs)}
+              {timeStr && ` (${timeStr})`}
             </span>
             {isPartial && (
               <span className="rounded-md bg-gray-100 px-1.5 py-0.5 font-mono text-[10px] font-medium text-gray-500 border border-gray-200">
@@ -578,7 +618,13 @@ function CaptionParagraphBlock({
   );
 }
 
-function ListeningRow({ finalizing }: { finalizing: boolean }) {
+function ListeningRow({
+  finalizing = false,
+  label,
+}: {
+  finalizing?: boolean;
+  label?: string;
+}) {
   return (
     <div className="flex items-center gap-2 text-sm text-ink-faint" aria-live="polite">
       <span className="flex gap-1">
@@ -586,7 +632,7 @@ function ListeningRow({ finalizing }: { finalizing: boolean }) {
         <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current [animation-delay:150ms]" />
         <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current [animation-delay:300ms]" />
       </span>
-      {finalizing ? "Đang hoàn thiện transcript…" : "Đang nghe…"}
+      {label ?? (finalizing ? "Đang hoàn thiện transcript…" : "Đang nghe…")}
     </div>
   );
 }

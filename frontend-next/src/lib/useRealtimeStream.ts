@@ -34,6 +34,8 @@ export interface RealtimeStreamState {
   error: string | null;
   /** Source ID created by backend for this realtime session. */
   sourceId: string | null;
+  /** Offline (diarization) job ID; it starts processing right after stop. */
+  jobId: string | null;
   /** Recording timeline (ms) already processed by server ASR. */
   confirmedEndMs: number;
 }
@@ -89,6 +91,7 @@ export function useRealtimeStream(): RealtimeStreamState &
   const [elapsedMs, setElapsedMs] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [sourceId, setSourceId] = useState<string | null>(null);
+  const [jobId, setJobId] = useState<string | null>(null);
   const [confirmedEndMs, setConfirmedEndMs] = useState(0);
 
   // ------------------------------------------------------------------
@@ -158,6 +161,7 @@ export function useRealtimeStream(): RealtimeStreamState &
     setError(null);
     setTranscripts([]);
     setSourceId(null);
+    setJobId(null);
     setConfirmedEndMs(0);
     setElapsedMs(0);
     finalizingRef.current = false;
@@ -248,6 +252,7 @@ export function useRealtimeStream(): RealtimeStreamState &
 
           if (data.type === "session_init") {
             setSourceId(data.source_id ?? null);
+            setJobId(data.job_id ?? null);
             return;
           }
 
@@ -397,6 +402,7 @@ export function useRealtimeStream(): RealtimeStreamState &
     elapsedMs,
     error,
     sourceId,
+    jobId,
     confirmedEndMs,
     start,
     stop,
