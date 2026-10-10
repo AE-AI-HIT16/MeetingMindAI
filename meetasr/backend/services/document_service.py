@@ -16,7 +16,9 @@ from meetasr.backend.db.models_phase2 import (
     Source,
     TranscriptSegment,
 )
+from meetasr.backend.db.user_model import User
 from meetasr.backend.export import ExportArtifact, ExportService, create_export_service
+from meetasr.backend.llm.openai_client import LLMQuotaExhaustedError
 from meetasr.backend.schemas import SentenceInfo, TranscriptResult
 
 FinalDocumentMode = Literal["summary", "full_text"]
@@ -167,6 +169,11 @@ class DocumentService:
                         transcript,
                         progress_callback=progress_callback,
                     )
+            except LLMQuotaExhaustedError as exc:
+                raise DocumentGenerationError(
+                    "Chức năng tạo tài liệu bằng AI đã đạt giới hạn sử dụng "
+                    "(tất cả API key đều đã hết lượt). Vui lòng thử lại sau."
+                ) from exc
             except Exception as exc:
                 raise DocumentGenerationError(
                     "Dịch vụ AI chưa thể tạo bản tóm tắt. "
@@ -227,16 +234,25 @@ class DocumentService:
         self,
         document_id: str,
         format: Literal["md", "docx", "pdf"],
+        preset: str | None = None,
     ) -> ExportArtifact:
         """Convert a persisted canonical Markdown document into a file."""
         document = self.get_document(document_id)
         source = self.db.get(Source, document.source_id)
         title = source.filename if source is not None else "document"
+        # Some templates (DOCX "modern", PDF "blue_modern") print the author.
+        author = "MeetingMind AI"
+        if source is not None and source.user_id is not None:
+            owner = self.db.get(User, source.user_id)
+            if owner is not None and (owner.name or "").strip():
+                author = owner.name.strip()
         export_service = self.export_service or create_export_service()
         return export_service.export(
             document.markdown,
             format,
             title=title,
+            preset=preset,
+            context={"author": author},
         )
 
     @staticmethod
