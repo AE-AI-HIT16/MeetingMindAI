@@ -407,7 +407,13 @@ async def delete_source(
     except Exception as exc:
         logger.warning("Không thể xóa file storage '%s': %s", source.storage_path, exc)
 
-    # Bước 2: Xóa Source khỏi DB (SQLModel cascade xóa Job, Segments, Documents)
+    # Bước 2: Xóa Source khỏi DB (SQLModel cascade xóa Job, Segments, Documents).
+    # document_generation_jobs references documents but SQLAlchemy doesn't know
+    # that dependency, so it could delete documents first → FK violation (500)
+    # for every source that ever had a summary/full text. Delete them first.
+    for generation in list(source.document_generation_jobs):
+        db.delete(generation)
+    db.flush()
     db.delete(source)
     db.commit()
 
