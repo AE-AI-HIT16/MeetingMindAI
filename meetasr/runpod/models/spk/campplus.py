@@ -85,6 +85,22 @@ class CAMPlusPlus(AbsSpk):
         except Exception as e:
             raise RuntimeError(f"Failed to load CAM++: {e}") from e
 
+    def _generate(self, **kwargs):
+        """FunASR generate with cuDNN TF32 disabled.
+
+        TF32 convolutions (PyTorch's default on Ampere+ GPUs) shift CAM++
+        embeddings enough that, on compressed audio, spectral clustering
+        found 5 speakers instead of 2 (reproduced on GPU; CPU and TF32-off
+        give 2). CAM++ is tiny, so full FP32 costs nothing noticeable.
+        """
+        import torch
+        previous = torch.backends.cudnn.allow_tf32
+        torch.backends.cudnn.allow_tf32 = False
+        try:
+            return self._inner.generate(**kwargs)
+        finally:
+            torch.backends.cudnn.allow_tf32 = previous
+
     def embed(self, audio: np.ndarray, **kwargs) -> "torch.Tensor":
         """Extract speaker embedding for an audio chunk.
 
@@ -98,7 +114,7 @@ class CAMPlusPlus(AbsSpk):
         import torch
         self._ensure_loaded()
         kwargs.setdefault("disable_pbar", True)
-        results = self._inner.generate(input=audio, **kwargs)
+        results = self._generate(input=audio, **kwargs)
         if results and "spk_embedding" in results[0]:
             emb = results[0]["spk_embedding"]
             # FunASR may return np.ndarray depending on version — enforce contract.
@@ -118,7 +134,7 @@ class CAMPlusPlus(AbsSpk):
         embeddings = []
         for i in range(0, len(audios), batch_size):
             # CAM++ inference returns one {"spk_embedding": [B, 192]} per batch.
-            for result in self._inner.generate(
+            for result in self._generate(
                 input=audios[i:i + batch_size],
                 batch_size=batch_size,
                 disable_pbar=True,
