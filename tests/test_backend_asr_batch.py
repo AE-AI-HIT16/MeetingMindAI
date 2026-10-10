@@ -103,3 +103,21 @@ async def test_overlapped_turn_carries_relative_overlaps_and_voice_profile(monke
     assert isinstance(sent["segments"][0], str)  # no overlap: plain WAV
     assert sent["segments"][1]["overlaps"] == [[500, 1200]]
     assert sent["segments"][1]["speaker_embedding"] == [0.1, 0.2]
+
+
+def test_diarization_audio_is_lossless_flac_when_it_fits():
+    from meetasr.backend.services.asr_service import numpy_to_diarization_audio_bytes
+
+    audio = (np.random.default_rng(0).normal(0, 0.05, 16000 * 60)).astype(np.float32)
+    assert numpy_to_diarization_audio_bytes(audio)[:4] == b"fLaC"
+
+
+def test_long_diarization_audio_uses_opus_within_runpod_limit(monkeypatch):
+    from meetasr.backend.services import asr_service
+
+    # Pretend FLAC is too big so the Opus path is exercised on a short clip.
+    monkeypatch.setattr(asr_service, "MAX_PREPARE_AUDIO_BYTES", 200_000)
+    audio = (np.random.default_rng(0).normal(0, 0.05, 16000 * 40)).astype(np.float32)
+    encoded = asr_service.numpy_to_diarization_audio_bytes(audio)
+    assert b"OpusHead" in encoded[:200]
+    assert len(encoded) <= 200_000

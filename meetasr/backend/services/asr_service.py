@@ -62,47 +62,77 @@ def numpy_to_flac_bytes(audio: np.ndarray, sample_rate: int = 16000) -> bytes:
     return buf.getvalue()
 
 
-def numpy_to_diarization_audio_bytes(audio: np.ndarray, sample_rate: int = 16000) -> bytes:
-    """Compress whole-file audio for the diarization (prepare) step.
+# Encoded whole-file audio for prepare_incremental must stay under RunPod's
+# 20 MiB (20.97 MB) /runsync body after base64 (x4/3 -> 19.3 MB) and JSON.
+MAX_PREPARE_AUDIO_BYTES = 14_500_000
+# Opus bitrates tried for audio too long for FLAC. Below 32 kbps speaker
+# embeddings degrade (Vorbis 24 kbps merged two real voices into one).
+OPUS_BITRATES_KBPS = (64, 48, 32, 24, 16)
 
-    Diarization/VAD don't need full-fidelity audio, so we encode heavily with
-    OGG/Vorbis (~24 kbps) to stay well under RunPod's 20 MiB request limit even
-    for long recordings. libsndfile reads OGG/Vorbis, so the RunPod handler's
-    soundfile-based loader decodes it fine. Falls back to FLAC, then WAV.
+
+def numpy_to_diarization_audio_bytes(audio: np.ndarray, sample_rate: int = 16000) -> bytes:
+    """Encode whole-file audio for the diarization (prepare) step.
+
+    Lossless FLAC when it fits; otherwise Opus (a speech codec) at the
+    highest bitrate that fits. The previous OGG/Vorbis 24 kbps encoding made
+    cam++ hear two real speakers as one; Opus >= 32 kbps matches WAV on our
+    diarization tests. libsndfile on the RunPod side decodes both.
     """
-    import io
+    try:
+        flac = numpy_to_flac_bytes(audio, sample_rate)
+        if len(flac) <= MAX_PREPARE_AUDIO_BYTES:
+            return flac
+    except Exception as exc:  # pragma: no cover - fallback path
+        logger.warning("FLAC encode failed (%s); trying Opus.", exc)
+
+    duration_s = max(len(audio) / sample_rate, 1.0)
+    encoded = b""
+    for kbps in OPUS_BITRATES_KBPS:
+        # Opus lands close to its target bitrate: skip what cannot fit, then
+        # check the real size (rarely needs a second, lower encode).
+        if kbps * 125 * duration_s * 1.03 > MAX_PREPARE_AUDIO_BYTES:
+            continue
+        try:
+            encoded = _encode_opus(audio, sample_rate, kbps)
+        except Exception as exc:  # pragma: no cover - fallback path
+            logger.warning("Opus encode failed (%s); falling back to WAV.", exc)
+            break
+        if len(encoded) <= MAX_PREPARE_AUDIO_BYTES:
+            if kbps < 32:
+                logger.warning(
+                    "Recording is %.0f min: diarization audio sent as Opus %d kbps; "
+                    "speaker separation may be less accurate.", duration_s / 60, kbps,
+                )
+            return encoded
+    if encoded:
+        return encoded
+    return numpy_to_wav_bytes(audio, sample_rate)
+
+
+def _encode_opus(audio: np.ndarray, sample_rate: int, kbps: int) -> bytes:
     import shutil
     import subprocess
 
     ffmpeg = shutil.which("ffmpeg")
-    if ffmpeg is not None:
-        try:
-            if audio.dtype != np.float32:
-                audio = audio.astype(np.float32)
-            proc = subprocess.run(
-                [
-                    ffmpeg, "-nostdin", "-v", "error",
-                    "-f", "f32le", "-ar", str(sample_rate), "-ac", "1", "-i", "pipe:0",
-                    "-c:a", "libvorbis", "-b:a", "24k",
-                    "-f", "ogg", "pipe:1",
-                ],
-                input=audio.tobytes(),
-                capture_output=True,
-                check=True,
-            )
-            if proc.stdout:
-                return proc.stdout
-        except Exception as exc:  # pragma: no cover - fallback path
-            logger.warning("ffmpeg OGG/Vorbis encode failed (%s); trying FLAC.", exc)
-
-    try:
-        import soundfile as sf
-        buf = io.BytesIO()
-        sf.write(buf, audio, sample_rate, format="FLAC")
-        return buf.getvalue()
-    except Exception as exc:  # pragma: no cover - fallback path
-        logger.warning("FLAC compression failed (%s); falling back to WAV.", exc)
-        return numpy_to_wav_bytes(audio, sample_rate)
+    if ffmpeg is None:
+        raise RuntimeError("ffmpeg not found")
+    proc = subprocess.run(
+        [
+            ffmpeg, "-nostdin", "-v", "error",
+            "-f", "f32le", "-ar", str(sample_rate), "-ac", "1", "-i", "pipe:0",
+            "-c:a", "libopus", "-b:a", f"{kbps}k", "-application", "voip",
+            # Level 5 halves encode time vs the default 10 with the same
+            # diarization result (level 2 was measurably worse).
+            "-compression_level", "5",
+            "-f", "ogg", "pipe:1",
+        ],
+        input=np.asarray(audio, dtype=np.float32).tobytes(),
+        capture_output=True,
+        check=True,
+    )
+    if not proc.stdout:
+        raise RuntimeError("empty Opus output")
+    return proc.stdout
 
 class ASRService:
     """Run one shared pipeline via RunPod HTTP API and normalize its result."""
