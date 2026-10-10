@@ -24,7 +24,7 @@ export default function Error({
         <button
           type="button"
           onClick={() => unstable_retry()}
-          className="rounded-xl bg-brand px-4 py-2.5 text-sm font-medium text-white transition hover:bg-brand-ink"
+          className="btn btn-primary"
         >
           Thử lại
         </button>

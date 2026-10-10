@@ -1,6 +1,7 @@
 "use client";
 
 import { friendlyError } from "@/lib/friendlyError";
+import { WarningCircle } from "@phosphor-icons/react";
 
 /**
  * Friendly, non-alarming error message (icon + title + explanation + optional
@@ -39,11 +40,7 @@ export function ErrorNotice({
           compact ? "h-5 w-5" : "h-7 w-7"
         }`}
       >
-        <svg width={compact ? 12 : 15} height={compact ? 12 : 15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-          <circle cx="12" cy="12" r="10" />
-          <line x1="12" y1="8" x2="12" y2="12.5" />
-          <line x1="12" y1="16" x2="12.01" y2="16" />
-        </svg>
+        <WarningCircle size={compact ? 13 : 16} weight="bold" />
       </span>
       <div className="min-w-0 flex-1">
         <p className={`font-medium text-ink ${compact ? "text-xs" : "text-sm"}`}>{info.title}</p>
@@ -54,7 +51,7 @@ export function ErrorNotice({
               <button
                 type="button"
                 onClick={onRetry}
-                className="rounded-lg bg-ink px-3 py-1 text-xs font-medium text-white transition hover:bg-ink/85"
+                className="rounded-lg bg-ink px-3 py-1 text-xs font-medium text-paper transition hover:bg-ink/85"
               >
                 Thử lại
               </button>

@@ -13,7 +13,9 @@ export function StageProgress({
   current: ProcessingStage;
   progress: number; // 0..1 within current stage
 }) {
-  const idx = STAGES.findIndex((s) => s.key === current);
+  // "done" is not one of the listed stages: every bar is then complete.
+  const idx =
+    current === "done" ? STAGES.length : STAGES.findIndex((s) => s.key === current);
   return (
     <div className="flex items-center gap-2">
       {STAGES.map((s, i) => {
@@ -42,10 +44,10 @@ export function StageProgress({
                   {s.label}
                 </span>
               </div>
-              <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-line">
+              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-line">
                 <div
-                  className={`h-full rounded-full transition-all duration-500 ${
-                    done ? "bg-ok" : "bg-signal"
+                  className={`h-full rounded-full transition-[width] duration-700 ${
+                    done ? "bg-ok" : `bg-signal ${active ? "shimmer" : ""}`
                   }`}
                   style={{
                     width: done ? "100%" : active ? `${progress * 100}%` : "0%",
