@@ -106,7 +106,12 @@ class ASRService:
         self.api_key = api_key or os.environ.get("RUNPOD_API_KEY", "")
         self.headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
         self._transcribe_lock = asyncio.Lock()
-        self._is_serverless = "api.runpod.ai" in self.runpod_url
+        # RUNPOD_SERVERLESS=1 treats RUNPOD_URL as a serverless API, e.g. the
+        # local simulator `python meetasr/runpod/handler.py --rp_serve_api`.
+        self._is_serverless = (
+            "api.runpod.ai" in self.runpod_url
+            or os.environ.get("RUNPOD_SERVERLESS") == "1"
+        )
 
     async def _call_serverless(self, action: str, payload: dict, timeout: float = 600.0) -> dict:
         """Call RunPod Serverless /runsync and return the output dict.

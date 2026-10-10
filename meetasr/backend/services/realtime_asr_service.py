@@ -30,7 +30,12 @@ class RealtimeASRService:
         self.api_key = api_key or os.environ.get("RUNPOD_API_KEY", "")
         self.headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
         self._lock = asyncio.Lock()
-        self._is_serverless = "api.runpod.ai" in self.runpod_url
+        # RUNPOD_SERVERLESS=1 treats RUNPOD_URL as a serverless API, e.g. the
+        # local simulator `python meetasr/runpod/handler.py --rp_serve_api`.
+        self._is_serverless = (
+            "api.runpod.ai" in self.runpod_url
+            or os.environ.get("RUNPOD_SERVERLESS") == "1"
+        )
         # Reuse ASRService's /runsync caller (handles IN_QUEUE/IN_PROGRESS polling)
         self._serverless = ASRService(runpod_url=self.runpod_url, api_key=self.api_key)
 
