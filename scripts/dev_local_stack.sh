@@ -39,6 +39,13 @@ CONFIG_PATH=configs/runpod_gpu.yaml "$PY" meetasr/runpod/handler.py \
 pids+=($!)
 wait_for "worker (models load ~20 s)" "$LOGS/worker.log" "Uvicorn running"
 
+# The backend reads GROQ_API_KEY (comma-separated keys rotate); local .env
+# files may only define GROQ_API_KEYS.
+if [ -z "${GROQ_API_KEY:-}" ] && grep -q "^GROQ_API_KEYS=" .env 2>/dev/null; then
+  GROQ_API_KEY="$(grep "^GROQ_API_KEYS=" .env | cut -d= -f2- | tr -d "\"'")"
+  export GROQ_API_KEY
+fi
+
 DATABASE_URL="sqlite:///$LOGS/local_test.db" STORAGE_BACKEND=local \
 STORAGE_LOCAL_ROOT="$LOGS/media" RUNPOD_URL=http://localhost:8008 RUNPOD_SERVERLESS=1 \
   "$PY" -m uvicorn meetasr.backend.api.app:app --host 127.0.0.1 --port 8010 \
