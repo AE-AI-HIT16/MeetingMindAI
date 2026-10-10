@@ -251,8 +251,11 @@ async def realtime_stream(websocket: WebSocket, db: Session = Depends(get_db)):
             )
 
         # Báo frontend realtime đã hoàn tất (frontend chờ event này để kết thúc)
+        # rồi đóng WS đúng chuẩn: trước đây handler kết thúc mà không gửi close
+        # frame → trình duyệt thấy mã 1006 và báo lỗi dù mọi thứ đã xong.
         try:
             await websocket.send_json({"type": "stream_stopped"})
+            await websocket.close(code=1000)
         except Exception:
             pass
 

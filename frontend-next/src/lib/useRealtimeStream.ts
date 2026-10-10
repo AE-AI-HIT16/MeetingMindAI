@@ -310,6 +310,12 @@ export function useRealtimeStream(): RealtimeStreamState &
       };
 
       ws.onclose = (ev) => {
+        // Session already finished (stream_stopped detached it): whatever close
+        // code follows (e.g. 1006 from the proxy) is not an error.
+        if (wsRef.current !== ws) {
+          setIsConnected(false);
+          return;
+        }
         if (finalizationTimerRef.current) {
           clearTimeout(finalizationTimerRef.current);
           finalizationTimerRef.current = null;
