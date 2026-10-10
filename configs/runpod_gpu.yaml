@@ -10,20 +10,27 @@ pipeline:
     max_chunk_ms: 15000
     boundary_search_ms: 2000
     min_chunk_ms: 1000
-  # pyannote segmentation-3.0 (ONNX, CPU): finds overlapped speech, places
-  # speaker changes to ~17 ms and drops VAD segments without a voice.
-  # Tuned on synthetic meetings (scripts/eval): DER 14.5% -> 7.0%.
+  # pyannote segmentation-3.0 (ONNX, CPU, ~12 s per hour of audio):
+  # drops VAD segments without a voice (noise no longer becomes text or an
+  # extra "speaker") and marks where two people talk at once ("nói chồng").
+  # Measured on synthetic meetings (scripts/eval): noise words 12 -> 1,
+  # speaker count 75% -> 88% (hard set), word errors unchanged.
   overlap_detection:
     enabled: true
     model: onnx-community/pyannote-segmentation-3.0
-    step_s: 1.0            # ~25 s CPU per hour of audio (2.0 halves it, slightly worse)
-    boundary_s: 0.0        # moving cam++ speaker changes made DER worse
-    supplement: true
+    step_s: 2.0
     min_speech_ratio: 0.3  # VAD segment needs a voice >= 30% of its length
-  # MossFormer2 separation of overlapped regions before ASR (GPU).
-  # Recovers interjections spoken over someone else ("dạ", "vâng").
+    supplement: true
+    boundary_s: 0.0
+    # Rebuild speaker turns around overlaps. Only useful together with
+    # overlap_separation; on its own it does not reduce word errors.
+    refine: false
+  # MossFormer2 separation of overlapped speech before ASR (GPU). Recovers
+  # "dạ/vâng" said over someone else (cpWER 22% -> 15.4% on the standard set)
+  # but roughly doubles ASR time on multi-speaker recordings. To use it set
+  # enabled: true here AND refine: true above.
   overlap_separation:
-    enabled: true
+    enabled: false
     model: alibabasglab/MossFormer2_SS_16K
 
 realtime:

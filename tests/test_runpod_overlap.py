@@ -100,3 +100,23 @@ def test_annotate_overlaps_marks_ranges_shared_with_other_speakers():
     assert turns[0].overlaps == [(3000, 3500)]
     assert turns[1].overlaps == [(3000, 3500)]
     assert turns[2].overlaps == []
+
+
+def test_overlap_regions_and_assignment_to_turns():
+    from meetasr.runpod.utils.diarization import assign_overlap_regions
+    from meetasr.runpod.utils.overlap import overlap_regions
+
+    count = np.ones(1000, dtype=np.int64)
+    count[frame_of(2.0):frame_of(3.0)] = 2   # 1 s of crosstalk
+    count[frame_of(5.0):frame_of(5.1)] = 2   # 100 ms blip is ignored
+    segmentation = LocalSegmentation(np.zeros((1, 589, 3)), [0], count)
+
+    regions = overlap_regions(segmentation, min_duration_s=0.3)
+    assert len(regions) == 1
+    assert abs(regions[0][0] - 2000) < 20 and abs(regions[0][1] - 3000) < 20
+
+    turns = [SpeakerTurn(0, 2500, 0), SpeakerTurn(2500, 4000, 1), SpeakerTurn(4000, 9000, 0)]
+    assign_overlap_regions(turns, regions)
+    assert turns[0].overlaps == [(regions[0][0], 2500)]
+    assert turns[1].overlaps == [(2500, regions[0][1])]
+    assert turns[2].overlaps == []

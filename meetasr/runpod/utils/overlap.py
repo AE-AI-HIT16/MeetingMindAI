@@ -64,6 +64,7 @@ class SpeakerSegmenter:
         min_segment_s: float = 0.1,
         fill_gap_s: float = 0.2,
         min_speech_ratio: float = 0.0,
+        refine: bool = True,
         **_: object,
     ):
         """
@@ -78,6 +79,8 @@ class SpeakerSegmenter:
             fill_gap_s: Close same-speaker gaps shorter than this.
             min_speech_ratio: Drop VAD segments where segmentation hears a
                 voice in less than this share of the time (0 = keep all).
+            refine: Rebuild speaker turns from segmentation (overlap-aware).
+                False keeps cam++ turns and only uses the speech gate.
         """
         if step_s <= 0 or step_s > WINDOW_SAMPLES / SAMPLE_RATE:
             raise ValueError("step_s must be in (0, 10]")
@@ -91,6 +94,7 @@ class SpeakerSegmenter:
         self.min_segment_s = min_segment_s
         self.fill_gap_s = fill_gap_s
         self.min_speech_ratio = min_speech_ratio
+        self.refine_turns = refine
         self._session = None
 
     def _ensure_loaded(self) -> None:
@@ -175,6 +179,27 @@ def speech_ratio(segmentation: LocalSegmentation, start_s: float, end_s: float) 
     a, b = frame_of(start_s), max(frame_of(end_s), frame_of(start_s) + 1)
     window = segmentation.count[a:b]
     return float((window > 0).mean()) if window.size else 0.0
+
+
+def overlap_regions(
+    segmentation: LocalSegmentation,
+    min_duration_s: float = 0.3,
+) -> list[tuple[int, int]]:
+    """``[start_ms, end_ms]`` ranges where two or more people talk at once."""
+    regions = []
+    start = None
+    active = segmentation.count >= 2
+    for index, value in enumerate(np.append(active, False)):
+        if value and start is None:
+            start = index
+        elif not value and start is not None:
+            if (index - start) * FRAME_STEP_S >= min_duration_s:
+                regions.append((
+                    int(round(start * FRAME_STEP_S * 1000)),
+                    int(round(index * FRAME_STEP_S * 1000)),
+                ))
+            start = None
+    return regions
 
 
 def speech_regions(segmentation: LocalSegmentation, min_duration_s: float = 0.0) -> list[tuple[float, float]]:

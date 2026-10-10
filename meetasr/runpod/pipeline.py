@@ -22,6 +22,7 @@ from meetasr.runpod.utils.audio import load_audio
 from meetasr.runpod.utils.text_filter import clean_transcript_text
 from meetasr.runpod.utils.diarization import (
     annotate_overlaps,
+    assign_overlap_regions,
     assign_speakers_by_overlap,
     build_speaker_turns,
     chunk_segment,
@@ -274,7 +275,14 @@ class MeetPipeline:
                     "SPK-first: no speaker turns; using ASR-first fallback."
                 )
                 return audio, vad_segments, None, duration_ms, {}
-            annotate_overlaps(speaker_turns, diar_segments)
+            if self.segmenter is not None and not self.segmenter.refine_turns:
+                # cam++ turns never overlap: mark where segmentation hears
+                # two voices so the transcript can flag crosstalk.
+                from meetasr.runpod.utils.overlap import overlap_regions
+
+                assign_overlap_regions(speaker_turns, overlap_regions(segmentation))
+            else:
+                annotate_overlaps(speaker_turns, diar_segments)
             mapping = first_appearance_mapping(diar_segments)
             profiles = {
                 mapping[raw]: vector.tolist()
@@ -808,7 +816,7 @@ class MeetPipeline:
                 centroid = vectors[label_array == label].mean(axis=0)
                 profiles[int(label)] = centroid / max(float(np.linalg.norm(centroid)), 1e-8)
         diar_segs = compressed_seg(diar_segs)
-        if self.segmenter is None or not diar_segs:
+        if self.segmenter is None or not self.segmenter.refine_turns or not diar_segs:
             return diar_segs
         try:
             return self._refine_with_segmentation(audio, diar_segs, segmentation)

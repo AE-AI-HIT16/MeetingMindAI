@@ -52,6 +52,8 @@ export interface ApiTranscriptSegment {
   end_ms: number;
   speaker: number | null;
   text: string;
+  /** Another person talks at the same time. */
+  overlapped?: boolean;
 }
 
 /** Transcript segment normalized for React components. */
@@ -61,6 +63,8 @@ export interface TranscriptSegment {
   endMs: number;
   speaker: number | null; // 0-based; null until diarization completes
   text: string;
+  /** Another person talks at the same time ("nói chồng"). */
+  overlapped?: boolean;
   /** Internal marker: "partial" for in-progress ASR, "delta" for confirmed.
    *  Used to control which segments get replaced when a delta arrives. */
   _partialType?: "partial" | "delta";

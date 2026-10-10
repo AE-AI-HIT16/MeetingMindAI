@@ -52,7 +52,7 @@ def build_pipeline(config_path: Path, overrides: list[str]):
 
 def run_meeting(
     pipeline, audio, *, diar_only: bool, language: str, context: str,
-    pad_ms: int = 0, drop_echo: bool = True,
+    pad_ms: int = 0, drop_echo: bool = True, skip_overlapped: bool = False,
 ):
     prepared = pipeline.prepare_diarization_first_transcription(audio)
     turns = prepared[2]
@@ -66,6 +66,11 @@ def run_meeting(
             for t in turns
         ]
 
+    if skip_overlapped:
+        turns = [
+            t for t in turns
+            if overlap_ratio(t.start_ms, t.end_ms, getattr(t, "overlaps", [])) < 0.6
+        ]
     hypothesis = []
     transcribed = []
     for index in range(0, len(turns), BATCH_SIZE):
@@ -124,6 +129,8 @@ def main() -> None:
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--language", default="vi")
     parser.add_argument("--context", default="")
+    parser.add_argument("--skip-overlapped", action="store_true",
+                        help="do not transcribe turns that are >= 60%% overlapped")
     parser.add_argument("--keep-echo", action="store_true",
                         help="keep overlapped turns that repeat another speaker's words")
     parser.add_argument("--pad-ms", type=int, default=0,
@@ -147,7 +154,7 @@ def main() -> None:
         hypothesis = run_meeting(
             pipeline, audio, diar_only=args.diar_only,
             language=args.language, context=args.context, pad_ms=args.pad_ms,
-            drop_echo=not args.keep_echo,
+            drop_echo=not args.keep_echo, skip_overlapped=args.skip_overlapped,
         )
         score = score_meeting(reference, hypothesis)
         score["seconds"] = round(time.perf_counter() - t0, 1)

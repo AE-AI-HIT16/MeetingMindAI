@@ -15,7 +15,7 @@ import { EditableSegmentText } from "@/components/EditableSegmentText";
 import { formatDuration, formatStamp } from "@/lib/format";
 import { useJobEvents } from "@/lib/useJobEvents";
 import { MarkdownLite } from "@/components/MarkdownLite";
-import { SpeakerChip } from "@/components/ui";
+import { CrosstalkBadge, SpeakerChip } from "@/components/ui";
 import { ErrorNotice } from "@/components/ErrorNotice";
 
 type Tab = "doc" | "transcript" | "media";
@@ -451,6 +451,7 @@ export function DocumentView({
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <SpeakerChip speaker={seg.speaker} />
+                        {seg.overlapped && <CrosstalkBadge />}
                         {isActive && (
                           <span className="inline-flex items-center gap-1.5 rounded-full bg-brand px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-white">
                             <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" />

@@ -6,7 +6,7 @@ import type { Source } from "@/lib/types";
 import { formatStamp } from "@/lib/format";
 import { useJobEvents } from "@/lib/useJobEvents";
 import { useRevealCount } from "@/lib/useRevealCount";
-import { SpeakerChip, StatusBadge, Waveform } from "@/components/ui";
+import { CrosstalkBadge, SpeakerChip, StatusBadge, Waveform } from "@/components/ui";
 import { StageProgress } from "@/components/StageProgress";
 import { MarkdownLite } from "@/components/MarkdownLite";
 import { FinalizeDialog } from "@/components/FinalizeDialog";
@@ -133,6 +133,7 @@ export function ProcessingView({
                 >
                   <div className="mb-1 flex items-center gap-2.5">
                     <SpeakerChip speaker={seg.speaker} />
+                        {seg.overlapped && <CrosstalkBadge />}
                     <span className="font-mono text-[11px] text-ink-faint">
                       {formatStamp(seg.startMs)}
                     </span>

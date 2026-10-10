@@ -162,6 +162,7 @@ class JobQueue:
                         _sentence_to_payload(
                             sentence,
                             speaker=sentence.speaker if speaker_first else None,
+                            overlapped=_has_crosstalk(sentence, turn),
                         )
                         for sentence in chunk_sentences
                     ]
@@ -325,6 +326,7 @@ class JobQueue:
                     end_ms=segment.end_ms,
                     speaker=segment.speaker,
                     text=segment.text,
+                    overlapped=segment.overlapped,
                 )
                 for segment in segments
             ]
@@ -453,6 +455,7 @@ def _sentence_to_payload(
     sentence: SentenceInfo,
     *,
     speaker: int | None,
+    overlapped: bool = False,
 ) -> TranscriptSegmentPayload:
     start_ms = max(0, int(sentence.start * 1000))
     return TranscriptSegmentPayload(
@@ -460,7 +463,22 @@ def _sentence_to_payload(
         end_ms=max(start_ms, int(sentence.end * 1000)),
         speaker=speaker,
         text=sentence.text,
+        overlapped=overlapped,
     )
+
+
+CROSSTALK_MIN_MS = 300
+
+
+def _has_crosstalk(sentence: SentenceInfo, turn: SpeakerTurn | None) -> bool:
+    """True if someone else talks over this sentence for >= 300 ms."""
+    if turn is None or not turn.overlaps:
+        return False
+    start_ms, end_ms = int(sentence.start * 1000), int(sentence.end * 1000)
+    shared = sum(
+        max(0, min(end_ms, b) - max(start_ms, a)) for a, b in turn.overlaps
+    )
+    return shared >= CROSSTALK_MIN_MS
 
 
 job_queue = JobQueue()

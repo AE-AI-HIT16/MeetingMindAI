@@ -95,6 +95,8 @@ class TranscriptSegmentPayload(BaseModel):
     end_ms: int = Field(ge=0)
     speaker: int | None = Field(default=None, ge=0)
     text: str
+    # Another person talks at the same time ("nói chồng").
+    overlapped: bool = False
 
     @model_validator(mode="after")
     def validate_time_range(self):
@@ -116,6 +118,7 @@ class TranscriptSegmentPayload(BaseModel):
             end_ms=segment.end_ms,
             speaker=segment.speaker,
             text=segment.text,
+            overlapped=bool(segment.overlapped),
         )
 
 

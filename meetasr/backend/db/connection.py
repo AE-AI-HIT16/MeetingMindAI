@@ -56,19 +56,21 @@ def init_db() -> None:
 
 
 def _ensure_job_columns() -> None:
-    """Add Job columns introduced after the table was first created."""
+    """Add columns introduced after the tables were first created."""
     from sqlalchemy import inspect
 
-    existing = {column["name"] for column in inspect(engine).get_columns("jobs")}
     added = {
-        "asr_context": "TEXT",
-        "num_speakers": "INTEGER",
+        "jobs": {"asr_context": "TEXT", "num_speakers": "INTEGER"},
+        "transcript_segments": {"overlapped": "BOOLEAN NOT NULL DEFAULT FALSE"},
     }
+    inspector = inspect(engine)
     with engine.begin() as connection:
-        for name, sql_type in added.items():
-            if name not in existing:
-                connection.execute(text(f"ALTER TABLE jobs ADD COLUMN {name} {sql_type}"))
-                logger.info("Đã thêm cột jobs.%s.", name)
+        for table, columns in added.items():
+            existing = {column["name"] for column in inspector.get_columns(table)}
+            for name, sql_type in columns.items():
+                if name not in existing:
+                    connection.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {sql_type}"))
+                    logger.info("Đã thêm cột %s.%s.", table, name)
 
 
 def _ensure_unique_documents() -> None:

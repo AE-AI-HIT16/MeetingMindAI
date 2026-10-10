@@ -163,6 +163,22 @@ def annotate_overlaps(
     return turns
 
 
+def assign_overlap_regions(
+    turns: list[SpeakerTurn],
+    regions_ms: list[tuple[int, int]],
+    *,
+    min_overlap_ms: int = 150,
+) -> list[SpeakerTurn]:
+    """Fill ``turn.overlaps`` from detected overlapped-speech ranges."""
+    for turn in turns:
+        turn.overlaps = [
+            (max(turn.start_ms, start), min(turn.end_ms, end))
+            for start, end in regions_ms
+            if min(turn.end_ms, end) - max(turn.start_ms, start) >= min_overlap_ms
+        ]
+    return turns
+
+
 def _other_speaker_between(
     turns: list[list[int]],
     previous: list[int],

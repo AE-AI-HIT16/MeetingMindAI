@@ -133,3 +133,15 @@ export function Waveform({
     </div>
   );
 }
+
+/** Marks a transcript segment where two people talk at once. */
+export function CrosstalkBadge() {
+  return (
+    <span
+      title="Có người khác nói chồng lên đoạn này — chữ có thể thiếu hoặc lẫn"
+      className="inline-flex items-center rounded-md border border-line px-1.5 py-0.5 text-[11px] font-medium text-ink-soft"
+    >
+      Nói chồng
+    </span>
+  );
+}

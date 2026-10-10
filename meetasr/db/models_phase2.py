@@ -161,6 +161,7 @@ class TranscriptSegment(SQLModel, table=True):
     end_ms: int             # segment end, milliseconds from file beginning
     speaker: Optional[int] = None   # speaker label; None until diarization runs
     text: str               # recognised text for this segment
+    overlapped: bool = False  # another person talks at the same time
 
     # Relationships
     job: Job = Relationship(back_populates="segments")
