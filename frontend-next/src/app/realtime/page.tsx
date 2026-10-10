@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useRealtimeStream } from "@/lib/useRealtimeStream";
 import { useJobEvents } from "@/lib/useJobEvents";
+import { EditableSegmentText } from "@/components/EditableSegmentText";
 import type { AudioSource, SentenceInfo } from "@/lib/useRealtimeStream";
 import {
   isTrackCaptionSupported,
@@ -330,6 +331,8 @@ export default function RealtimePage() {
                   speaker={segment.speaker}
                   startMs={segment.startMs}
                   endMs={segment.endMs}
+                  editJobId={followJobId}
+                  editSegmentId={segment.id}
                 />
               ))}
               {!diarized && transcripts.map((t, i) => (
@@ -441,6 +444,8 @@ function TranscriptBlock({
   speaker,
   startMs,
   endMs,
+  editJobId = null,
+  editSegmentId = null,
 }: {
   text: string;
   sentenceInfo: SentenceInfo[];
@@ -452,6 +457,9 @@ function TranscriptBlock({
   speaker: number | null;
   startMs: number;
   endMs: number;
+  /** Persisted segment (final, diarized transcript): text can be edited. */
+  editJobId?: string | null;
+  editSegmentId?: number | null;
 }) {
   const timeStr =
     receivedAt === undefined
@@ -519,6 +527,37 @@ function TranscriptBlock({
                         ? sentence.speaker
                         : speaker;
                     const style = getSpeakerStyle(spkNum);
+                    const badge = (
+                      <span
+                        className="mr-2 inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 font-mono text-xs font-semibold"
+                        style={{
+                          backgroundColor: style.bg,
+                          color: style.color,
+                          border: `1px solid ${style.border}`,
+                        }}
+                      >
+                        <span
+                          className="h-1.5 w-1.5 rounded-full"
+                          style={{ backgroundColor: style.color }}
+                        />
+                        {spkNum !== null && spkNum !== undefined
+                          ? `Speaker ${spkNum}`
+                          : "Người nói"}
+                      </span>
+                    );
+                    if (editSegmentId !== null) {
+                      return (
+                        <div key={`${sentence.start}-${sIdx}`}>
+                          {badge}
+                          <EditableSegmentText
+                            jobId={editJobId}
+                            segmentId={editSegmentId}
+                            text={sentence.text}
+                            className="mt-1 text-[15px]"
+                          />
+                        </div>
+                      );
+                    }
                     return (
                       <p
                         key={`${sentence.start}-${sIdx}`}
