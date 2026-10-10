@@ -43,7 +43,7 @@ _SYSTEM_CONTEXT_KEYS = frozenset(
         "brand_name",
         "language",
         "sections",
-        "poppins_bold_url",
+        "display_font_url",
         "body_font_url",
     }
 )
@@ -251,7 +251,9 @@ def export_pdf(
             "brand_name": "MeetingMind AI",
             "language": "vi",
             "sections": _extract_sections(markdown),
-            "poppins_bold_url": _font_data_url("Poppins-Bold.ttf"),
+            # Headings: Be Vietnam Pro (full Vietnamese coverage; Poppins lacked
+            # ơ/ư and most tone marks, so headings fell back to other fonts).
+            "display_font_url": _font_data_url("BeVietnamPro-Bold.ttf"),
             "body_font_url": _font_data_url("NotoSans-Regular.ttf"),
         }
     )

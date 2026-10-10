@@ -49,3 +49,20 @@ def test_both_pdf_templates_render(preset):
         context={"author": "An"},
     )
     assert artifact.content[:4] == b"%PDF"
+
+
+def test_bundled_pdf_fonts_cover_all_vietnamese_letters():
+    """Poppins lacked ơ/ư and most tone marks -> broken PDF headings."""
+    ttlib = pytest.importorskip("fontTools.ttLib")
+    from pathlib import Path
+
+    import meetasr.backend.export.pdf_exporter as pdf_exporter
+
+    letters = "àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ"
+    letters += letters.upper()
+    fonts = sorted(Path(pdf_exporter._FONT_DIRECTORY).glob("*.ttf"))
+    assert fonts
+    for font in fonts:
+        cmap = ttlib.TTFont(str(font)).getBestCmap()
+        missing = "".join(c for c in letters if ord(c) not in cmap)
+        assert not missing, f"{font.name} lacks Vietnamese letters: {missing}"
