@@ -17,7 +17,7 @@ from sqlmodel import Session
 from meetasr.backend.db.connection import get_db, engine
 from meetasr.backend.db.models_phase2 import Source, MediaType, Job, JobStatus
 from meetasr.backend.db.user_model import User
-from meetasr.backend.api.auth_deps import get_current_user
+from meetasr.backend.api.auth_deps import get_current_user, user_id_from_token
 
 def pcm_to_wav_bytes(pcm_bytes: bytes, sample_rate: int = 16000) -> bytes:
     wav_io = io.BytesIO()
@@ -35,6 +35,19 @@ logger = logging.getLogger("realtime")
 
 # Offline jobs started at stop outlive the WS handler; keep refs so they aren't GC'd.
 _background_tasks: set[asyncio.Task] = set()
+
+
+def _assign_owner(source_id: str, token: str | None) -> None:
+    """Attach the realtime Source to the user behind ``token`` (if valid)."""
+    user_id = user_id_from_token(token)
+    if user_id is None:
+        return
+    with Session(engine) as db:
+        source = db.get(Source, source_id)
+        if source is not None and source.user_id is None and db.get(User, user_id):
+            source.user_id = user_id
+            db.add(source)
+            db.commit()
 
 
 async def _warmup(asr_service) -> None:
@@ -186,17 +199,21 @@ async def realtime_stream(websocket: WebSocket, db: Session = Depends(get_db)):
 
             audio = message.get("bytes")
             if audio is None:
-                # Text/control message. Handle {"type":"stop"} to finalize;
-                # ignore others (e.g. auth handshake).
+                # Text/control message: {"type":"auth"} links the session to the
+                # logged-in user (so it shows in their library); {"type":"stop"}
+                # finalizes.
                 text = message.get("text")
                 if text:
                     try:
                         import json
-                        if json.loads(text).get("type") == "stop":
+                        control = json.loads(text)
+                        if control.get("type") == "auth":
+                            _assign_owner(session.source_id, control.get("token"))
+                        elif control.get("type") == "stop":
                             await websocket.send_json({"type": "stream_stopping"})
                             break
                     except Exception:
-                        pass
+                        logger.warning("Bad realtime control message", exc_info=True)
                 continue
 
             # Lưu toàn bộ audio của phiên realtime

@@ -195,3 +195,29 @@ def test_upload_warmup_requires_login_and_is_throttled(harness, monkeypatch):
     assert harness.client.post("/v1/runpod/warmup").status_code == 202
     assert harness.client.post("/v1/runpod/warmup").status_code == 202  # within 30 s
     assert harness.asr.warmups == 1
+
+
+@pytest.mark.parametrize("valid_token", [True, False])
+def test_auth_message_links_realtime_session_to_user(harness, valid_token):
+    from meetasr.backend.api.routes.auth import _create_jwt
+    from meetasr.backend.db.user_model import User
+
+    with Session(harness.engine) as db:
+        user = User(provider="google", provider_id="p1", email="a@example.com", name="An")
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        token = _create_jwt(user)[0] if valid_token else "not-a-jwt"
+        user_id = user.id
+
+    with harness.client.websocket_connect("/v1/realtime/stream") as ws:
+        ws.receive_json()
+        ws.send_json({"type": "auth", "token": token})
+        ws.send_bytes(_pcm(1.0))
+        ws.send_json({"type": "stop"})
+        while ws.receive_json()["type"] != "stream_stopped":
+            pass
+
+    with Session(harness.engine) as db:
+        source = db.exec(select(Source)).one()
+        assert source.user_id == (user_id if valid_token else None)

@@ -72,3 +72,18 @@ def get_current_user(
             detail="Tài khoản không tồn tại.",
         )
     return user
+
+
+def user_id_from_token(token: str | None) -> Optional[str]:
+    """User ID inside a valid backend JWT, or None (never raises).
+
+    For channels without HTTP auth headers, e.g. the realtime WebSocket, where
+    the browser sends the token in its first message.
+    """
+    if not token:
+        return None
+    try:
+        payload = jwt.decode(token, _JWT_SECRET, algorithms=[_JWT_ALGORITHM])
+    except jwt.InvalidTokenError:
+        return None
+    return payload.get("sub") or None
