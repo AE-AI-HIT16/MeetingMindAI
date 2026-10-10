@@ -145,6 +145,7 @@ export async function uploadSource(
 ): Promise<CreateSourceResponse> {
   const session = await getSession();
   const token = session?.accessToken;
+  assertSessionHasToken(session);
   const formData = new FormData();
   formData.append("file", file);
   // Optional recognition hints (keywords for Qwen3, known speaker count).
@@ -202,6 +203,20 @@ export async function uploadSource(
     method: "POST",
     body: formData,
   }, token);
+}
+
+/** A signed-in user without a backend token would create ownerless data
+ *  that never shows in their library — refuse instead (guests have no
+ *  session and are unaffected). */
+export function assertSessionHasToken(
+  session: { user?: unknown; accessToken?: string } | null,
+): void {
+  if (session?.user && !session.accessToken) {
+    throw new APIError(
+      401,
+      "Phiên đăng nhập chưa đồng bộ với máy chủ. Vui lòng thử lại sau vài giây hoặc đăng nhập lại.",
+    );
+  }
 }
 
 /**

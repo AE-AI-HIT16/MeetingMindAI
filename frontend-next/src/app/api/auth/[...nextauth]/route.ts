@@ -134,6 +134,14 @@ export const authOptions: NextAuthOptions = {
       }
       // Gắn JWT nội bộ vào session để client gọi API
       session.accessToken = token.accessToken;
+      // No backend token: uploads would be stored without an owner and never
+      // appear in the library. "relogin" = a session from before sync retries
+      // existed (cannot recover); "syncing" = retried on the next request.
+      session.authError = token.accessToken
+        ? undefined
+        : token.syncIdentity
+          ? "syncing"
+          : "relogin";
       return session;
     },
   },

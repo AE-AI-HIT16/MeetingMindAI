@@ -23,7 +23,7 @@ import httpx
 import jwt
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from sqlmodel import Session, select
+from sqlmodel import Session, func, select
 
 from meetasr.backend.api.auth_deps import get_current_user
 from meetasr.backend.db.connection import get_db
@@ -120,31 +120,7 @@ async def sync_user(
             detail="Invalid sync secret.",
         )
 
-    # Tìm User trong DB
-    user = db.exec(
-        select(User)
-        .where(User.provider == body.provider)
-        .where(User.provider_id == body.provider_id)
-    ).first()
-
-    if user is None:
-        user = User(
-            provider=body.provider,
-            provider_id=body.provider_id,
-            email=body.email,
-            name=body.name,
-            avatar_url=body.avatar_url,
-        )
-        db.add(user)
-        logger.info("Tao User moi: provider=%s email=%s", body.provider, body.email)
-    else:
-        # Cập nhật thông tin có thể thay đổi
-        user.name = body.name
-        user.email = body.email
-        user.avatar_url = body.avatar_url
-        user.last_login_at = datetime.now(timezone.utc)
-        logger.info("User dang nhap lai: provider=%s email=%s", body.provider, body.email)
-
+    user = _account_for_login(db, body)
     db.commit()
     db.refresh(user)
 
@@ -162,6 +138,63 @@ async def sync_user(
         ),
     )
 
+
+
+def _account_for_login(db: Session, body: "SyncUserRequest") -> User:
+    """One account per email across Google and GitHub logins.
+
+    Users signed in with Google one day and GitHub another got two accounts
+    and two separate libraries. The oldest account with the email is the
+    canonical one; uploads owned by any duplicate are moved onto it.
+    """
+    from meetasr.backend.db.models_phase2 import Source
+
+    by_provider = db.exec(
+        select(User)
+        .where(User.provider == body.provider)
+        .where(User.provider_id == body.provider_id)
+    ).first()
+    email = (body.email or "").strip().lower()
+    same_email = (
+        list(db.exec(select(User).where(func.lower(User.email) == email)).all())
+        if email else []
+    )
+    accounts = {account.id: account for account in same_email}
+    if by_provider is not None:
+        accounts[by_provider.id] = by_provider
+
+    if not accounts:
+        user = User(
+            provider=body.provider,
+            provider_id=body.provider_id,
+            email=body.email,
+            name=body.name,
+            avatar_url=body.avatar_url,
+        )
+        db.add(user)
+        logger.info("Tao User moi: provider=%s email=%s", body.provider, body.email)
+        return user
+
+    user = min(accounts.values(), key=lambda account: account.created_at)
+    for duplicate in accounts.values():
+        if duplicate.id == user.id:
+            continue
+        moved = 0
+        for source in db.exec(select(Source).where(Source.user_id == duplicate.id)).all():
+            source.user_id = user.id
+            db.add(source)
+            moved += 1
+        if moved:
+            logger.info(
+                "Gop tai khoan %s (%s) vao %s: chuyen %d source.",
+                duplicate.id, duplicate.provider, user.id, moved,
+            )
+    user.name = body.name
+    user.email = body.email
+    user.avatar_url = body.avatar_url
+    user.last_login_at = datetime.now(timezone.utc)
+    logger.info("User dang nhap lai: provider=%s email=%s", body.provider, body.email)
+    return user
 
 
 # ---------------------------------------------------------------------------

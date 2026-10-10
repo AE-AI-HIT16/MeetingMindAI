@@ -10,6 +10,7 @@ import type {
 } from "./realtimeTranscriptState";
 import type { ApiTranscriptSegment } from "./types";
 import { getWebSocketBase } from "./runtime";
+import { assertSessionHasToken } from "./api";
 
 export type { SentenceInfo, TranscriptDelta } from "./realtimeTranscriptState";
 
@@ -208,6 +209,7 @@ export function useRealtimeStream(): RealtimeStreamState &
       // 3. Open WebSocket
       const wsUrl = await buildWsUrl(options);
       const authSession = await getSession();
+      assertSessionHasToken(authSession);
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
       ws.binaryType = "arraybuffer";
