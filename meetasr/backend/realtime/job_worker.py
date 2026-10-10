@@ -446,3 +446,39 @@ async def run_job_processing(job_id: str, asr_service: ASRService, storage: Stor
     except asyncio.CancelledError:
         logger.info(f"Job processing {job_id} cancelled.")
         raise
+
+
+def recover_interrupted_jobs(db_engine=None) -> tuple[int, int]:
+    """Call once at startup: no job can still be running in this process.
+
+    A restart (e.g. a deploy) killed in-flight jobs, which then stayed
+    "processing" forever. Jobs whose audio is stored go back to QUEUED (they
+    restart when the user opens the source — not all at once, to avoid GPU
+    cost for old files nobody looks at); jobs without audio (realtime session
+    cut before its audio was saved) can never run and are marked FAILED.
+    Returns (requeued, failed).
+    """
+    requeued = failed = 0
+    with Session(db_engine or engine) as db:
+        rows = db.exec(
+            select(Job, Source)
+            .join(Source, Source.id == Job.source_id)
+            .where(Job.status.in_([JobStatus.PROCESSING, JobStatus.QUEUED]))
+        ).all()
+        for job, source in rows:
+            if source.storage_path:
+                if job.status == JobStatus.PROCESSING:
+                    job.status = JobStatus.QUEUED
+                    requeued += 1
+                else:
+                    continue
+            else:
+                job.status = JobStatus.FAILED
+                job.error = "Phiên ghi âm bị gián đoạn trước khi lưu xong âm thanh."
+                failed += 1
+            job.updated_at = datetime.now(timezone.utc)
+            db.add(job)
+        db.commit()
+    if requeued or failed:
+        logger.info("Recovered interrupted jobs: %d requeued, %d failed (no audio).", requeued, failed)
+    return requeued, failed

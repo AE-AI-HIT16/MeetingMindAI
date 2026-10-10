@@ -43,7 +43,7 @@ from meetasr.backend.api.routes import (
 from meetasr.backend.pipeline import BackendPipeline
 from meetasr.backend.db.connection import init_db
 from meetasr.backend.realtime.document_generation import document_generation_queue
-from meetasr.backend.realtime.job_worker import job_queue
+from meetasr.backend.realtime.job_worker import job_queue, recover_interrupted_jobs
 from meetasr.backend.services.asr_service import ASRService
 from meetasr.backend.services.realtime_asr_service import RealtimeASRService
 from meetasr.backend.streaming.final_transcript_queue import FinalTranscriptQueue
@@ -72,6 +72,7 @@ async def lifespan(app: FastAPI):
 
     init_db()
     logger.info("Database tables initialized.")
+    recover_interrupted_jobs()
 
     # --------------------------------------------------------------
     # STARTUP
