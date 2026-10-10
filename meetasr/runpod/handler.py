@@ -77,9 +77,8 @@ def init_models():
         # downloads them to the Network Volume). The upload page sends a
         # "warmup" job on open, so Qwen loads while the user is still
         # uploading instead of inside the first transcription batch.
-        for component in (pipeline.asr, pipeline.punc, pipeline.segmenter, pipeline.separator):
-            if component is not None and hasattr(component, "_ensure_loaded"):
-                component._ensure_loaded()
+        pipeline.asr._ensure_loaded()  # required: failing here is fatal
+        _load_optional_components(pipeline)
         realtime_pipeline = ASRPipeline(
             asr_model=pipeline.asr,
             vad_model=pipeline.vad,
@@ -91,6 +90,24 @@ def init_models():
     except Exception as exc:
         logger.exception("Fatal: pipeline init failed: %s", exc)
         raise
+
+
+def _load_optional_components(pipe) -> None:
+    """Load punctuation, segmentation and separation, disabling any that fail.
+
+    A download error or corrupt weights for an optional model must not stop
+    the worker: the pipeline runs without that step and logs a warning.
+    """
+    for name in ("punc", "segmenter", "separator"):
+        component = getattr(pipe, name, None)
+        if component is None or not hasattr(component, "_ensure_loaded"):
+            continue
+        try:
+            component._ensure_loaded()
+        except Exception as exc:
+            logger.warning("Optional %s failed to load (%s); continuing without it.", name, exc)
+            setattr(pipe, name, None)
+            _load_stats[f"{name}_load_error"] = str(exc)[:200]
 
 
 def _sentence_info_to_dict(si) -> dict:
