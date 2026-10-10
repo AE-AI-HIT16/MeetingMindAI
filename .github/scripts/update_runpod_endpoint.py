@@ -7,9 +7,10 @@ Required env vars:
 
 Previously this edited the template returned by GraphQL `myself.endpoints`,
 reported success, yet the endpoint kept its old pinned digest. Now it:
-  1. reads the endpoint's own templateId via the REST API,
-  2. sets that template's image,
-  3. re-reads the endpoint and FAILS if the image did not change,
+  1. reads the endpoint config via the REST API,
+  2. sets the endpoint's template image via GraphQL (endpoint-owned templates
+     are invisible to REST /templates),
+  3. re-reads the template and FAILS if the image did not change,
   4. recycles workers (workersMax -> 0 -> original) so none keep the old image,
   5. prints Network Volume / data center / idle timeout config for debugging.
 """
@@ -68,11 +69,44 @@ for vid in volume_ids:
 if (ep.get("idleTimeout") or 0) < 20:
     print("  ⚠️  idleTimeout < 20 s: worker may stop between 15 s realtime windows.")
 
-old_image = rest("GET", f"/templates/{template_id}").get("imageName")
-print(f"\nTemplate {template_id}: {old_image} -> {image}")
-rest("PATCH", f"/templates/{template_id}", {"imageName": image})
+# Endpoint-owned templates (endpoint created from an image in the UI) are not
+# visible to REST /templates (404), but GraphQL can read and save them.
+TEMPLATE_FIELDS = "id name imageName dockerArgs volumeInGb containerDiskInGb isServerless env { key value }"
 
-current = rest("GET", f"/templates/{template_id}").get("imageName")
+
+def gql(query):
+    resp = requests.post("https://api.runpod.io/graphql", headers=headers,
+                         json={"query": query}, timeout=30)
+    data = resp.json() if resp.text else {}
+    if not resp.ok or data.get("errors"):
+        print(f"ERROR: GraphQL -> HTTP {resp.status_code}: {json.dumps(data)[:500]}", file=sys.stderr)
+        sys.exit(1)
+    return data["data"]
+
+
+def endpoint_template():
+    for e in gql(f"{{ myself {{ endpoints {{ id template {{ {TEMPLATE_FIELDS} }} }} }} }}")["myself"]["endpoints"]:
+        if e["id"] == endpoint_id:
+            return e["template"]
+    print("ERROR: endpoint not visible via GraphQL", file=sys.stderr)
+    sys.exit(1)
+
+
+tmpl = endpoint_template()
+if tmpl["id"] != template_id:
+    print(f"WARNING: GraphQL template {tmpl['id']} != REST templateId {template_id}")
+print(f"\nTemplate {tmpl['id']}: {tmpl['imageName']} -> {image}")
+
+q = json.dumps  # JSON string literals are valid GraphQL string literals
+env_gql = ", ".join(f"{{key: {q(e['key'])}, value: {q(e['value'])}}}" for e in tmpl.get("env") or [])
+gql(f"""mutation {{ saveTemplate(input: {{
+    id: {q(tmpl['id'])}, name: {q(tmpl['name'] or f"meetasr-{tmpl['id']}")},
+    imageName: {q(image)}, dockerArgs: {q(tmpl.get('dockerArgs') or '')},
+    volumeInGb: {tmpl.get('volumeInGb') or 0}, containerDiskInGb: {tmpl.get('containerDiskInGb') or 10},
+    isServerless: {str(tmpl.get('isServerless', True)).lower()}, env: [{env_gql}]
+}}) {{ id imageName }} }}""")
+
+current = endpoint_template()["imageName"]
 if current != image:
     print(f"ERROR: endpoint still uses {current!r} after update", file=sys.stderr)
     sys.exit(1)
