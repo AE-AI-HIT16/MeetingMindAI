@@ -15,7 +15,8 @@
     "test:pcm": "node --test tests/pcm-processor.test.mjs",
     "test:realtime-state": "node --test tests/realtime-transcript-state.test.mjs",
     "test:live-caption": "node --test tests/live-caption-state.test.mjs",
-    "test:friendly-error": "node --test tests/friendly-error.test.mjs"
+    "test:friendly-error": "node --test tests/friendly-error.test.mjs",
+    "test:speaker-blocks": "node --test tests/speaker-blocks.test.mjs"
   },
   "build": {
     "appId": "com.meetingmind.app",

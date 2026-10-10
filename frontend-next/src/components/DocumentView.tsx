@@ -16,6 +16,7 @@ import { formatDuration, formatStamp } from "@/lib/format";
 import { useJobEvents } from "@/lib/useJobEvents";
 import { MarkdownLite } from "@/components/MarkdownLite";
 import { CrosstalkBadge, SpeakerChip } from "@/components/ui";
+import { groupSpeakerBlocks } from "@/lib/speakerBlocks";
 import { ErrorNotice } from "@/components/ErrorNotice";
 
 type Tab = "doc" | "transcript" | "media";
@@ -84,7 +85,7 @@ export function DocumentView({
   const [playbackMs, setPlaybackMs] = useState<number | null>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
-  const segmentRefs = useRef(new Map<string, HTMLDivElement>());
+  const segmentRefs = useRef(new Map<string, HTMLElement>());
   const { segments } = useJobEvents(source.jobId);
 
   const selectedPreset =
@@ -407,30 +408,21 @@ export function DocumentView({
 
           {tab === "transcript" && (
             <div className="space-y-2">
-              {segments.map((seg) => {
-                const key = segmentKey(seg.id, seg.startMs);
-                const isActive = key === activeSegmentKey;
-
+              {groupSpeakerBlocks(segments).map((block) => {
+                const keys = block.segments.map((seg) => segmentKey(seg.id, seg.startMs));
+                const blockActive = activeSegmentKey !== null && keys.includes(activeSegmentKey);
                 return (
                   <div
-                    key={key}
-                    ref={(node) => {
-                      if (node) {
-                        segmentRefs.current.set(key, node);
-                      } else {
-                        segmentRefs.current.delete(key);
-                      }
-                    }}
-                    aria-current={isActive ? "true" : undefined}
+                    key={keys[0]}
                     className={`relative flex gap-4 rounded-2xl border px-3 py-3 transition-all duration-300 ${
-                      isActive
+                      blockActive
                         ? "border-brand/25 bg-brand-wash shadow-[0_12px_32px_-18px_rgb(44_62_224_/_0.55)]"
                         : activeSegmentKey
                           ? "border-transparent opacity-55"
                           : "border-transparent"
                     }`}
                   >
-                    {isActive && (
+                    {blockActive && (
                       <span
                         aria-hidden="true"
                         className="absolute inset-y-3 left-0 w-1 rounded-r-full bg-brand"
@@ -438,35 +430,62 @@ export function DocumentView({
                     )}
                     <button
                       type="button"
-                      onClick={() => seekTo(seg.startMs)}
-                      title={`Phát từ ${formatStamp(seg.startMs)}`}
+                      onClick={() => seekTo(block.startMs)}
+                      title={`Phát từ ${formatStamp(block.startMs)}`}
                       className={`w-12 shrink-0 pt-0.5 text-left font-mono text-[11px] transition ${
-                        isActive
+                        blockActive
                           ? "font-semibold text-brand-ink"
                           : "text-ink-faint hover:text-brand"
                       }`}
                     >
-                      {formatStamp(seg.startMs)}
+                      {formatStamp(block.startMs)}
                     </button>
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
-                        <SpeakerChip speaker={seg.speaker} />
-                        {seg.overlapped && <CrosstalkBadge />}
-                        {isActive && (
+                        <SpeakerChip speaker={block.speaker} />
+                        {block.segments.some((seg) => seg.overlapped) && <CrosstalkBadge />}
+                        {blockActive && (
                           <span className="inline-flex items-center gap-1.5 rounded-full bg-brand px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-white">
                             <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" />
                             Đang phát
                           </span>
                         )}
                       </div>
-                      <EditableSegmentText
-                        jobId={source.jobId}
-                        segmentId={seg.id}
-                        text={seg.text}
-                        className={`mt-1 transition-all duration-300 ${
-                          isActive ? "text-base font-semibold" : "text-[15px]"
-                        }`}
-                      />
+                      <div className="mt-1 text-[15px]">
+                        {block.segments.map((seg, index) => {
+                          const key = keys[index];
+                          const isActive = key === activeSegmentKey;
+                          return (
+                            <span
+                              key={key}
+                              ref={(node) => {
+                                if (node) {
+                                  segmentRefs.current.set(key, node);
+                                } else {
+                                  segmentRefs.current.delete(key);
+                                }
+                              }}
+                              aria-current={isActive ? "true" : undefined}
+                            >
+                              {index > 0 && " "}
+                              <EditableSegmentText
+                                inline
+                                jobId={source.jobId}
+                                segmentId={seg.id}
+                                text={seg.text}
+                                onClick={() => seekTo(seg.startMs)}
+                                className={`transition-colors duration-300 ${
+                                  isActive ? "bg-brand/15 font-semibold" : "hover:bg-surface-2"
+                                } ${
+                                  seg.overlapped
+                                    ? "underline decoration-dotted decoration-ink-faint underline-offset-4"
+                                    : ""
+                                }`}
+                              />
+                            </span>
+                          );
+                        })}
+                      </div>
                     </div>
                   </div>
                 );

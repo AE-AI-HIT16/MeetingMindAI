@@ -7,6 +7,7 @@ import { formatStamp } from "@/lib/format";
 import { useJobEvents } from "@/lib/useJobEvents";
 import { useRevealCount } from "@/lib/useRevealCount";
 import { CrosstalkBadge, SpeakerChip, StatusBadge, Waveform } from "@/components/ui";
+import { groupSpeakerBlocks } from "@/lib/speakerBlocks";
 import { StageProgress } from "@/components/StageProgress";
 import { MarkdownLite } from "@/components/MarkdownLite";
 import { FinalizeDialog } from "@/components/FinalizeDialog";
@@ -118,36 +119,51 @@ export function ProcessingView({
             <Waveform live={!done && !error} bars={16} className="h-4 w-24" />
           </header>
           <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-5">
-            {visibleSegments.map((seg, i) => {
-              const last = i === visibleSegments.length - 1;
-              const fromSnapshot = i < snapshotCount;
-              // Snapshot segments: stagger 30ms each, capped at 600ms total
-              const delayMs = fromSnapshot
-                ? Math.min(i * 30, 600)
-                : 0;
-              return (
-                <div
-                  key={seg.id ?? `${seg.startMs}-${i}`}
-                  className="animate-rise"
-                  style={delayMs > 0 ? { animationDelay: `${delayMs}ms` } : undefined}
-                >
-                  <div className="mb-1 flex items-center gap-2.5">
-                    <SpeakerChip speaker={seg.speaker} />
-                        {seg.overlapped && <CrosstalkBadge />}
-                    <span className="font-mono text-[11px] text-ink-faint">
-                      {formatStamp(seg.startMs)}
-                    </span>
-                  </div>
-                  <p
-                    className={`text-[15px] leading-relaxed text-ink ${
-                      last && !done ? "caret" : ""
-                    }`}
+            {(() => {
+              const blocks = groupSpeakerBlocks(visibleSegments);
+              return blocks.map((block, b) => {
+                const startIndex = block.firstIndex;
+                const last = b === blocks.length - 1;
+                const fromSnapshot = startIndex < snapshotCount;
+                // Snapshot blocks: stagger 30ms each, capped at 600ms total
+                const delayMs = fromSnapshot ? Math.min(b * 30, 600) : 0;
+                const first = block.segments[0];
+                return (
+                  <div
+                    key={first.id ?? `${first.startMs}-${startIndex}`}
+                    className="animate-rise"
+                    style={delayMs > 0 ? { animationDelay: `${delayMs}ms` } : undefined}
                   >
-                    {seg.text}
-                  </p>
-                </div>
-              );
-            })}
+                    <div className="mb-1 flex items-center gap-2.5">
+                      <SpeakerChip speaker={block.speaker} />
+                      {block.segments.some((seg) => seg.overlapped) && <CrosstalkBadge />}
+                      <span className="font-mono text-[11px] text-ink-faint">
+                        {formatStamp(block.startMs)}
+                      </span>
+                    </div>
+                    <p
+                      className={`text-[15px] leading-relaxed text-ink ${
+                        last && !done ? "caret" : ""
+                      }`}
+                    >
+                      {block.segments.map((seg, i) => (
+                        <span
+                          key={seg.id ?? `${seg.startMs}-${i}`}
+                          className={
+                            seg.overlapped
+                              ? "underline decoration-dotted decoration-ink-faint underline-offset-4"
+                              : undefined
+                          }
+                        >
+                          {i > 0 && " "}
+                          {seg.text}
+                        </span>
+                      ))}
+                    </p>
+                  </div>
+                );
+              });
+            })()}
             {segments.length === 0 && !error && (
               <p className="text-sm text-ink-faint">
                 Transcript sẽ hiện tại đây khi ASR xử lý xong đoạn đầu tiên.

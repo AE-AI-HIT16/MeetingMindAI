@@ -15,11 +15,17 @@ export function EditableSegmentText({
   segmentId,
   text,
   className = "",
+  inline = false,
+  onClick,
 }: {
   jobId: string | null;
   segmentId: number | null;
   text: string;
   className?: string;
+  /** Render as a sentence inside a paragraph (speaker block). */
+  inline?: boolean;
+  /** Single click on the text (e.g. play from this sentence). */
+  onClick?: () => void;
 }) {
   const { data: authSession } = useSession();
   const [saved, setSaved] = useState<string | null>(null);
@@ -97,6 +103,32 @@ export function EditableSegmentText({
           />
         ) : null}
       </div>
+    );
+  }
+
+  if (inline) {
+    return (
+      <span
+        className={`group/sentence cursor-pointer rounded-sm leading-relaxed text-ink ${className}`}
+        onClick={onClick}
+        onDoubleClick={startEdit}
+        title={editable ? "Bấm để nghe · nhấp đúp để sửa" : "Bấm để nghe"}
+      >
+        {shown}
+        {editable && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              startEdit();
+            }}
+            aria-label="Sửa câu này"
+            className="ml-1 hidden translate-y-[-1px] rounded border border-line px-1 align-middle text-[10px] font-medium text-ink-soft hover:border-brand hover:text-brand-ink group-hover/sentence:inline"
+          >
+            Sửa
+          </button>
+        )}
+      </span>
     );
   }
 
