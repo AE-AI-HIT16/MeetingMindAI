@@ -36,11 +36,32 @@ except Exception as exc:
 pipeline = None
 realtime_pipeline = None
 
+# Cold-start diagnostics, reported by the "warmup" action.
+_load_stats: dict = {}
+
+
+def _dir_size(path: str) -> int:
+    total = 0
+    for root, _dirs, files in os.walk(path):
+        for name in files:
+            try:
+                total += os.path.getsize(os.path.join(root, name))
+            except OSError:
+                pass
+    return total
+
 
 def init_models():
     global pipeline, realtime_pipeline
     if pipeline is not None:
         return
+
+    import time
+    hf_home = os.environ.get("HF_HOME", "")
+    # Cache already populated before loading → models come from the volume.
+    _load_stats["hf_cache_bytes_before_load"] = _dir_size(hf_home) if hf_home else 0
+    _load_stats["load_started_at"] = time.time()
+    t0 = time.monotonic()
 
     logger.info("First job received — loading ML pipeline...")
     try:
@@ -57,7 +78,8 @@ def init_models():
             vad_model=pipeline.vad,
             device=pipeline.device,
         )
-        logger.info("Pipeline loaded successfully.")
+        _load_stats["model_load_seconds"] = round(time.monotonic() - t0, 1)
+        logger.info("Pipeline loaded successfully in %.1fs.", _load_stats["model_load_seconds"])
     except Exception as exc:
         logger.exception("Fatal: pipeline init failed: %s", exc)
         raise
@@ -180,8 +202,32 @@ async def run_handler(job):
         }
 
     elif action == "warmup":
-        # init_models() above already loaded the pipeline; nothing else to do.
-        return {"status": "warm"}
+        # Sent by the backend when a realtime session opens so the cold start
+        # overlaps with the user speaking. init_models() above did the loading;
+        # report where models came from so the Network Volume can be verified.
+        import shutil
+        import time
+        hf_home = os.environ.get("HF_HOME", "")
+        mounted = os.path.isdir(_NV)
+        info = {
+            "status": "ready",
+            "worker_id": os.environ.get("RUNPOD_POD_ID"),
+            "network_volume_mounted": mounted,
+            "hf_home": hf_home,
+            "modelscope_cache": os.environ.get("MODELSCOPE_CACHE"),
+            "hf_cache_bytes": _dir_size(hf_home) if hf_home else 0,
+            "hf_cached_repos": sorted(
+                d for d in (os.listdir(os.path.join(hf_home, "hub")) if os.path.isdir(os.path.join(hf_home, "hub")) else [])
+                if d.startswith("models--")
+            ),
+            **_load_stats,
+            "loaded_seconds_ago": round(time.time() - _load_stats.get("load_started_at", time.time()), 1),
+        }
+        if mounted:
+            usage = shutil.disk_usage(_NV)
+            info["volume_free_gb"] = round(usage.free / 1e9, 1)
+            info["volume_total_gb"] = round(usage.total / 1e9, 1)
+        return info
 
     elif action == "realtime_recognize":
         audio_bytes = base64.b64decode(job_input['audio_base64'])
