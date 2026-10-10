@@ -863,11 +863,18 @@ class MeetPipeline:
             "SPK diarize: %d VAD seg -> %d chunks -> %d embeddings",
             len(segments), len(all_chunks), all_embs.shape[0],
         )
-        labels = (
-            self.spk.cluster(all_embs, oracle_num=num_speakers)
-            if num_speakers
-            else self.spk.cluster(all_embs)
-        )
+        # The user's speaker count only adds speakers auto-detection missed
+        # (usually someone who barely talks). Forcing a count that is too
+        # low merged two people into one label (DER 13% -> 38%), so a hint
+        # below the detected count is ignored.
+        labels = self.spk.cluster(all_embs)
+        detected = len(set(labels))
+        if num_speakers and detected < num_speakers:
+            logging.info(
+                "SPK: user expects %d speakers, detected %d; using the user's count.",
+                num_speakers, detected,
+            )
+            labels = self.spk.cluster(all_embs, oracle_num=num_speakers)
         usable_count = min(len(embedded_chunks), len(labels))
         if usable_count != len(embedded_chunks):
             logging.warning(

@@ -61,6 +61,9 @@ export function RecognitionHints({
           placeholder="Tự nhận"
           className={`mt-1 ${field}`}
         />
+        <span className="mt-1 block text-xs text-ink-faint">
+          Không chắc thì để trống — hệ thống tự đếm.
+        </span>
       </label>
     </div>
   );
