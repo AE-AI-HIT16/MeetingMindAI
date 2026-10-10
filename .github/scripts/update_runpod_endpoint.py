@@ -41,18 +41,15 @@ def rest(method, path, body=None):
     return resp.json() if resp.text else {}
 
 
-def get_endpoint():
-    return rest("GET", f"/endpoints/{endpoint_id}?includeTemplate=true")
-
-
-ep = get_endpoint()
-template_id = ep.get("templateId") or (ep.get("template") or {}).get("id")
-old_image = (ep.get("template") or {}).get("imageName")
+ep = rest("GET", f"/endpoints/{endpoint_id}")
+template_id = ep.get("templateId")
 if not template_id:
     print(f"ERROR: endpoint has no templateId: {json.dumps(ep)[:500]}", file=sys.stderr)
     sys.exit(1)
 
 print("===== Endpoint config =====")
+# Must be the endpoint the backend calls (EC2 RUNPOD_ENDPOINT_ID). workersMax 0 /
+# no volume here usually means the GitHub secret points at a stale endpoint.
 for key in ("name", "templateId", "gpuTypeIds", "dataCenterIds", "networkVolumeId",
             "networkVolumeIds", "idleTimeout", "workersMin", "workersMax", "flashboot",
             "scalerType", "scalerValue"):
@@ -71,11 +68,11 @@ for vid in volume_ids:
 if (ep.get("idleTimeout") or 0) < 20:
     print("  ⚠️  idleTimeout < 20 s: worker may stop between 15 s realtime windows.")
 
+old_image = rest("GET", f"/templates/{template_id}").get("imageName")
 print(f"\nTemplate {template_id}: {old_image} -> {image}")
 rest("PATCH", f"/templates/{template_id}", {"imageName": image})
 
-ep = get_endpoint()
-current = (ep.get("template") or {}).get("imageName")
+current = rest("GET", f"/templates/{template_id}").get("imageName")
 if current != image:
     print(f"ERROR: endpoint still uses {current!r} after update", file=sys.stderr)
     sys.exit(1)
