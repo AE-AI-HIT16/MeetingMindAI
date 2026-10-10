@@ -160,11 +160,14 @@ async def run_handler(job):
     elif action == "transcribe_segments":
         # Many speaker turns in one job: one network round-trip instead of one
         # per turn, and no fan-out that would cold-start extra workers.
+        # All turns go to the ASR model in one batched call (GPU batching).
+        from meetasr.runpod.utils.audio import load_audio
         language = job_input.get('language', 'auto')
-        return [
-            await _transcribe_one(audio_b64, language)
-            for audio_b64 in job_input['segments']
-        ]
+        chunks = [load_audio(base64.b64decode(b64)) for b64 in job_input['segments']]
+        per_chunk = await asyncio.to_thread(
+            pipeline.transcribe_chunks, chunks, language=language
+        )
+        return [[_sentence_info_to_dict(s) for s in sentences] for sentences in per_chunk]
 
     elif action == "finalize_incremental":
         from meetasr.runpod.schemas import SentenceInfo

@@ -121,8 +121,9 @@ class JobQueue:
             # round-trip on one warm worker — per-turn parallel calls spent most of
             # the time on network/queue overhead and cold-started extra workers).
             # Persist/stream each batch in timeline order so the UI fills
-            # top-to-bottom. 16 turns x <=15 s WAV ≈ 10 MB base64 < 20 MiB limit.
-            BATCH_SIZE = 16
+            # top-to-bottom. 8 turns per job (one GPU batch, results every few
+            # seconds; the UI reveals them one by one). <= 8 x 15 s WAV ≈ 5 MB.
+            BATCH_SIZE = 8
             completed = 0
             for batch_start in range(0, len(work_items), BATCH_SIZE):
                 batch = work_items[batch_start:batch_start + BATCH_SIZE]

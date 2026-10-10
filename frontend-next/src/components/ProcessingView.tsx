@@ -5,6 +5,7 @@ import Link from "next/link";
 import type { Source } from "@/lib/types";
 import { formatStamp } from "@/lib/format";
 import { useJobEvents } from "@/lib/useJobEvents";
+import { useRevealCount } from "@/lib/useRevealCount";
 import { SpeakerChip, StatusBadge, Waveform } from "@/components/ui";
 import { StageProgress } from "@/components/StageProgress";
 import { MarkdownLite } from "@/components/MarkdownLite";
@@ -32,9 +33,13 @@ export function ProcessingView({
     error,
   } = useJobEvents(jobId);
 
+  // Reveal batched segments one by one so the transcript keeps flowing.
+  const visibleCount = useRevealCount(segments.length, snapshotCount);
+  const visibleSegments = segments.slice(0, visibleCount);
+
   useEffect(() => {
     transcriptEnd.current?.scrollIntoView({ behavior: "smooth" });
-  }, [segments.length]);
+  }, [visibleCount]);
 
   return (
     <div className="mx-auto flex h-screen w-full max-w-6xl flex-col px-6 py-8 md:px-10">
@@ -117,8 +122,8 @@ export function ProcessingView({
             <Waveform live={!done && !error} bars={16} className="h-4 w-24" />
           </header>
           <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-5">
-            {segments.map((seg, i) => {
-              const last = i === segments.length - 1;
+            {visibleSegments.map((seg, i) => {
+              const last = i === visibleSegments.length - 1;
               const fromSnapshot = i < snapshotCount;
               // Snapshot segments: stagger 30ms each, capped at 600ms total
               const delayMs = fromSnapshot
@@ -150,6 +155,16 @@ export function ProcessingView({
               <p className="text-sm text-ink-faint">
                 Transcript sẽ hiện tại đây khi ASR xử lý xong đoạn đầu tiên.
               </p>
+            )}
+            {segments.length > 0 && !done && !error && (
+              <div className="flex items-center gap-2 text-sm text-ink-faint" aria-live="polite">
+                <span className="flex gap-1">
+                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current" />
+                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current [animation-delay:150ms]" />
+                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current [animation-delay:300ms]" />
+                </span>
+                Đang nhận dạng tiếp…
+              </div>
             )}
             <div ref={transcriptEnd} />
           </div>

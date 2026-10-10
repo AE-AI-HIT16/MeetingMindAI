@@ -1,9 +1,9 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { PageHeader, Waveform } from "@/components/ui";
-import { uploadSource } from "@/lib/api";
+import { uploadSource, warmupAsr } from "@/lib/api";
 
 const ACCEPT = "video/*,audio/*";
 const MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024;
@@ -16,6 +16,12 @@ export default function UploadPage() {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Start the RunPod cold start now; by the time the file is uploaded the
+  // worker is (nearly) ready.
+  useEffect(() => {
+    void warmupAsr();
+  }, []);
 
   async function onFiles(files: FileList | null) {
     if (!files || files.length === 0 || uploading) return;
@@ -34,8 +40,19 @@ export default function UploadPage() {
     setUploading(true);
     setError(null);
 
+    // A long upload can outlast the worker idle timeout after the page-open
+    // warmup: cold-start again near the end so processing starts warm.
+    let warmedNearEnd = false;
+    const onProgress = (percent: number) => {
+      setUploadProgress(percent);
+      if (!warmedNearEnd && percent >= 80) {
+        warmedNearEnd = true;
+        void warmupAsr();
+      }
+    };
+
     try {
-      const result = await uploadSource(file, setUploadProgress);
+      const result = await uploadSource(file, onProgress);
       router.push(
         `/sources/${result.sourceId}?jobId=${encodeURIComponent(result.jobId)}`,
       );

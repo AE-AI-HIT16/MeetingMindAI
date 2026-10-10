@@ -302,3 +302,14 @@ export function documentExportUrl(
   if (preset) params.set("preset", preset);
   return `/v1/documents/${documentId}/export?${params.toString()}`;
 }
+
+/**
+ * Ask the backend to cold-start a RunPod worker while the user picks and
+ * uploads a file, so processing starts on a ready worker. Best effort.
+ */
+export async function warmupAsr(): Promise<void> {
+  const session = await getSession();
+  const token = session?.accessToken;
+  if (!token) return;
+  await apiFetch<unknown>("/v1/runpod/warmup", { method: "POST" }, token).catch(() => {});
+}

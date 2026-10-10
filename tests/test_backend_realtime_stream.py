@@ -182,3 +182,16 @@ def test_windows_are_cut_at_pauses_and_cover_whole_timeline(harness):
 
     assert 4.3 <= harness.asr.windows[0] <= 4.4
     assert sum(harness.asr.windows) == pytest.approx(12.0, abs=0.01)
+
+
+def test_upload_warmup_requires_login_and_is_throttled(harness, monkeypatch):
+    from meetasr.backend.api.auth_deps import get_current_user
+
+    monkeypatch.setattr(realtime, "_last_warmup_at", 0.0)
+    assert harness.client.post("/v1/runpod/warmup").status_code == 401
+    assert harness.asr.warmups == 0
+
+    harness.app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id="u1")
+    assert harness.client.post("/v1/runpod/warmup").status_code == 202
+    assert harness.client.post("/v1/runpod/warmup").status_code == 202  # within 30 s
+    assert harness.asr.warmups == 1

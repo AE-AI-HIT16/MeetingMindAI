@@ -304,6 +304,29 @@ class MeetPipeline:
             timestamp_offsets_ms=offsets,
         )
 
+    def transcribe_chunks(
+        self,
+        chunks: list[np.ndarray],
+        language: str = "auto",
+        **kwargs,
+    ) -> list[list[SentenceInfo]]:
+        """Transcribe many standalone chunks (speaker turns) in one batched ASR
+        call; same result per chunk as ``transcribe_vad_segment(chunk, whole)``."""
+        if getattr(self.asr, "uses_internal_vad", False):
+            return [
+                self.transcribe_vad_segment(
+                    chunk, Segment(0, int(len(chunk) / SAMPLE_RATE * 1000)),
+                    language=language, **kwargs,
+                )
+                for chunk in chunks
+            ]
+        segments = [Segment(0, int(len(chunk) / SAMPLE_RATE * 1000)) for chunk in chunks]
+        results = self.asr.recognize(list(chunks), language=language, **kwargs)
+        return [
+            build_sentence_info([result], [segment], timestamp_offsets_ms=[0])
+            for result, segment in zip(results, segments)
+        ]
+
     def finalize_incremental_transcript(
         self,
         audio: np.ndarray,

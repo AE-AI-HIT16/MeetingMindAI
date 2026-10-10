@@ -7,13 +7,17 @@ import io
 import wave
 import asyncio
 import logging
+import time
+from typing import Annotated, Optional
 
 import numpy as np
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, HTTPException, Request
 from sqlmodel import Session
 from meetasr.backend.db.connection import get_db, engine
 from meetasr.backend.db.models_phase2 import Source, MediaType, Job, JobStatus
+from meetasr.backend.db.user_model import User
+from meetasr.backend.api.auth_deps import get_current_user
 
 def pcm_to_wav_bytes(pcm_bytes: bytes, sample_rate: int = 16000) -> bytes:
     wav_io = io.BytesIO()
@@ -39,6 +43,33 @@ async def _warmup(asr_service) -> None:
         logger.info("RunPod warmup job queued")
     except Exception:
         logger.warning("RunPod warmup failed", exc_info=True)
+
+
+# Upload page warmup: at most one RunPod job per interval for all users.
+WARMUP_MIN_INTERVAL_S = 30.0
+_last_warmup_at = 0.0
+
+
+@router.post("/v1/runpod/warmup", status_code=202)
+async def runpod_warmup(
+    request: Request,
+    current_user: Annotated[Optional[User], Depends(get_current_user)],
+):
+    """Start a RunPod worker cold start while the user picks/uploads a file.
+
+    Logged-in users only (each call can bill GPU time) and throttled.
+    """
+    global _last_warmup_at
+    if current_user is None:
+        raise HTTPException(status_code=401, detail="Login required")
+    asr_service = getattr(request.app.state, "realtime_asr_service", None)
+    now = time.monotonic()
+    if asr_service is not None and now - _last_warmup_at >= WARMUP_MIN_INTERVAL_S:
+        _last_warmup_at = now
+        task = asyncio.create_task(_warmup(asr_service))
+        _background_tasks.add(task)
+        task.add_done_callback(_background_tasks.discard)
+    return {"status": "accepted"}
 
 
 @router.websocket("/v1/realtime/stream")

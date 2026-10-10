@@ -193,29 +193,30 @@ class Qwen3ASR(AbsASR):
                 ", ".join(sorted(_ALIGNER_LANGUAGES)),
             )
 
-        results = []
-        for idx, chunk in enumerate(audio):
-            chunk = _validate_audio_chunk(chunk)
-            if chunk.size == 0:
-                results.append(
-                    {"key": kwargs.get("key", f"chunk_{idx}"), "text": "", "timestamp": []}
-                )
-                continue
-
-            transcription = self._model.transcribe(
-                audio=[(chunk, SAMPLE_RATE)],
+        # One transcribe() call for all chunks: qwen-asr batches them on the GPU
+        # (up to max_inference_batch_size per forward). Calling it per chunk
+        # left the GPU mostly idle (~1.5-2.5 s per speaker turn).
+        chunks = [_validate_audio_chunk(chunk) for chunk in audio]
+        non_empty = [idx for idx, chunk in enumerate(chunks) if chunk.size > 0]
+        transcriptions = []
+        if non_empty:
+            transcriptions = self._model.transcribe(
+                audio=[(chunks[idx], SAMPLE_RATE) for idx in non_empty],
                 context=kwargs.get("context", ""),
-                language=[qwen_language] if qwen_language else None,
+                language=[qwen_language] * len(non_empty) if qwen_language else None,
                 return_time_stamps=use_timestamps,
-            )
+            ) or []
+        by_index = dict(zip(non_empty, transcriptions))
 
-            if not transcription:
+        results = []
+        for idx in range(len(chunks)):
+            result_obj = by_index.get(idx)
+            if result_obj is None:
                 results.append(
                     {"key": kwargs.get("key", f"chunk_{idx}"), "text": "", "timestamp": []}
                 )
                 continue
 
-            result_obj = transcription[0]
             text = getattr(result_obj, "text", "").strip()
 
             char_timestamps = []
