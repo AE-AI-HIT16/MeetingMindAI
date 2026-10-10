@@ -32,7 +32,7 @@ except Exception as exc:
     logger.exception("Fatal: core import failed: %s", exc)
     sys.exit(1)
 
-# Global instances for model caching (loaded on first job request)
+# Global instances for model caching (loaded at worker start, see __main__)
 pipeline = None
 realtime_pipeline = None
 
@@ -95,6 +95,17 @@ def _sentence_info_to_dict(si) -> dict:
     }
 
 
+async def _transcribe_one(audio_b64: str, language: str) -> list[dict]:
+    from meetasr.runpod.utils.audio import load_audio
+    from meetasr.runpod.schemas import Segment
+    audio = load_audio(base64.b64decode(audio_b64))
+    duration_ms = int(len(audio) / 16000 * 1000)
+    sentences = await asyncio.to_thread(
+        pipeline.transcribe_vad_segment, audio, Segment(0, duration_ms), language=language
+    )
+    return [_sentence_info_to_dict(s) for s in sentences]
+
+
 async def run_handler(job):
     init_models()
     job_input = job.get('input', {})
@@ -144,17 +155,16 @@ async def run_handler(job):
         return response
 
     elif action == "transcribe_segment":
-        audio_bytes = base64.b64decode(job_input['audio_base64'])
-        from meetasr.runpod.utils.audio import load_audio
-        from meetasr.runpod.schemas import Segment
-        audio = load_audio(audio_bytes)
+        return await _transcribe_one(job_input['audio_base64'], job_input.get('language', 'auto'))
+
+    elif action == "transcribe_segments":
+        # Many speaker turns in one job: one network round-trip instead of one
+        # per turn, and no fan-out that would cold-start extra workers.
         language = job_input.get('language', 'auto')
-        duration_ms = int(len(audio) / 16000 * 1000)
-        segment = Segment(0, duration_ms)
-        sentences = await asyncio.to_thread(
-            pipeline.transcribe_vad_segment, audio, segment, language=language
-        )
-        return [_sentence_info_to_dict(s) for s in sentences]
+        return [
+            await _transcribe_one(audio_b64, language)
+            for audio_b64 in job_input['segments']
+        ]
 
     elif action == "finalize_incremental":
         from meetasr.runpod.schemas import SentenceInfo
@@ -247,4 +257,7 @@ async def handler(job):
 logger.info("Handler module loaded — starting RunPod serverless worker.")
 
 if __name__ == "__main__":
+    # Load models during container start (part of the cold start), so the worker
+    # only reports ready once it can serve — the first job doesn't wait on loading.
+    init_models()
     runpod.serverless.start({"handler": handler})

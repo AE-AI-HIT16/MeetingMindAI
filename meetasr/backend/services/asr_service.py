@@ -531,6 +531,71 @@ class ASRService:
             for s in res_json
         ]
 
+    async def transcribe_segments(
+        self,
+        prepared: PreparedTranscription,
+        segments: list[Segment],
+        *,
+        language: str | None = None,
+    ) -> list[list[SentenceInfo]]:
+        """Transcribe many speaker turns in ONE RunPod job (results in order).
+
+        One round-trip per batch instead of one per turn, served by a single warm
+        worker (parallel per-turn calls made RunPod cold-start extra workers).
+        Falls back to per-turn calls on an older RunPod image without the action.
+        """
+        if language is None:
+            language = os.environ.get("ASR_LANGUAGE", "vi")
+        if not self._is_serverless:
+            return [
+                await self.transcribe_segment(prepared, seg, language=language)
+                for seg in segments
+            ]
+
+        import base64
+        payload_segments = []
+        sent: list[Segment] = []  # empty slices are skipped (→ no sentences)
+        for seg in segments:
+            start = int(seg.start_ms / 1000 * 16000)
+            end = int(seg.end_ms / 1000 * 16000)
+            if end <= start:
+                continue
+            sent.append(seg)
+            payload_segments.append(
+                base64.b64encode(numpy_to_wav_bytes(prepared.audio[start:end])).decode()
+            )
+        if not sent:
+            return [[] for _ in segments]
+        try:
+            res_json = await self._call_serverless(
+                "transcribe_segments",
+                {"segments": payload_segments, "language": language},
+                timeout=300.0,
+            )
+        except RuntimeError as exc:
+            if "Unknown action" not in str(exc):
+                raise
+            logger.warning("RunPod image has no transcribe_segments; falling back to per-turn calls")
+            return list(await asyncio.gather(*[
+                self.transcribe_segment(prepared, seg, language=language)
+                for seg in segments
+            ]))
+
+        by_segment = {
+            id(seg): [
+                SentenceInfo(
+                    text=s["text"],
+                    start=s["start"] + seg.start_ms / 1000.0,
+                    end=s["end"] + seg.start_ms / 1000.0,
+                    speaker=s.get("speaker"),
+                    char_timestamps=s.get("char_timestamps", []),
+                )
+                for s in sentences
+            ]
+            for seg, sentences in zip(sent, res_json)
+        }
+        return [by_segment.get(id(seg), []) for seg in segments]
+
     async def finalize_incremental(
         self,
         prepared: PreparedTranscription,

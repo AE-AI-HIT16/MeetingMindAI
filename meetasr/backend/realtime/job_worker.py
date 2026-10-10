@@ -117,22 +117,19 @@ class JobQueue:
                 job_id, speaker_first, chunk_count,
             )
 
-            # Transcribe turns in parallel batches to cut wall-clock time on long
-            # files. ASR per turn is independent (speaker already assigned), so we
-            # fan out CONCURRENCY turns at once, then persist/stream each batch in
-            # timeline order so the UI still fills top-to-bottom.
-            CONCURRENCY = 4
+            # Transcribe turns in batches: each batch is ONE RunPod job (one
+            # round-trip on one warm worker — per-turn parallel calls spent most of
+            # the time on network/queue overhead and cold-started extra workers).
+            # Persist/stream each batch in timeline order so the UI fills
+            # top-to-bottom. 16 turns x <=15 s WAV ≈ 10 MB base64 < 20 MiB limit.
+            BATCH_SIZE = 16
             completed = 0
-            for batch_start in range(0, len(work_items), CONCURRENCY):
-                batch = work_items[batch_start:batch_start + CONCURRENCY]
-                batch_results = await asyncio.gather(*[
-                    self._asr_service.transcribe_segment(
-                        prepared,
-                        seg,
-                        key=f"{source.filename}:turn-{batch_start + i + 1}",
-                    )
-                    for i, (seg, _spk) in enumerate(batch)
-                ])
+            for batch_start in range(0, len(work_items), BATCH_SIZE):
+                batch = work_items[batch_start:batch_start + BATCH_SIZE]
+                batch_results = await self._asr_service.transcribe_segments(
+                    prepared,
+                    [seg for seg, _spk in batch],
+                )
 
                 for (transcription_segment, speaker), chunk_sentences in zip(batch, batch_results):
                     if speaker_first:

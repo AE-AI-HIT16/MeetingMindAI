@@ -190,11 +190,10 @@ jobs:
             exit 0
           fi
 
-          # Use the immutable per-commit tag (not @digest, which can be the
-          # multi-arch manifest-index digest that RunPod resolves differently,
-          # and not :latest which caches). The commit tag is unique each build
-          # so RunPod always pulls the right image.
-          IMAGE="${{ env.RUNPOD_IMAGE }}:${{ github.sha }}"
+          # Pin the exact digest just built (same name@sha256 form that works when
+          # set by hand; single-arch + provenance:false so it is the image digest,
+          # not a manifest index). :latest would be cached by RunPod hosts.
+          IMAGE="${{ env.RUNPOD_IMAGE }}@${{ steps.build-runpod.outputs.digest }}"
           echo "Updating RunPod endpoint ${RUNPOD_ENDPOINT_ID} -> ${IMAGE}"
 
           export NEW_IMAGE="${IMAGE}"

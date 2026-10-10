@@ -51,8 +51,8 @@ total = time.monotonic() - t0
 out = status.get("output") or {}
 print()
 print(f"Tổng thời gian đến khi sẵn sàng: {total:.1f}s")
-print(f"  delayTime (xếp hàng + boot container): {status.get('delayTime', 0) / 1000:.1f}s")
-print(f"  executionTime (gồm load model nếu cold): {status.get('executionTime', 0) / 1000:.1f}s")
+print(f"  delayTime (xếp hàng + boot container + load model): {status.get('delayTime', 0) / 1000:.1f}s")
+print(f"  executionTime (chạy job): {status.get('executionTime', 0) / 1000:.1f}s")
 print("Output:", json.dumps(out, indent=2, ensure_ascii=False))
 print()
 
@@ -62,7 +62,7 @@ elif "network_volume_mounted" not in out:
     print("⚠️  Worker đang chạy image cũ (chưa có chẩn đoán). Chờ CI build image mới + endpoint trỏ đúng image rồi chạy lại.")
 elif not out["network_volume_mounted"]:
     print("❌ KHÔNG thấy /runpod-volume → Network Volume chưa gắn vào endpoint, hoặc volume khác data center với GPU của endpoint.")
-elif "model_load_seconds" not in out:
+elif out.get("loaded_seconds_ago", 0) > total + 10:
     print("ℹ️  Volume ĐÃ gắn, nhưng worker đã warm sẵn (không cold start) → chưa đo được tốc độ load.")
     print("   Muốn đo cold start: Max Workers = 0 → Save → đặt lại như cũ → Save, rồi chạy lại script.")
 elif out.get("hf_cache_bytes_before_load", 0) > 0:
