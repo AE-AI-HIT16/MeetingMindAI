@@ -51,15 +51,6 @@ python -m pip install --upgrade pip
 python -m pip install -e ".[dev,export]"
 ```
 
-Desktop app chỉ khởi động backend local khi tìm thấy interpreter trong
-`.venv\Scripts\python.exe` (hoặc `venv\Scripts\python.exe`). Nếu không có
-virtual environment, app không gọi Python hệ thống; nó sẽ dùng backend remote
-nếu `MEETASR_REMOTE_API` được cấu hình. Có thể chỉ rõ interpreter của venv:
-
-```powershell
-$env:MEETASR_PYTHON = "$PWD\.venv\Scripts\python.exe"
-```
-
 `requirements.txt` là lệnh cài tiện lợi cho người cần cả PostgreSQL và S3/MinIO:
 
 ```bash

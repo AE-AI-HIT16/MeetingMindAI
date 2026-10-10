@@ -2,79 +2,16 @@
   "name": "frontend-next",
   "version": "0.1.0",
   "private": true,
-  "main": "desktop/main.cjs",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "desktop:dev": "concurrently -k \"next dev\" \"wait-on http://127.0.0.1:3000 && electron --no-sandbox desktop/main.cjs\"",
-    "desktop:build": "cross-env ELECTRON_BUILD=1 next build",
-    "desktop:start": "electron --no-sandbox desktop/main.cjs",
-    "desktop:dist": "pnpm desktop:build && electron-builder",
     "test:pcm": "node --test tests/pcm-processor.test.mjs",
     "test:realtime-state": "node --test tests/realtime-transcript-state.test.mjs",
     "test:live-caption": "node --test tests/live-caption-state.test.mjs",
     "test:friendly-error": "node --test tests/friendly-error.test.mjs",
     "test:speaker-blocks": "node --test tests/speaker-blocks.test.mjs"
-  },
-  "build": {
-    "appId": "com.meetingmind.app",
-    "productName": "MeetingMind AI Desktop",
-    "publish": {
-      "provider": "github",
-      "owner": "itzzchann",
-      "repo": "MeetingMindAI"
-    },
-    "directories": {
-      "output": "dist",
-      "buildResources": "desktop/assets"
-    },
-    "files": [
-      "desktop/**/*",
-      "package.json"
-    ],
-    "extraResources": [
-      {
-        "from": "../",
-        "to": "app",
-        "filter": [
-          "meetasr/**/*",
-          "meeting_config.yaml",
-          "pyproject.toml",
-          "README.md",
-          "!meetasr/**/__pycache__",
-          "!meetasr/**/*.pyc"
-        ]
-      },
-      {
-        "from": ".next/standalone",
-        "to": "app/frontend-next/.next/standalone"
-      },
-      {
-        "from": ".next/static",
-        "to": "app/frontend-next/.next/standalone/.next/static"
-      },
-      {
-        "from": "public",
-        "to": "app/frontend-next/.next/standalone/public"
-      }
-    ],
-    "win": {
-      "target": ["nsis", "portable"],
-      "forceCodeSigning": false
-    },
-    "mac": {
-      "target": ["dmg"],
-      "category": "public.app-category.productivity"
-    },
-    "linux": {
-      "target": ["AppImage", "deb"]
-    },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true
-    }
   },
   "dependencies": {
     "next": "16.2.10",
@@ -89,17 +26,10 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "concurrently": "^9.2.1",
-    "cross-env": "^7.0.3",
-    "electron": "^39.0.0",
-    "electron-builder": "^25.1.8",
-    "electron-log": "^5.2.4",
-    "electron-updater": "^6.3.9",
     "eslint": "^9",
     "eslint-config-next": "16.2.10",
     "tailwindcss": "^4",
-    "typescript": "^5",
-    "wait-on": "^9.0.1"
+    "typescript": "^5"
   },
   "packageManager": "pnpm@9.15.4"
 }

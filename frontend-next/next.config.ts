@@ -23,9 +23,6 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: path.resolve(__dirname),
   },
-  // Standalone output cho Electron production: tạo .next/standalone/server.js
-  // tự chứa Node.js server không cần node_modules ngoài.
-  output: process.env.ELECTRON_BUILD === "1" ? "standalone" : undefined,
 };
 
 export default nextConfig;
