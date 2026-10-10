@@ -20,11 +20,20 @@ class ASRServiceResult:
 
 class PreparedTranscription:
     """Audio decoded once and its full-file VAD timeline."""
-    def __init__(self, audio: np.ndarray, vad_segments: list[Segment], duration_ms: int, speaker_turns: list[SpeakerTurn] | None = None):
+    def __init__(
+        self,
+        audio: np.ndarray,
+        vad_segments: list[Segment],
+        duration_ms: int,
+        speaker_turns: list[SpeakerTurn] | None = None,
+        speaker_profiles: dict[int, list[float]] | None = None,
+    ):
         self.audio = audio
         self.vad_segments = vad_segments
         self.duration_ms = duration_ms
         self.speaker_turns = speaker_turns
+        # Mean voice embedding per speaker (from RunPod) for overlap separation.
+        self.speaker_profiles = speaker_profiles or {}
 
 def numpy_to_wav_bytes(audio: np.ndarray, sample_rate: int = 16000) -> bytes:
     """Helper to convert audio numpy array to WAV bytes."""
@@ -404,6 +413,8 @@ class ASRService:
     async def prepare_incremental(
         self,
         audio_source: Any,
+        *,
+        num_speakers: int | None = None,
     ) -> PreparedTranscription:
         """Decode audio locally, run VAD + diarization on the WHOLE file once.
 
@@ -416,9 +427,12 @@ class ASRService:
             # Compress whole-file audio (FLAC) to stay under RunPod's request limit.
             import base64
             audio_b64 = base64.b64encode(numpy_to_diarization_audio_bytes(audio)).decode()
+            payload: dict = {"audio_base64": audio_b64}
+            if num_speakers:
+                payload["num_speakers"] = num_speakers
             res_json = await self._call_serverless(
                 "prepare_incremental",
-                {"audio_base64": audio_b64},
+                payload,
                 timeout=600.0,
             )
         else:
@@ -442,7 +456,8 @@ class ASRService:
                 SpeakerTurn(
                     start_ms=s["start_ms"],
                     end_ms=s["end_ms"],
-                    speaker=s["speaker"]
+                    speaker=s["speaker"],
+                    overlaps=[tuple(r) for r in s.get("overlaps") or []],
                 )
                 for s in res_json["speaker_turns"]
             ]
@@ -465,6 +480,9 @@ class ASRService:
             vad_segments=vad_segments,
             duration_ms=res_json["duration_ms"],
             speaker_turns=speaker_turns,
+            speaker_profiles={
+                int(k): v for k, v in (res_json.get("speaker_profiles") or {}).items()
+            },
         )
 
     async def transcribe_segment(
@@ -537,12 +555,17 @@ class ASRService:
         segments: list[Segment],
         *,
         language: str | None = None,
+        context: str = "",
+        turns: list[SpeakerTurn | None] | None = None,
     ) -> list[list[SentenceInfo]]:
         """Transcribe many speaker turns in ONE RunPod job (results in order).
 
         One round-trip per batch instead of one per turn, served by a single warm
         worker (parallel per-turn calls made RunPod cold-start extra workers).
         Falls back to per-turn calls on an older RunPod image without the action.
+
+        ``turns[i]`` (the speaker turn behind ``segments[i]``) lets RunPod
+        separate that speaker's voice where someone else talks at once.
         """
         if language is None:
             language = os.environ.get("ASR_LANGUAGE", "vi")
@@ -555,21 +578,32 @@ class ASRService:
         import base64
         payload_segments = []
         sent: list[Segment] = []  # empty slices are skipped (→ no sentences)
-        for seg in segments:
+        for index, seg in enumerate(segments):
             start = int(seg.start_ms / 1000 * 16000)
             end = int(seg.end_ms / 1000 * 16000)
             if end <= start:
                 continue
             sent.append(seg)
-            payload_segments.append(
-                base64.b64encode(numpy_to_wav_bytes(prepared.audio[start:end])).decode()
-            )
+            audio_b64 = base64.b64encode(numpy_to_wav_bytes(prepared.audio[start:end])).decode()
+            turn = turns[index] if turns else None
+            profile = prepared.speaker_profiles.get(turn.speaker) if turn else None
+            if turn is not None and turn.overlaps and profile is not None:
+                payload_segments.append({
+                    "audio_base64": audio_b64,
+                    "overlaps": [[a - seg.start_ms, b - seg.start_ms] for a, b in turn.overlaps],
+                    "speaker_embedding": profile,
+                })
+            else:
+                payload_segments.append(audio_b64)
         if not sent:
             return [[] for _ in segments]
         try:
+            payload = {"segments": payload_segments, "language": language}
+            if context:
+                payload["context"] = context
             res_json = await self._call_serverless(
                 "transcribe_segments",
-                {"segments": payload_segments, "language": language},
+                payload,
                 timeout=300.0,
             )
         except RuntimeError as exc:

@@ -19,12 +19,15 @@ from meetasr.runpod.schemas import (
     TranscriptResult,
 )
 from meetasr.runpod.utils.audio import load_audio
+from meetasr.runpod.utils.text_filter import clean_transcript_text
 from meetasr.runpod.utils.diarization import (
+    annotate_overlaps,
     assign_speakers_by_overlap,
     build_speaker_turns,
     chunk_segment,
     circle_pad,
     compressed_seg,
+    first_appearance_mapping,
     map_chars_to_speakers,
     split_at_speaker_turns,
 )
@@ -71,6 +74,8 @@ class MeetPipeline:
         speaker_turn_boundary_search_ms: int = 2000,
         speaker_turn_min_chunk_ms: int = 1000,
         transcription_language: str = "auto",
+        segmenter=None,
+        separator=None,
     ):
         """Initialize MeetPipeline with pre-built model instances.
 
@@ -89,6 +94,10 @@ class MeetPipeline:
             speaker_turn_boundary_search_ms: Backward low-energy search window.
             speaker_turn_min_chunk_ms: Minimum tail duration when splitting turns.
             transcription_language: Default language used by upload jobs.
+            segmenter: SpeakerSegmenter for overlap-aware, frame-precise
+                speaker boundaries. If None, cam++ windows are used as-is.
+            separator: SpeechSeparator that recovers each speaker's voice in
+                overlapped speech before ASR. Needs ``spk`` for embeddings.
         """
         if speaker_turn_max_chunk_ms <= 0:
             raise ValueError("speaker_turn_max_chunk_ms must be positive")
@@ -115,6 +124,8 @@ class MeetPipeline:
         self.speaker_turn_boundary_search_ms = speaker_turn_boundary_search_ms
         self.speaker_turn_min_chunk_ms = speaker_turn_min_chunk_ms
         self.transcription_language = transcription_language
+        self.segmenter = segmenter
+        self.separator = separator if spk_model is not None else None
 
     # ------------------------------------------------------------------
     # Public API
@@ -211,26 +222,45 @@ class MeetPipeline:
     def prepare_diarization_first_transcription(
         self,
         audio_source,
-    ) -> tuple[np.ndarray, list[Segment], list[SpeakerTurn] | None, int]:
+        num_speakers: int | None = None,
+    ) -> tuple[
+        np.ndarray, list[Segment], list[SpeakerTurn] | None, int, dict[int, list[float]]
+    ]:
         """Decode audio, run VAD + diarization, and build ASR-ready turns.
 
         ``None`` speaker turns means the caller must use the legacy ASR-first
         fallback. This preserves transcript availability when diarization is
         disabled, produces no usable chunks, or fails.
+
+        ``num_speakers`` (from the user) fixes the cluster count. The last
+        item maps each turn speaker to its mean cam++ embedding, used to pick
+        that speaker's voice when separating overlapped speech.
         """
         audio = load_audio(audio_source)
         duration_ms = int(len(audio) / SAMPLE_RATE * 1000)
         vad_segments = self._run_vad(audio)
         if not self.diarization_first or self.spk is None or not vad_segments:
-            return audio, vad_segments, None, duration_ms
+            return audio, vad_segments, None, duration_ms, {}
 
         try:
-            diar_segments = self._diarize_segments(audio, vad_segments)
+            segmentation = None
+            if self.segmenter is not None:
+                segmentation, vad_segments = self._gate_non_speech(audio, vad_segments)
+                if not vad_segments:
+                    return audio, vad_segments, [], duration_ms, {}
+            raw_profiles: dict[int, np.ndarray] = {}
+            diar_segments = self._diarize_segments(
+                audio,
+                vad_segments,
+                num_speakers=num_speakers,
+                segmentation=segmentation,
+                profiles=raw_profiles,
+            )
             if not diar_segments:
                 logging.warning(
                     "SPK-first: no diarization segments; using ASR-first fallback."
                 )
-                return audio, vad_segments, None, duration_ms
+                return audio, vad_segments, None, duration_ms, {}
             speaker_turns = build_speaker_turns(
                 audio,
                 diar_segments,
@@ -243,19 +273,28 @@ class MeetPipeline:
                 logging.warning(
                     "SPK-first: no speaker turns; using ASR-first fallback."
                 )
-                return audio, vad_segments, None, duration_ms
+                return audio, vad_segments, None, duration_ms, {}
+            annotate_overlaps(speaker_turns, diar_segments)
+            mapping = first_appearance_mapping(diar_segments)
+            profiles = {
+                mapping[raw]: vector.tolist()
+                for raw, vector in raw_profiles.items()
+                if raw in mapping
+            }
             logging.info(
-                "SPK-first: built %s ASR turn(s) from %s diarization segment(s).",
+                "SPK-first: built %s ASR turn(s) from %s diarization segment(s), "
+                "%s with overlapped speech.",
                 len(speaker_turns),
                 len(diar_segments),
+                sum(1 for turn in speaker_turns if turn.overlaps),
             )
-            return audio, vad_segments, speaker_turns, duration_ms
+            return audio, vad_segments, speaker_turns, duration_ms, profiles
         except Exception as exc:
             logging.warning(
                 "SPK-first preparation failed: %s. Using ASR-first fallback.",
                 exc,
             )
-            return audio, vad_segments, None, duration_ms
+            return audio, vad_segments, None, duration_ms, {}
 
     def transcribe_vad_segment(
         self,
@@ -308,10 +347,19 @@ class MeetPipeline:
         self,
         chunks: list[np.ndarray],
         language: str = "auto",
+        overlaps: list[list[tuple[int, int]]] | None = None,
+        speaker_embeddings: list[list[float] | None] | None = None,
         **kwargs,
     ) -> list[list[SentenceInfo]]:
         """Transcribe many standalone chunks (speaker turns) in one batched ASR
-        call; same result per chunk as ``transcribe_vad_segment(chunk, whole)``."""
+        call; same result per chunk as ``transcribe_vad_segment(chunk, whole)``.
+
+        ``overlaps[i]`` (ms, relative to chunk i) are ranges where another
+        speaker talks too; with a separator and ``speaker_embeddings[i]`` the
+        chunk's own voice is separated out there before ASR.
+        """
+        if self.separator is not None and overlaps and speaker_embeddings:
+            chunks = self._separate_overlaps(list(chunks), overlaps, speaker_embeddings)
         if getattr(self.asr, "uses_internal_vad", False):
             return [
                 self.transcribe_vad_segment(
@@ -322,10 +370,40 @@ class MeetPipeline:
             ]
         segments = [Segment(0, int(len(chunk) / SAMPLE_RATE * 1000)) for chunk in chunks]
         results = self.asr.recognize(list(chunks), language=language, **kwargs)
+        for result, segment in zip(results, segments):
+            result["text"] = clean_transcript_text(
+                result.get("text", ""), segment.duration_ms / 1000
+            )
         return [
             build_sentence_info([result], [segment], timestamp_offsets_ms=[0])
+            if result["text"] else []
             for result, segment in zip(results, segments)
         ]
+
+    def _separate_overlaps(
+        self,
+        chunks: list[np.ndarray],
+        overlaps: list[list[tuple[int, int]]],
+        speaker_embeddings: list[list[float] | None],
+    ) -> list[np.ndarray]:
+        t0 = time.perf_counter()
+        separated = 0
+        for index, (regions, embedding) in enumerate(zip(overlaps, speaker_embeddings)):
+            if not regions or embedding is None:
+                continue
+            try:
+                chunks[index] = self.separator.extract(
+                    chunks[index], regions, np.asarray(embedding), self.spk.embed_batch
+                )
+                separated += 1
+            except Exception as exc:
+                logging.warning("Overlap separation failed for chunk %s: %s", index, exc)
+        if separated:
+            logging.info(
+                "Separated overlapped speech in %d chunk(s) (%.2fs)",
+                separated, time.perf_counter() - t0,
+            )
+        return chunks
 
     def finalize_incremental_transcript(
         self,
@@ -631,12 +709,41 @@ class MeetPipeline:
 
         return sentence_info
 
+    def _gate_non_speech(self, audio: np.ndarray, vad_segments: list[Segment]):
+        """Drop VAD segments the segmentation model hears as non-speech.
+
+        Silero fires on coughs, laughter, clapping or typing; those segments
+        made Qwen write words ("Applause", "Đi.") and gave clustering extra
+        "speakers". Returns the segmentation for reuse in diarization.
+        """
+        from meetasr.runpod.utils.overlap import speech_ratio
+
+        segmentation = self.segmenter(audio)
+        kept = [
+            segment for segment in vad_segments
+            if speech_ratio(segmentation, segment.start_s, segment.end_s)
+            >= self.segmenter.min_speech_ratio
+        ]
+        if len(kept) != len(vad_segments):
+            logging.info(
+                "Speech gate: dropped %d of %d VAD segment(s) without voice.",
+                len(vad_segments) - len(kept), len(vad_segments),
+            )
+        return segmentation, kept
+
     def _diarize_segments(
         self,
         audio: np.ndarray,
         segments: list[Segment],
+        num_speakers: int | None = None,
+        segmentation=None,
+        profiles: dict[int, np.ndarray] | None = None,
     ) -> list[list]:
-        """Return compressed ``[start_s, end_s, speaker_id]`` segments."""
+        """Return compressed ``[start_s, end_s, speaker_id]`` segments.
+
+        If ``profiles`` is given it is filled with each cluster's mean,
+        L2-normalized cam++ embedding.
+        """
         if self.spk is None or not segments:
             return []
 
@@ -672,7 +779,11 @@ class MeetPipeline:
             "SPK diarize: %d VAD seg -> %d chunks -> %d embeddings",
             len(segments), len(all_chunks), all_embs.shape[0],
         )
-        labels = self.spk.cluster(all_embs)
+        labels = (
+            self.spk.cluster(all_embs, oracle_num=num_speakers)
+            if num_speakers
+            else self.spk.cluster(all_embs)
+        )
         usable_count = min(len(embedded_chunks), len(labels))
         if usable_count != len(embedded_chunks):
             logging.warning(
@@ -687,7 +798,38 @@ class MeetPipeline:
                 labels[:usable_count],
             )
         ]
-        return compressed_seg(diar_segs)
+        if profiles is not None:
+            vectors = all_embs[:usable_count].detach().float().cpu().numpy()
+            vectors = vectors / np.maximum(
+                np.linalg.norm(vectors, axis=1, keepdims=True), 1e-8
+            )
+            label_array = np.asarray(labels[:usable_count])
+            for label in np.unique(label_array):
+                centroid = vectors[label_array == label].mean(axis=0)
+                profiles[int(label)] = centroid / max(float(np.linalg.norm(centroid)), 1e-8)
+        diar_segs = compressed_seg(diar_segs)
+        if self.segmenter is None or not diar_segs:
+            return diar_segs
+        try:
+            return self._refine_with_segmentation(audio, diar_segs, segmentation)
+        except Exception as exc:
+            logging.warning("Overlap segmentation failed (%s); using cam++ windows.", exc)
+            return diar_segs
+
+    def _refine_with_segmentation(
+        self,
+        audio: np.ndarray,
+        diar_segs: list[list],
+        segmentation=None,
+    ) -> list[list]:
+        """Frame-precise, overlap-aware speaker segments (may overlap)."""
+        t0 = time.perf_counter()
+        refined, overlapped_s = self.segmenter.refine(audio, diar_segs, segmentation)
+        logging.info(
+            "SPK overlap: %d -> %d segment(s), %.1fs overlapped speech (%.2fs)",
+            len(diar_segs), len(refined), overlapped_s, time.perf_counter() - t0,
+        )
+        return refined or diar_segs
 
 
 # ------------------------------------------------------------------

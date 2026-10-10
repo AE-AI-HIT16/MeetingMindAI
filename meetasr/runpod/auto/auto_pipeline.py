@@ -80,6 +80,20 @@ class AutoPipeline:
         pipeline_cfg = config.get("pipeline") or {}
         gap_rescue_cfg = pipeline_cfg.get("gap_rescue") or {}
         diarization_first_cfg = pipeline_cfg.get("diarization_first") or {}
+        overlap_cfg = dict(pipeline_cfg.get("overlap_detection") or {})
+        segmenter = None
+        if spk_model is not None and overlap_cfg.pop("enabled", False):
+            from meetasr.runpod.utils.overlap import SpeakerSegmenter
+
+            overlap_cfg.setdefault("device", device)
+            segmenter = SpeakerSegmenter(**overlap_cfg)
+        separation_cfg = dict(pipeline_cfg.get("overlap_separation") or {})
+        separator = None
+        if spk_model is not None and separation_cfg.pop("enabled", False):
+            from meetasr.runpod.models.sep.separator import SpeechSeparator
+
+            separation_cfg.setdefault("device", device)
+            separator = SpeechSeparator(**separation_cfg)
 
         return MeetPipeline(
             asr_model=asr_model,
@@ -107,6 +121,8 @@ class AutoPipeline:
                 "transcription_language",
                 "auto",
             ),
+            segmenter=segmenter,
+            separator=separator,
         )
 
     @classmethod

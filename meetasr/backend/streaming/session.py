@@ -85,6 +85,9 @@ class StreamSession:
         # Window tối đa
         self.max_window_seconds = 30.0
 
+        # Từ khóa / tên riêng người dùng nhập, gửi kèm mỗi window cho Qwen3
+        self.asr_context = ""
+
         # Window tối thiểu để bắt đầu infer
         self.min_window_seconds = 4.0
 

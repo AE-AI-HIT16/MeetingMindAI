@@ -43,6 +43,10 @@ export interface RealtimeStreamState {
 export interface RealtimeStreamOptions {
   /** Server ASR window length in seconds (server clamps to 5–30). */
   windowSeconds?: number;
+  /** Keywords / names passed to Qwen3-ASR as context. */
+  context?: string;
+  /** Known number of speakers for the offline diarization after stop. */
+  speakers?: number;
 }
 
 export interface RealtimeStreamActions {
@@ -62,6 +66,8 @@ export interface RealtimeStreamActions {
 async function buildWsUrl(options: RealtimeStreamOptions): Promise<string> {
   const params = new URLSearchParams();
   if (options.windowSeconds) params.set("window", String(options.windowSeconds));
+  if (options.context?.trim()) params.set("context", options.context.trim());
+  if (options.speakers) params.set("speakers", String(options.speakers));
   const query = params.toString();
   return `${getWebSocketBase()}/v1/realtime/stream${query ? `?${query}` : ""}`;
 }

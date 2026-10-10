@@ -74,3 +74,32 @@ async def test_other_runpod_errors_are_not_swallowed(monkeypatch):
 
     with pytest.raises(RuntimeError, match="CUDA"):
         await service.transcribe_segments(_prepared(), [Segment(0, 1000)])
+
+
+@pytest.mark.asyncio
+async def test_overlapped_turn_carries_relative_overlaps_and_voice_profile(monkeypatch):
+    from meetasr.backend.api.schemas_phase2 import SpeakerTurn
+
+    sent = {}
+
+    async def fake_call(action, payload, timeout=600.0):
+        sent.update(payload)
+        return [[] for _ in payload["segments"]]
+
+    service = _service()
+    monkeypatch.setattr(service, "_call_serverless", fake_call)
+    prepared = _prepared()
+    prepared.speaker_profiles = {1: [0.1, 0.2]}
+    turns = [
+        SpeakerTurn(0, 2000, 0),
+        SpeakerTurn(3000, 6000, 1, overlaps=[(3500, 4200)]),
+    ]
+
+    await service.transcribe_segments(
+        prepared, [t.to_segment() for t in turns], context="OKR", turns=turns
+    )
+
+    assert sent["context"] == "OKR"
+    assert isinstance(sent["segments"][0], str)  # no overlap: plain WAV
+    assert sent["segments"][1]["overlaps"] == [[500, 1200]]
+    assert sent["segments"][1]["speaker_embedding"] == [0.1, 0.2]

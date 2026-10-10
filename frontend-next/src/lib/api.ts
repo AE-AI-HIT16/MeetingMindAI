@@ -141,11 +141,15 @@ import { getSession } from "next-auth/react";
 export async function uploadSource(
   file: File,
   onProgress?: (percent: number) => void,
+  hints: { context?: string; numSpeakers?: number } = {},
 ): Promise<CreateSourceResponse> {
   const session = await getSession();
   const token = session?.accessToken;
   const formData = new FormData();
   formData.append("file", file);
+  // Optional recognition hints (keywords for Qwen3, known speaker count).
+  if (hints.context?.trim()) formData.append("context", hints.context.trim());
+  if (hints.numSpeakers) formData.append("num_speakers", String(hints.numSpeakers));
 
   // Dùng XMLHttpRequest để có progress event (fetch không hỗ trợ upload progress)
   if (onProgress) {

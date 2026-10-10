@@ -16,7 +16,7 @@ import logging
 import mimetypes
 from typing import Annotated, List, Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
 from fastapi.responses import RedirectResponse, StreamingResponse
 from pydantic import BaseModel
 from sqlmodel import Session, select
@@ -163,6 +163,10 @@ def get_storage_summary(
     return {"used_bytes": used_bytes, "quota_bytes": QUOTA_BYTES}
 
 
+MAX_CONTEXT_CHARS = 1000
+MAX_SPEAKERS = 20
+
+
 # ---------------------------------------------------------------------------
 # POST /v1/sources — upload file, tạo Source + Job
 # ---------------------------------------------------------------------------
@@ -173,6 +177,8 @@ async def create_source(
     db: Annotated[Session, Depends(get_db)],
     storage: Annotated[StorageBackend, Depends(get_storage_backend)],
     current_user: Annotated[Optional[User], Depends(get_current_user)],
+    context: Annotated[str, Form(max_length=MAX_CONTEXT_CHARS, description="Từ khóa, tên riêng giúp ASR nhận đúng.")] = "",
+    num_speakers: Annotated[Optional[int], Form(ge=1, le=MAX_SPEAKERS, description="Số người nói nếu biết.")] = None,
 ) -> CreateSourceResponse:
     """Upload file media, lưu vào Storage, tạo Source và Job trong DB.
 
@@ -183,6 +189,8 @@ async def create_source(
         file:    File upload từ form-data (UploadFile của FastAPI).
         db:      DB session (Dependency Injection).
         storage: Storage backend — local hoặc MinIO (từ biến môi trường).
+        context: Từ khóa / tên riêng (tùy chọn) đưa vào Qwen3-ASR.
+        num_speakers: Số người nói (tùy chọn) cho bước phân người nói.
 
     Returns:
         ``sourceId`` để mở Source và ``jobId`` để theo dõi tiến trình xử lý.
@@ -232,7 +240,12 @@ async def create_source(
     db.flush()  # để có source.id trước khi tạo Job
 
     # Tạo Job với trạng thái queued — Worker sẽ xử lý sau
-    job = Job(source_id=source.id, status=JobStatus.QUEUED)
+    job = Job(
+        source_id=source.id,
+        status=JobStatus.QUEUED,
+        asr_context=context.strip() or None,
+        num_speakers=num_speakers,
+    )
     db.add(job)
     db.commit()
     db.refresh(source)

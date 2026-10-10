@@ -28,7 +28,7 @@ class FakeASR:
     async def warmup(self):
         self.warmups += 1
 
-    async def transcribe(self, audio, *, offset_ms=0, key=None):
+    async def transcribe(self, audio, *, offset_ms=0, key=None, context=""):
         self.windows.append(len(audio) / SAMPLE_RATE)
         return ASRServiceResult(segments=[], text="", duration_ms=int(len(audio) / SAMPLE_RATE * 1000))
 
@@ -113,7 +113,7 @@ def test_failed_window_is_skipped_and_later_windows_still_confirm(harness):
     calls = {"n": 0}
     original = harness.asr.transcribe
 
-    async def flaky(audio, *, offset_ms=0, key=None):
+    async def flaky(audio, *, offset_ms=0, key=None, context=""):
         calls["n"] += 1
         if calls["n"] == 1:
             raise RuntimeError("RunPod down")

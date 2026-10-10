@@ -53,6 +53,7 @@ class RealtimeASRService:
         *,
         offset_ms: int = 0,
         key: str | None = None,
+        context: str = "",
     ) -> ASRServiceResult:
 
         if self._is_serverless:
@@ -63,6 +64,8 @@ class RealtimeASRService:
             }
             if key:
                 payload["key"] = key
+            if context:
+                payload["context"] = context
             res_json = await self._serverless._call_serverless(
                 "realtime_transcribe", payload, timeout=120.0,
             )

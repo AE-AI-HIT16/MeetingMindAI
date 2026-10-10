@@ -51,7 +51,24 @@ def init_db() -> None:
     import meetasr.backend.db.user_model  # noqa: F401  -- bang users
     SQLModel.metadata.create_all(engine)
     _ensure_unique_documents()
+    _ensure_job_columns()
     logger.info("Đã khởi tạo các bảng trong cơ sở dữ liệu.")
+
+
+def _ensure_job_columns() -> None:
+    """Add Job columns introduced after the table was first created."""
+    from sqlalchemy import inspect
+
+    existing = {column["name"] for column in inspect(engine).get_columns("jobs")}
+    added = {
+        "asr_context": "TEXT",
+        "num_speakers": "INTEGER",
+    }
+    with engine.begin() as connection:
+        for name, sql_type in added.items():
+            if name not in existing:
+                connection.execute(text(f"ALTER TABLE jobs ADD COLUMN {name} {sql_type}"))
+                logger.info("Đã thêm cột jobs.%s.", name)
 
 
 def _ensure_unique_documents() -> None:

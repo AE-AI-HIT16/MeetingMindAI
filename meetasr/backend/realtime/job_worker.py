@@ -15,6 +15,7 @@ from meetasr.backend.api.schemas_phase2 import (
     DoneEvent,
     ErrorEvent,
     SpeakerAssignment,
+    SpeakerTurn,
     SpeakerUpdateEvent,
     StatusEvent,
     TranscriptDeltaEvent,
@@ -34,6 +35,7 @@ from meetasr.backend.schemas import SentenceInfo
 from meetasr.backend.services.asr_service import ASRService
 from meetasr.backend.services.document_service import DocumentService
 from meetasr.backend.storage.backend import StorageBackend
+from meetasr.backend.utils.overlap_echo import is_overlap_echo, overlap_ratio
 
 logger = logging.getLogger(__name__)
 
@@ -96,18 +98,22 @@ class JobQueue:
             #  1. VAD + speaker diarization on the WHOLE file -> consistent speakers
             #  2. transcribe each speaker turn, streaming segments as they complete
             #  3. finalize (punctuation / speaker projection)
-            prepared = await self._asr_service.prepare_incremental(audio_source)
+            asr_context, num_speakers = self._job_hints(job_id)
+            prepared = await self._asr_service.prepare_incremental(
+                audio_source,
+                num_speakers=num_speakers,
+            )
             provisional_sentences: list[SentenceInfo] = []
             persisted: list[TranscriptSegmentPayload] = []
             speaker_first = prepared.speaker_turns is not None
             work_items = (
                 [
-                    (turn.to_segment(), turn.speaker)
+                    (turn.to_segment(), turn.speaker, turn)
                     for turn in prepared.speaker_turns
                 ]
                 if speaker_first
                 else [
-                    (vad_segment, None)
+                    (vad_segment, None, None)
                     for vad_segment in prepared.vad_segments
                 ]
             )
@@ -125,14 +131,29 @@ class JobQueue:
             # seconds; the UI reveals them one by one). <= 8 x 15 s WAV ≈ 5 MB.
             BATCH_SIZE = 8
             completed = 0
+            transcribed_turns: list[tuple[SpeakerTurn, str]] = []
             for batch_start in range(0, len(work_items), BATCH_SIZE):
                 batch = work_items[batch_start:batch_start + BATCH_SIZE]
                 batch_results = await self._asr_service.transcribe_segments(
                     prepared,
-                    [seg for seg, _spk in batch],
+                    [seg for seg, _spk, _turn in batch],
+                    context=asr_context,
+                    turns=[turn for _seg, _spk, turn in batch],
                 )
+                batch_texts = [
+                    (turn, " ".join(s.text for s in sentences))
+                    for (_seg, _spk, turn), sentences in zip(batch, batch_results)
+                    if turn is not None
+                ]
+                transcribed_turns.extend(batch_texts)
 
-                for (transcription_segment, speaker), chunk_sentences in zip(batch, batch_results):
+                for (transcription_segment, speaker, turn), chunk_sentences in zip(batch, batch_results):
+                    if turn is not None and _is_echo(turn, chunk_sentences, transcribed_turns):
+                        logger.info(
+                            "Job %s: dropped overlapped turn %d-%dms repeating another speaker",
+                            job_id, turn.start_ms, turn.end_ms,
+                        )
+                        continue
                     if speaker_first:
                         for sentence in chunk_sentences:
                             sentence.speaker = speaker
@@ -238,6 +259,14 @@ class JobQueue:
         finally:
             if temporary_path is not None:
                 await asyncio.to_thread(temporary_path.unlink, missing_ok=True)
+
+    def _job_hints(self, job_id: str) -> tuple[str, int | None]:
+        """User hints stored on the Job: Qwen3 keywords and speaker count."""
+        with Session(engine) as db:
+            job = db.get(Job, job_id)
+            if job is None:
+                return "", None
+            return job.asr_context or "", job.num_speakers
 
     def _prepare_job(self, job_id: str) -> Source | None:
         with Session(engine) as db:
@@ -482,3 +511,22 @@ def recover_interrupted_jobs(db_engine=None) -> tuple[int, int]:
     if requeued or failed:
         logger.info("Recovered interrupted jobs: %d requeued, %d failed (no audio).", requeued, failed)
     return requeued, failed
+
+
+def _is_echo(
+    turn: SpeakerTurn,
+    sentences: list[SentenceInfo],
+    transcribed: list[tuple[SpeakerTurn, str]],
+) -> bool:
+    """A mostly-overlapped turn whose words repeat a concurrent speaker."""
+    concurrent = [
+        text for other, text in transcribed
+        if other.speaker != turn.speaker
+        and other.start_ms < turn.end_ms
+        and other.end_ms > turn.start_ms
+    ]
+    return is_overlap_echo(
+        " ".join(s.text for s in sentences),
+        overlap_ratio(turn.start_ms, turn.end_ms, turn.overlaps),
+        concurrent,
+    )

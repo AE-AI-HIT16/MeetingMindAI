@@ -10,6 +10,21 @@ pipeline:
     max_chunk_ms: 15000
     boundary_search_ms: 2000
     min_chunk_ms: 1000
+  # pyannote segmentation-3.0 (ONNX, CPU): finds overlapped speech, places
+  # speaker changes to ~17 ms and drops VAD segments without a voice.
+  # Tuned on synthetic meetings (scripts/eval): DER 14.5% -> 7.0%.
+  overlap_detection:
+    enabled: true
+    model: onnx-community/pyannote-segmentation-3.0
+    step_s: 1.0            # ~25 s CPU per hour of audio (2.0 halves it, slightly worse)
+    boundary_s: 0.0        # moving cam++ speaker changes made DER worse
+    supplement: true
+    min_speech_ratio: 0.3  # VAD segment needs a voice >= 30% of its length
+  # MossFormer2 separation of overlapped regions before ASR (GPU).
+  # Recovers interjections spoken over someone else ("dạ", "vâng").
+  overlap_separation:
+    enabled: true
+    model: alibabasglab/MossFormer2_SS_16K
 
 realtime:
   vad:

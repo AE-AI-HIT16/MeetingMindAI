@@ -17,6 +17,11 @@ import type { CaptionParagraph } from "@/lib/liveCaptionState";
 import { formatDuration, formatStamp, getSpeakerStyle } from "@/lib/format";
 import { StatusBadge, Waveform } from "@/components/ui";
 import { ErrorNotice } from "@/components/ErrorNotice";
+import {
+  EMPTY_HINTS,
+  RecognitionHints,
+  hintSpeakerCount,
+} from "@/components/RecognitionHints";
 
 // ----------------------------------------------------------------
 // Page
@@ -44,6 +49,7 @@ export default function RealtimePage() {
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const [audioSource, setAudioSource] = useState<AudioSource>("microphone");
+  const [hints, setHints] = useState(EMPTY_HINTS);
   // Client-only detection (false during SSR) to avoid hydration mismatch.
   const captionSupported = useSyncExternalStore(
     noopSubscribe,
@@ -68,6 +74,8 @@ export default function RealtimePage() {
       audioSource === "microphone" ? captionSupported : trackCaptionSupported;
     const started = await start(audioSource, {
       windowSeconds: useCaption ? 15 : 10,
+      context: hints.context,
+      speakers: hintSpeakerCount(hints),
     });
     setCaptionActive(useCaption && started !== null);
     if (useCaption && started !== null) {
@@ -237,6 +245,9 @@ export default function RealtimePage() {
             <SourceOption label="Microphone" selected={audioSource === "microphone"} onClick={() => setAudioSource("microphone")} />
             <SourceOption label="Âm thanh từ tab" selected={audioSource === "tab"} onClick={() => setAudioSource("tab")} />
           </div>
+        )}
+        {!isRecording && !isFinalizing && (
+          <RecognitionHints value={hints} onChange={setHints} className="mt-4" />
         )}
 
         {/* Connection status bar */}

@@ -110,6 +110,7 @@ class ASRWorker:
         result = await self.asr_service.transcribe(
             audio,
             offset_ms=self.offset_ms,
+            context=getattr(self.session, "asr_context", ""),
         )
         self.offset_ms += result.duration_ms
         return result

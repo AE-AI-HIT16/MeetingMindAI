@@ -37,6 +37,8 @@ class SpeakerTurn:
     start_ms: int
     end_ms: int
     speaker: int
+    # Absolute [start_ms, end_ms] ranges where another speaker talks too.
+    overlaps: list[tuple[int, int]] = field(default_factory=list)
 
     @property
     def duration_ms(self) -> int:

@@ -5,6 +5,11 @@ import { useRouter } from "next/navigation";
 import { PageHeader, Waveform } from "@/components/ui";
 import { uploadSource, warmupAsr } from "@/lib/api";
 import { ErrorNotice } from "@/components/ErrorNotice";
+import {
+  EMPTY_HINTS,
+  RecognitionHints,
+  hintSpeakerCount,
+} from "@/components/RecognitionHints";
 
 const ACCEPT = "video/*,audio/*";
 const MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024;
@@ -17,6 +22,7 @@ export default function UploadPage() {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<unknown>(null);
+  const [hints, setHints] = useState(EMPTY_HINTS);
 
   // Start the RunPod cold start now; by the time the file is uploaded the
   // worker is (nearly) ready.
@@ -53,7 +59,10 @@ export default function UploadPage() {
     };
 
     try {
-      const result = await uploadSource(file, onProgress);
+      const result = await uploadSource(file, onProgress, {
+        context: hints.context,
+        numSpeakers: hintSpeakerCount(hints),
+      });
       router.push(
         `/sources/${result.sourceId}?jobId=${encodeURIComponent(result.jobId)}`,
       );
@@ -67,6 +76,13 @@ export default function UploadPage() {
   return (
     <div className="mx-auto w-full max-w-3xl px-6 py-10 md:px-10">
       <PageHeader eyebrow="Bước 1 / 3 · Tải lên" title="Chọn media để tạo tài liệu" />
+
+      <RecognitionHints
+        value={hints}
+        onChange={setHints}
+        disabled={uploading}
+        className="mt-8"
+      />
 
       <button
         type="button"
@@ -82,7 +98,7 @@ export default function UploadPage() {
           setDragging(false);
           void onFiles(e.dataTransfer.files);
         }}
-        className={`mt-8 flex w-full flex-col items-center justify-center rounded-[var(--radius-card)] border-2 border-dashed px-6 py-16 text-center transition disabled:cursor-wait ${
+        className={`mt-4 flex w-full flex-col items-center justify-center rounded-[var(--radius-card)] border-2 border-dashed px-6 py-16 text-center transition disabled:cursor-wait ${
           dragging
             ? "border-brand bg-brand-wash"
             : "border-line bg-surface hover:border-brand/60 hover:bg-surface-2"

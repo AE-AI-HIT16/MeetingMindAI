@@ -187,7 +187,7 @@ async def prepare_incremental(
     import asyncio
 
     if getattr(pipeline, "diarization_first", False):
-        audio_out, vad_segments, speaker_turns, duration_ms = await asyncio.to_thread(
+        audio_out, vad_segments, speaker_turns, duration_ms, _profiles = await asyncio.to_thread(
             pipeline.prepare_diarization_first_transcription, audio
         )
     else:

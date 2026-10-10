@@ -10,6 +10,7 @@ import numpy as np
 
 from meetasr.runpod.schemas import Segment, SentenceInfo, TranscriptResult
 from meetasr.runpod.utils.audio import load_audio
+from meetasr.runpod.utils.text_filter import clean_transcript_text
 from meetasr.runpod.utils.timestamp import merge_vad_segments
 
 
@@ -35,10 +36,13 @@ class ASRPipeline:
         asr_model,
         vad_model=None,
         device: str = "cpu",
+        segmenter=None,
     ):
         self.asr = asr_model
         self.vad = vad_model
         self.device = device
+        # Optional SpeakerSegmenter: drops VAD segments without a voice.
+        self.segmenter = segmenter
 
 
     # -------------------------------------------------------------
@@ -58,6 +62,15 @@ class ASRPipeline:
         duration = len(audio) / SAMPLE_RATE
 
         segments = self._run_vad(audio)
+        if self.segmenter is not None and segments:
+            from meetasr.runpod.utils.overlap import speech_ratio
+
+            segmentation = self.segmenter(audio)
+            segments = [
+                segment for segment in segments
+                if speech_ratio(segmentation, segment.start_s, segment.end_s)
+                >= self.segmenter.min_speech_ratio
+            ]
 
         sentence_info = []
 
@@ -197,13 +210,16 @@ class ASRPipeline:
 
 
         result = results[0]
+        text = clean_transcript_text(
+            result.get("text", ""),
+            (end_ms - start_ms) / 1000,
+        )
+        if not text:
+            return []
 
         return [
             SentenceInfo(
-                text=result.get(
-                    "text",
-                    "",
-                ).strip(),
+                text=text,
 
                 start=segment.start_ms / 1000,
 

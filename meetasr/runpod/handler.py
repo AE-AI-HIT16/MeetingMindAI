@@ -73,10 +73,16 @@ def init_models():
         config_path = os.getenv("CONFIG_PATH", "config.yaml")
         logger.info("Loading pipeline from config: %s", config_path)
         pipeline = AutoPipeline.from_yaml(config_path)
+        # Overlap models load lazily; load them now (first worker also
+        # downloads them to the Network Volume) so no job waits on it.
+        for component in (pipeline.segmenter, pipeline.separator):
+            if component is not None:
+                component._ensure_loaded()
         realtime_pipeline = ASRPipeline(
             asr_model=pipeline.asr,
             vad_model=pipeline.vad,
             device=pipeline.device,
+            segmenter=pipeline.segmenter,
         )
         _load_stats["model_load_seconds"] = round(time.monotonic() - t0, 1)
         logger.info("Pipeline loaded successfully in %.1fs.", _load_stats["model_load_seconds"])
@@ -130,9 +136,12 @@ async def run_handler(job):
         audio_bytes = base64.b64decode(job_input['audio_base64'])
         from meetasr.runpod.utils.audio import load_audio
         audio = load_audio(audio_bytes)
+        profiles = {}
         if getattr(pipeline, "diarization_first", False):
-            audio_out, vad_segments, speaker_turns, duration_ms = await asyncio.to_thread(
-                pipeline.prepare_diarization_first_transcription, audio
+            audio_out, vad_segments, speaker_turns, duration_ms, profiles = await asyncio.to_thread(
+                pipeline.prepare_diarization_first_transcription,
+                audio,
+                job_input.get('num_speakers'),
             )
         else:
             audio_out, vad_segments, duration_ms = await asyncio.to_thread(
@@ -146,10 +155,18 @@ async def run_handler(job):
             ],
             "duration_ms": duration_ms,
             "speaker_turns": None,
+            # Mean cam++ voice per speaker; sent back with overlapped turns so
+            # transcribe_segments can separate that speaker's voice.
+            "speaker_profiles": {str(k): v for k, v in profiles.items()},
         }
         if speaker_turns is not None:
             response["speaker_turns"] = [
-                {"start_ms": t.start_ms, "end_ms": t.end_ms, "speaker": t.speaker}
+                {
+                    "start_ms": t.start_ms,
+                    "end_ms": t.end_ms,
+                    "speaker": t.speaker,
+                    "overlaps": [list(r) for r in t.overlaps],
+                }
                 for t in speaker_turns
             ]
         return response
@@ -163,9 +180,19 @@ async def run_handler(job):
         # All turns go to the ASR model in one batched call (GPU batching).
         from meetasr.runpod.utils.audio import load_audio
         language = job_input.get('language', 'auto')
-        chunks = [load_audio(base64.b64decode(b64)) for b64 in job_input['segments']]
+        # Each segment is base64 WAV, or {"audio_base64", "overlaps" (ms,
+        # relative), "speaker_embedding"} for a turn with overlapped speech.
+        items = [
+            item if isinstance(item, dict) else {"audio_base64": item}
+            for item in job_input['segments']
+        ]
+        chunks = [load_audio(base64.b64decode(item['audio_base64'])) for item in items]
+        # Keywords / names from the user bias Qwen3 towards the right spelling.
         per_chunk = await asyncio.to_thread(
-            pipeline.transcribe_chunks, chunks, language=language
+            pipeline.transcribe_chunks, chunks, language=language,
+            overlaps=[[tuple(r) for r in item.get('overlaps') or []] for item in items],
+            speaker_embeddings=[item.get('speaker_embedding') for item in items],
+            context=job_input.get('context', ''),
         )
         return [[_sentence_info_to_dict(s) for s in sentences] for sentences in per_chunk]
 
@@ -210,7 +237,8 @@ async def run_handler(job):
         # mis-detects Vietnamese as Chinese.
         language = job_input.get('language', 'auto')
         result = await asyncio.to_thread(
-            realtime_pipeline.transcribe, audio, key=key, language=language
+            realtime_pipeline.transcribe, audio, key=key, language=language,
+            context=job_input.get('context', ''),
         )
         return {
             "key": result.key,

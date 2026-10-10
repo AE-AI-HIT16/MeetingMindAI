@@ -128,6 +128,10 @@ class Job(SQLModel, table=True):
     stage: str = Field(default="")                      # see JobStage
     progress: float = Field(default=0.0)                # 0.0 → 1.0
     error: Optional[str] = None                         # set only when status=failed
+    # Optional user hints for recognition: keywords/names for Qwen3 and the
+    # known number of speakers for clustering.
+    asr_context: Optional[str] = None
+    num_speakers: Optional[int] = None
 
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

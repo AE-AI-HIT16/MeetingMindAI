@@ -77,6 +77,9 @@ def build_speaker_turns(
     duration_ms = int(len(audio) / sample_rate * 1000)
     speaker_mapping: dict[int, int] = {}
     normalized_turns: list[list[int]] = []
+    # Overlap-aware diarization interleaves speakers, so merge with the
+    # speaker's own latest turn rather than only the previous turn.
+    latest_turn: dict[int, list[int]] = {}
 
     for raw_start_s, raw_end_s, raw_speaker in sorted(
         diar_segments,
@@ -91,17 +94,17 @@ def build_speaker_turns(
             int(raw_speaker),
             len(speaker_mapping),
         )
+        previous = latest_turn.get(speaker)
         if (
-            normalized_turns
-            and normalized_turns[-1][2] == speaker
-            and start_ms - normalized_turns[-1][1] <= same_speaker_merge_gap_ms
+            previous is not None
+            and start_ms - previous[1] <= same_speaker_merge_gap_ms
+            and not _other_speaker_between(normalized_turns, previous, start_ms)
         ):
-            normalized_turns[-1][1] = max(
-                normalized_turns[-1][1],
-                end_ms,
-            )
+            previous[1] = max(previous[1], end_ms)
         else:
-            normalized_turns.append([start_ms, end_ms, speaker])
+            turn = [start_ms, end_ms, speaker]
+            normalized_turns.append(turn)
+            latest_turn[speaker] = turn
 
     turns: list[SpeakerTurn] = []
     for start_ms, end_ms, speaker in normalized_turns:
@@ -120,6 +123,58 @@ def build_speaker_turns(
         )
 
     return turns
+
+
+def first_appearance_mapping(diar_segments: list[list]) -> dict[int, int]:
+    """Raw cluster id -> turn speaker id, as ``build_speaker_turns`` numbers them."""
+    mapping: dict[int, int] = {}
+    for _start, _end, speaker in sorted(diar_segments, key=lambda item: (item[0], item[1])):
+        mapping.setdefault(int(speaker), len(mapping))
+    return mapping
+
+
+def annotate_overlaps(
+    turns: list[SpeakerTurn],
+    diar_segments: list[list],
+    *,
+    min_overlap_ms: int = 150,
+) -> list[SpeakerTurn]:
+    """Fill ``turn.overlaps`` with ranges where another speaker also talks."""
+    mapping = first_appearance_mapping(diar_segments)
+    others = [
+        (int(round(start * 1000)), int(round(end * 1000)), mapping[int(speaker)])
+        for start, end, speaker in diar_segments
+    ]
+    for turn in turns:
+        ranges = sorted(
+            (max(turn.start_ms, start), min(turn.end_ms, end))
+            for start, end, speaker in others
+            if speaker != turn.speaker and start < turn.end_ms and end > turn.start_ms
+        )
+        merged: list[list[int]] = []
+        for start, end in ranges:
+            if merged and start <= merged[-1][1]:
+                merged[-1][1] = max(merged[-1][1], end)
+            else:
+                merged.append([start, end])
+        turn.overlaps = [
+            (start, end) for start, end in merged if end - start >= min_overlap_ms
+        ]
+    return turns
+
+
+def _other_speaker_between(
+    turns: list[list[int]],
+    previous: list[int],
+    start_ms: int,
+) -> bool:
+    """True if another speaker took the floor alone between the two pieces."""
+    for turn in reversed(turns):
+        if turn is previous or turn[1] <= previous[1]:
+            break
+        if turn[2] != previous[2] and turn[0] >= previous[1] and turn[1] <= start_ms:
+            return True
+    return False
 
 
 def _split_turn_at_quiet_boundaries(
