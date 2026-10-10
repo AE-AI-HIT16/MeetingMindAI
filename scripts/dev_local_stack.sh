@@ -3,6 +3,7 @@
 # backend and frontend. Open http://localhost:3000 and log in as guest.
 #
 #   scripts/dev_local_stack.sh            # start, Ctrl+C stops everything
+#   FULL=1 scripts/dev_local_stack.sh     # + overlap separation (slower, more accurate)
 #
 # Logs: data/local_stack/{worker,backend,frontend}.log
 # Data: data/local_stack/local_test.db and data/local_stack/media (not the .env database).
@@ -34,7 +35,21 @@ wait_for() {  # wait_for <name> <log> <pattern>
   echo " ready"
 }
 
-CONFIG_PATH=configs/runpod_gpu.yaml "$PY" meetasr/runpod/handler.py \
+CONFIG="configs/runpod_gpu.yaml"
+if [ "${FULL:-0}" = "1" ]; then
+  # Full pipeline: overlap-aware turns + MossFormer2 separation (slower).
+  CONFIG="$LOGS/runpod_full.yaml"
+  "$PY" - "$CONFIG" <<'EOF'
+import sys, yaml
+config = yaml.safe_load(open("configs/runpod_gpu.yaml"))
+config["pipeline"]["overlap_detection"]["refine"] = True
+config["pipeline"]["overlap_separation"]["enabled"] = True
+yaml.safe_dump(config, open(sys.argv[1], "w"), allow_unicode=True, sort_keys=False)
+EOF
+  echo "FULL pipeline: refine + overlap separation ($CONFIG)"
+fi
+
+CONFIG_PATH="$CONFIG" "$PY" meetasr/runpod/handler.py \
   --rp_serve_api --rp_api_port 8008 > "$LOGS/worker.log" 2>&1 &
 pids+=($!)
 wait_for "worker (models load ~20 s)" "$LOGS/worker.log" "Uvicorn running"
