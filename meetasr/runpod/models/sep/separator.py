@@ -38,6 +38,7 @@ class SpeechSeparator:
         context_s: float = 0.3,
         min_region_s: float = 0.2,
         crossfade_s: float = 0.02,
+        verify_speakers: bool = True,
         **_: object,
     ):
         """
@@ -51,6 +52,8 @@ class SpeechSeparator:
                 voices before they overlap.
             min_region_s: Shorter overlaps are left as they are.
             crossfade_s: Fade between the mixture and the separated stream.
+            verify_speakers: Re-check who speaks in mostly-overlapped turns
+                from the separated voices (MeetPipeline).
         """
         self.model = model
         self.filename = filename
@@ -59,6 +62,7 @@ class SpeechSeparator:
         self.context_s = context_s
         self.min_region_s = min_region_s
         self.crossfade_s = crossfade_s
+        self.verify_speakers = verify_speakers
         self._net = None
 
     def _ensure_loaded(self) -> None:
