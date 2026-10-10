@@ -1,0 +1,107 @@
+# RunPod GPU runtime config — Qwen3-ASR 1.7B
+# Qwen3-ASR produces punctuated, mixed-case text natively; no punc model needed.
+
+device: cuda:0
+
+pipeline:
+  transcription_language: vi
+  diarization_first:
+    enabled: true
+    max_chunk_ms: 15000
+    boundary_search_ms: 2000
+    min_chunk_ms: 1000
+  # pyannote segmentation-3.0 (ONNX, CPU, ~12 s per hour of audio):
+  # drops VAD segments without a voice (noise no longer becomes text or an
+  # extra "speaker") and marks where two people talk at once ("nói chồng").
+  # Measured on synthetic meetings (scripts/eval): noise words 12 -> 1,
+  # speaker count 75% -> 88% (hard set), word errors unchanged.
+  overlap_detection:
+    enabled: true
+    model: onnx-community/pyannote-segmentation-3.0
+    step_s: 2.0
+    min_speech_ratio: 0.3  # VAD segment needs a voice >= 30% of its length
+    supplement: true
+    boundary_s: 0.0
+    # Rebuild speaker turns around overlaps. Only useful together with
+    # overlap_separation; on its own it does not reduce word errors.
+    refine: false
+  # MossFormer2 separation of overlapped speech before ASR (GPU). Recovers
+  # "dạ/vâng" said over someone else (cpWER 22% -> 15.4% on the standard set)
+  # but roughly doubles ASR time on multi-speaker recordings. To use it set
+  # enabled: true here AND refine: true above.
+  overlap_separation:
+    enabled: false
+    model: alibabasglab/MossFormer2_SS_16K
+
+realtime:
+  vad:
+    frame_ms: 32
+    start_threshold: 0.50
+    end_threshold: 0.35
+    min_speech_ms: 250
+    min_silence_ms: 600
+    pre_roll_ms: 300
+    post_roll_ms: 100
+  asr:
+    partial_interval_ms: 800
+    partial_min_audio_ms: 700
+    partial_max_audio_ms: 5000
+    max_utterance_ms: 15000
+
+asr:
+  model: qwen3-asr
+  hub: none
+  model_size: Qwen/Qwen3-ASR-1.7B  # vs 0.6B: cpWER 22.0% -> 19.3%, ~30% slower
+  device: cuda:0
+  dtype: bfloat16
+  max_inference_batch_size: 16  # RunPod GPUs have >= 16 GB
+  max_new_tokens: 512
+
+# Qwen3 leaves ~half of conversational Vietnamese segments lowercase and
+# unpunctuated; ViBERT-CaPu restores them per speaker run at finalize
+# (~66 ms per segment on GPU).
+punc:
+  model: vibert-capu
+  hub: hf
+  device: cuda:0
+
+vad:
+  model: silero-vad
+  backend: onnx
+  device: cpu
+  threshold: 0.5
+  neg_threshold: 0.35
+  min_speech_duration_ms: 250
+  min_silence_duration_ms: 500
+  speech_pad_ms: 80
+  max_speech_duration_s: 30
+
+spk:
+  model: cam++
+  hub: ms
+  device: cuda:0
+  cluster_type: spectral
+  # --- Tinh chỉnh diarization (khớp người nói) ---
+  # min_cluster_size: cụm ≤ số này bị gộp vào cụm lớn hơn.
+  #   Giảm (2) = giữ được người nói ÍT câu; tăng (4+) = bỏ qua phát biểu ngắn.
+  min_cluster_size: 2
+  # mer_cos: cosine ≥ số này thì gộp 2 người thành 1.
+  #   Tăng (0.85) = tách nhạy hơn (người giọng giống vẫn tách);
+  #   giảm (0.75) = gộp mạnh hơn (tránh 1 người bị chia đôi).
+  mer_cos: 0.80
+  # pval: cắt tỉa ma trận tương đồng của spectral clustering.
+  #   Giảm (0.008) = dễ tách thành NHIỀU người; tăng (0.02) = gộp lại.
+  pval: 0.012
+  # Giới hạn số người tự phát hiện (họp thường ≤ 8).
+  max_num_spks: 8
+  min_num_spks: 1
+
+llm:
+  provider: groq
+  model: openai/gpt-oss-20b
+  api_key: ~
+  language: vi
+  temperature: 0.3
+  max_tokens: 4096
+  timeout: 120
+  retry_attempts: 3

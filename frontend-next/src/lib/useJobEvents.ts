@@ -8,22 +8,23 @@ import type {
   ProcessingStage,
   TranscriptSegment,
 } from "./types";
+import { getWebSocketBase } from "./runtime";
 
 export interface JobEventsState {
   isConnected: boolean;
   stage: ProcessingStage;
   progress: number;
   segments: TranscriptSegment[];
+  /** Index below which segments came from snapshot (no live-delta animation) */
+  snapshotCount: number;
   sections: DocSection[];
   done: boolean;
   liveDocumentId: string | null;
   error: string | null;
 }
 
-function jobEventsUrl(jobId: string): string {
-  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  const host = process.env.NEXT_PUBLIC_WS_HOST ?? "127.0.0.1:8000";
-  return `${protocol}//${host}/v1/jobs/${jobId}/events`;
+async function jobEventsUrl(jobId: string): Promise<string> {
+  return `${getWebSocketBase()}/v1/jobs/${jobId}/events`;
 }
 
 export function useJobEvents(jobId: string | null): JobEventsState {
@@ -31,6 +32,7 @@ export function useJobEvents(jobId: string | null): JobEventsState {
   const [stage, setStage] = useState<ProcessingStage>("extracting_audio");
   const [progress, setProgress] = useState(0);
   const [segments, setSegments] = useState<TranscriptSegment[]>([]);
+  const [snapshotCount, setSnapshotCount] = useState(0);
   const [sections, setSections] = useState<DocSection[]>([]);
   const [done, setDone] = useState(false);
   const [liveDocumentId, setLiveDocumentId] = useState<string | null>(null);
@@ -39,23 +41,29 @@ export function useJobEvents(jobId: string | null): JobEventsState {
   useEffect(() => {
     if (!jobId) return;
 
+    // Reset state when jobId changes (new job), not on reconnect
+    setStage("extracting_audio");
+    setProgress(0);
+    setSegments([]);
+    setSnapshotCount(0);
+    setSections([]);
+    setDone(false);
+    setLiveDocumentId(null);
+    setError(null);
+
     let socket: WebSocket | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let stopped = false;
     let terminal = false;
 
-    const connect = () => {
-      socket = new WebSocket(jobEventsUrl(jobId));
+    const connect = async () => {
+      const url = await jobEventsUrl(jobId);
+      if (stopped) return;
+      socket = new WebSocket(url);
 
       socket.onopen = () => {
         setIsConnected(true);
         setError(null);
-        setDone(false);
-        setStage("extracting_audio");
-        setProgress(0);
-        setSegments([]);
-        setSections([]);
-        setLiveDocumentId(null);
       };
       socket.onmessage = (message) => {
         let event: JobEvent;
@@ -78,8 +86,8 @@ export function useJobEvents(jobId: string | null): JobEventsState {
               incoming.id !== null
                 ? item.id === incoming.id
                 : item.startMs === incoming.startMs &&
-                  item.endMs === incoming.endMs &&
-                  item.text === incoming.text,
+                item.endMs === incoming.endMs &&
+                item.text === incoming.text,
             );
 
             let next: typeof current;
@@ -112,6 +120,7 @@ export function useJobEvents(jobId: string | null): JobEventsState {
               (left, right) =>
                 left.startMs - right.startMs || left.endMs - right.endMs,
             );
+          setSnapshotCount(snapshot.length);
           setSegments(snapshot);
           return;
         }
@@ -198,8 +207,9 @@ export function useJobEvents(jobId: string | null): JobEventsState {
         }
       };
 
-      socket.onerror = () => {
-        setError("Không thể kết nối tới luồng tiến trình.");
+      socket.onerror = (ev) => {
+        console.error("[useJobEvents] WebSocket connection error:", url, ev);
+        setError("Mất kết nối tới máy chủ, đang tự kết nối lại…");
       };
       socket.onclose = () => {
         setIsConnected(false);
@@ -222,6 +232,7 @@ export function useJobEvents(jobId: string | null): JobEventsState {
     stage,
     progress,
     segments,
+    snapshotCount,
     sections,
     done,
     liveDocumentId,

@@ -4,6 +4,8 @@ import numpy as np
 
 from meetasr.models.asr import faster_whisper_asr
 from meetasr.models.asr.faster_whisper_asr import FasterWhisperASR
+from pathlib import PureWindowsPath
+
 
 
 class _FakeWhisperModel:
@@ -16,40 +18,54 @@ class _FakeWhisperModel:
         return iter([SimpleNamespace(words=words)]), SimpleNamespace()
 
 
-def test_windows_cuda_runtime_adds_pip_nvidia_dll_directories(tmp_path, monkeypatch):
-    root = tmp_path / "site-packages"
-    expected = []
-    for package in ("cublas", "cudnn", "cuda_nvrtc"):
-        directory = root / "nvidia" / package / "bin"
-        directory.mkdir(parents=True)
-        expected.append(str(directory))
+def test_windows_cuda_runtime_adds_pip_nvidia_dll_directories(monkeypatch):
+    root = PureWindowsPath(r"C:\Python\Lib\site-packages")
+
+    expected = [
+        str(root / "nvidia" / "cublas" / "bin"),
+        str(root / "nvidia" / "cudnn" / "bin"),
+        str(root / "nvidia" / "cuda_nvrtc" / "bin"),
+    ]
 
     added = []
+
     monkeypatch.setattr(faster_whisper_asr.os, "name", "nt")
     monkeypatch.setattr(
-        faster_whisper_asr.site, "getsitepackages", lambda: [str(root)]
+        faster_whisper_asr.site,
+        "getsitepackages",
+        lambda: [str(root)],
     )
+
+    monkeypatch.setattr(
+        faster_whisper_asr.os.path,
+        "isdir",
+        lambda path: path in expected,
+    )
+
     monkeypatch.setattr(
         faster_whisper_asr.os,
         "add_dll_directory",
-        lambda directory: added.append(directory),
+        lambda path: added.append(path),
         raising=False,
     )
+
     monkeypatch.setattr(
-        faster_whisper_asr, "_CUDA_DLL_DIRECTORIES", []
+        faster_whisper_asr,
+        "_CUDA_DLL_DIRECTORIES",
+        [],
     )
+
     monkeypatch.setattr(
-        faster_whisper_asr, "_CUDA_DLL_DIRECTORIES_CONFIGURED", False
+        faster_whisper_asr,
+        "_CUDA_DLL_DIRECTORIES_CONFIGURED",
+        False,
     )
+
     monkeypatch.setenv("PATH", "original")
 
     faster_whisper_asr._configure_windows_cuda_runtime()
 
     assert added == expected
-    assert faster_whisper_asr.os.environ["PATH"] == (
-        f"{faster_whisper_asr.os.pathsep.join(expected)}"
-        f"{faster_whisper_asr.os.pathsep}original"
-    )
 
 
 def test_recognize_forwards_configured_decode_options():

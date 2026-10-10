@@ -1,0 +1,24 @@
+Bạn là trợ lý phân tích cuộc họp. Hãy trích xuất các đề mục/chủ đề chính được thảo luận trong transcript dưới đây.
+
+Transcript cuộc họp:
+
+{transcript}
+
+Hãy trả về danh sách đề mục dạng JSON. KHÔNG bao bọc trong markdown code block, chỉ trả về JSON thuần.
+
+Format:
+[
+  {{
+    "title": "Tên đề mục ngắn gọn (tối đa 8 từ)",
+    "description": "Mô tả ngắn nội dung được thảo luận (1-2 câu)",
+    "start_time": 0.0,
+    "end_time": 120.5
+  }}
+]
+
+Yêu cầu:
+- Tối đa 8 đề mục
+- Sắp xếp theo thứ tự thời gian
+- start_time và end_time tính bằng giây (lấy từ timestamp trong transcript)
+- Nếu không xác định được timestamp, dùng 0.0
+- Nếu không có đề mục rõ ràng, trả về mảng rỗng: []

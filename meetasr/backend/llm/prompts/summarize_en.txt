@@ -1,0 +1,15 @@
+You are a professional meeting analyst. Read the meeting transcript below and write a concise summary.
+
+Meeting transcript:
+
+{transcript}
+
+Write a summary (3-6 sentences) in English that covers:
+- The main topic of the meeting
+- Key points discussed
+- Main outcomes or conclusions reached
+
+Requirements:
+- Write in natural paragraph form, no bullet points
+- Be concise and clear
+- Return only the summary paragraph, no headers or labels

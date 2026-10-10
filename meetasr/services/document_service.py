@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
 
@@ -212,7 +212,7 @@ class DocumentService:
                 mode=mode,
             )
         document.markdown = markdown
-        document.updated_at = datetime.utcnow()
+        document.updated_at = datetime.now(timezone.utc)
         self.db.add(document)
         self.db.commit()
         self.db.refresh(document)
@@ -237,7 +237,7 @@ class DocumentService:
                 mode=DocumentMode.LIVE,
             )
         document.markdown = markdown
-        document.updated_at = datetime.utcnow()
+        document.updated_at = datetime.now(timezone.utc)
         self.db.add(document)
         self.db.commit()
         self.db.refresh(document)

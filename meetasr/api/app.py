@@ -84,9 +84,25 @@ async def lifespan(app: FastAPI):
     if os.path.exists(CONFIG_PATH):
         logger.info(f"Loading pipeline from {CONFIG_PATH}...")
 
-        # Full pipeline:
-        # ASR + VAD + Punctuation + Speaker + LLM + Document planner
-        pipeline = AutoPipeline.from_yaml(CONFIG_PATH)
+        # MEETASR_DEVICE được set bởi Electron main process sau khi detect GPU.
+        # Override device trong config thay vì sửa file YAML.
+        device_override = os.environ.get("MEETASR_DEVICE")
+
+        from omegaconf import OmegaConf
+        raw_cfg = OmegaConf.to_container(OmegaConf.load(CONFIG_PATH), resolve=True)
+        if device_override:
+            logger.info(f"Device override from MEETASR_DEVICE: {device_override}")
+            raw_cfg["device"] = device_override
+            if "asr" in raw_cfg:
+                raw_cfg["asr"]["device"] = device_override
+            if "vad" in raw_cfg:
+                raw_cfg["vad"]["device"] = device_override
+            if "spk" in raw_cfg:
+                raw_cfg["spk"]["device"] = device_override
+            if "punc" in raw_cfg:
+                raw_cfg["punc"]["device"] = device_override
+
+        pipeline = AutoPipeline.from_config(raw_cfg)
 
         warm_up = getattr(pipeline.asr, "warm_up", None)
         if callable(warm_up):
@@ -152,7 +168,6 @@ async def lifespan(app: FastAPI):
         )
 
         logger.info("Final transcript worker started.")
-
     else:
         logger.warning(
             f"Config '{CONFIG_PATH}' not found. "
@@ -183,9 +198,6 @@ async def lifespan(app: FastAPI):
     logger.info(
         "Shutting down... Cleaning up ML models and freeing VRAM."
     )
-
-    await document_generation_queue.stop()
-    await job_queue.stop()
 
     set_pipeline(None)
 
@@ -243,7 +255,7 @@ app = FastAPI(
 # Allow all origins for local dev — restrict origins on production
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # TODO: restrict to actual domain on production
+    allow_origin_regex=r"https?://.*",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -27,6 +27,7 @@ from meetasr.services import asr_service, document_service
 from meetasr.services.asr_service import ASRService
 from meetasr.services.document_service import DocumentService
 from meetasr.storage.local import LocalStorage
+from types import SimpleNamespace
 
 
 def _short_wav() -> bytes:
@@ -78,8 +79,17 @@ async def test_upload_to_pdf_and_reopen_from_library(
         filename="vertical-slice.wav",
         headers=Headers({"content-type": "audio/wav"}),
     )
+    fake_user = SimpleNamespace(
+        id="test-user-id",
+    )
+
     with Session(test_engine) as db:
-        created = await sources.create_source(upload, db, storage)
+        created = await sources.create_source(
+            upload,
+            db,
+            storage,
+            fake_user,
+        )
 
     assert created.status == JobStatus.QUEUED
     assert enqueued_job_ids == [created.jobId]
@@ -102,7 +112,25 @@ async def test_upload_to_pdf_and_reopen_from_library(
             ]
 
     bus = EventBus(max_queue_size=50)
-    monkeypatch.setattr(job_worker, "event_bus", bus)
+
+    monkeypatch.setattr(
+        job_worker,
+        "event_bus",
+        bus,
+    )
+
+    fake_queue = CapturingQueue()
+
+    monkeypatch.setattr(
+        sources,
+        "job_queue",
+        fake_queue,
+    )
+    monkeypatch.setattr(
+        job_worker,
+        "job_queue",
+        fake_queue,
+    )
     subscriber = await bus.subscribe(created.jobId)
     worker = job_worker.JobQueue()
     worker._storage = storage
@@ -182,8 +210,17 @@ async def test_upload_to_pdf_and_reopen_from_library(
     # This is the backend data used by listSources()/getSource(): it now carries
     # the real Document ID, so SourceCard can reopen the finalized document.
     with Session(test_engine) as db:
-        library = sources.list_sources(db)
-        detail = sources.get_source(created.sourceId, db)
+        library = sources.list_sources(
+            db,
+            fake_user,
+        )
+
+        detail = sources.get_source(
+            created.sourceId,
+            db,
+            fake_user,
+        )
+
         summary_ref = next(
             document
             for document in detail.documents
@@ -192,6 +229,7 @@ async def test_upload_to_pdf_and_reopen_from_library(
 
         assert [source.id for source in library] == [created.sourceId]
         assert summary_ref.id == summary_id
+
         reopened = DocumentService(db).get_document(summary_ref.id)
         assert reopened.markdown.startswith("# Biên bản cuộc họp")
 

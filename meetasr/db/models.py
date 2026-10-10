@@ -1,5 +1,5 @@
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List
 
 from sqlmodel import SQLModel, Field, Relationship
@@ -39,7 +39,7 @@ class Report(SQLModel, table=True):
     #lưu trữ cấu hình model llm
     llm_model: Optional[str] = Field(default=None)
     
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     meeting: Optional["Meeting"] = Relationship(back_populates="report")
 
@@ -95,8 +95,8 @@ class Meeting(SQLModel, table=True):
     audio_path: str
     asr_model: Optional[str] = None
     llm_model: Optional[str] = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     #relationships
     transcript: Optional[Transcript] = Relationship(

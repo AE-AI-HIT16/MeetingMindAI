@@ -1,20 +1,20 @@
-"""Async adapter around the synchronous MeetPipeline transcription API."""
 
 from __future__ import annotations
 
+
 import asyncio
-from dataclasses import dataclass
+import numpy as np
 from typing import Any
 
 import numpy as np
 
+from dataclasses import dataclass
 from meetasr.api.schemas_phase2 import TranscriptSegmentPayload
 from meetasr.schemas import Segment, SentenceInfo, SpeakerTurn
 from meetasr.services.inference_coordinator import (
     InferenceCoordinator,
     InferenceKind,
 )
-
 
 @dataclass(frozen=True)
 class ASRServiceResult:
@@ -48,6 +48,14 @@ class ASRService:
         self.pipeline = pipeline
         self.coordinator = coordinator
         self._transcribe_lock = asyncio.Lock()
+
+    async def _call_client(self, fn: Any, *args: Any, **kwargs: Any) -> Any:
+        if asyncio.iscoroutinefunction(fn):
+            return await fn(*args, **kwargs)
+        res = fn(*args, **kwargs)
+        if asyncio.iscoroutine(res):
+            return await res
+        return res
 
     async def transcribe(
         self,

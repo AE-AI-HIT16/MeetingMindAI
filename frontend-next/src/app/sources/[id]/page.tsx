@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/route";
@@ -5,6 +6,9 @@ import { APIError, getDocument, getSource } from "@/lib/api";
 import { ProcessingView } from "@/components/ProcessingView";
 import { DocumentView } from "@/components/DocumentView";
 import type { DocumentData, Source } from "@/lib/types";
+
+// Luon render dong — can session va backend.
+export const dynamic = "force-dynamic";
 
 export default async function SourcePage({
   params,
@@ -30,6 +34,9 @@ export default async function SourcePage({
     if (error instanceof APIError && error.status === 404) {
       notFound();
     }
+    if (error instanceof APIError && (error.status === 401 || error.status === 403)) {
+      return <AccessProblem status={error.status} />;
+    }
     throw error;
   }
 
@@ -39,6 +46,9 @@ export default async function SourcePage({
       document = await getDocument(documentId, token);
     } catch (error) {
       if (error instanceof APIError && error.status === 404) notFound();
+      if (error instanceof APIError && (error.status === 401 || error.status === 403)) {
+        return <AccessProblem status={error.status} />;
+      }
       throw error;
     }
     if (document.sourceId !== source.id) notFound();
@@ -46,4 +56,29 @@ export default async function SourcePage({
   }
 
   return <ProcessingView source={source} jobId={jobId ?? source.jobId} />;
+}
+
+/** Expired login (401) or someone else's file (403): explain instead of crashing. */
+function AccessProblem({ status }: { status: number }) {
+  const expired = status === 401;
+  return (
+    <div className="mx-auto flex min-h-[60vh] max-w-md flex-col items-center justify-center px-6 text-center">
+      <h1 className="font-display text-xl font-semibold text-ink">
+        {expired ? "Phiên đăng nhập đã hết hạn" : "Bạn không có quyền xem tài liệu này"}
+      </h1>
+      <p className="mt-2 text-sm text-ink-soft">
+        {expired
+          ? "Vui lòng đăng nhập lại để xem các tài liệu đã lưu của bạn."
+          : "Tài liệu thuộc về một tài khoản khác. Hãy đăng nhập đúng tài khoản đã tạo tài liệu."}
+      </p>
+      <div className="mt-5 flex gap-3">
+        <Link href="/login" className="btn btn-primary">
+          Đăng nhập
+        </Link>
+        <Link href="/" className="btn btn-secondary">
+          Về thư viện
+        </Link>
+      </div>
+    </div>
+  );
 }

@@ -1,0 +1,33 @@
+Bạn là trợ lý của bác sĩ và có kỹ năng phân tích chuyên nghiệp. Hãy trích xuất TẤT CẢ các action items (việc cần làm) mà bệnh nhân cần làm được đề cập trong transcript dưới đây.
+
+Dưới đây là nội dung cuộc hội thoại của bác sĩ và bệnh nhân với timestamp và người nói và nội dung lời thoại được viết với cấu trúc sau:
+[timestamp] [Người nói] : [Lời thoại]
+
+{transcript}
+
+Hãy trả về danh sách action items dạng JSON. KHÔNG bao bọc trong markdown code block.
+
+Format:
+[
+  {{
+    "task": "Mô tả công việc cụ thể mà bệnh nhân cần thực hiện một cách rõ ràng",
+    "assignee": "Tên người được giao hoặc null nếu không rõ",
+    "time": "thời gian thực hiện lời khuyên của bác sĩ nếu được đề cập (ví dụ: 'buổi sáng', 'chiều', 'sau khi ăn', 'trước khi ăn') hoặc null",
+    "priority": "high",
+    "mentioned_by": "Speaker 0",
+    "timestamp": 145.2
+  }}
+]
+
+task: là những công việc mà bác sĩ yêu cầu bệnh nhân thực hiện. Những công việc giúp cải thiện tình trạng sức khỏe của bệnh nhân.
+Cũng có thể là thuốc được bác sĩ yêu cầu uống hoặc liệu pháp mà bác sĩ yêu cầu thực hiện, nếu là cái này thì cần phải nói rõ về tên thuốc hoặc liệu pháp sử dụng kèm với cách dùng hoặc thời gian dùng.
+Ví dụ: Sử dụng Thuốc giảm tiết axit dạ dày, uống trước bữa sáng 30 phút, mỗi ngày 1 lần
+
+Giá trị priority: "high" | "medium" | "low"
+- high: bắt buộc phải làm, không thể không làm
+- medium: cần làm, những không bắt buộc
+- low: khuyến khích thực hiện, tốt hơn nếu thực hiên
+
+timestamp: thời điểm action item được đề cập (giây), hoặc null nếu không rõ.
+
+Nếu không có action item nào, trả về: []

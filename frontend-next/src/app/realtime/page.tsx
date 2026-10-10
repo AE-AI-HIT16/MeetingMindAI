@@ -1,16 +1,37 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useRealtimeStream } from "@/lib/useRealtimeStream";
+import { useJobEvents } from "@/lib/useJobEvents";
+import { EditableSegmentText } from "@/components/EditableSegmentText";
 import type { AudioSource, SentenceInfo } from "@/lib/useRealtimeStream";
+import {
+  isTrackCaptionSupported,
+  isWebSpeechSupported,
+  useWebSpeechCaption,
+} from "@/lib/useWebSpeechCaption";
+import { groupCaptionParagraphs, unconfirmedCaptions } from "@/lib/liveCaptionState";
+import type { CaptionParagraph } from "@/lib/liveCaptionState";
 import { formatDuration, formatStamp, getSpeakerStyle } from "@/lib/format";
-import { StatusBadge, Waveform } from "@/components/ui";
+import { PageTitle, SpeakerChip, StatusBadge, Waveform } from "@/components/ui";
+import { ErrorNotice } from "@/components/ErrorNotice";
+import {
+  ArrowLeft,
+  ArrowRight,
+  Browser,
+  FileText,
+  Microphone,
+  Stop,
+} from "@phosphor-icons/react";
+import { EMPTY_HINTS, RecognitionHints } from "@/components/RecognitionHints";
 
 // ----------------------------------------------------------------
 // Page
 // ----------------------------------------------------------------
+
+const noopSubscribe = () => () => {};
 
 export default function RealtimePage() {
   const {
@@ -21,217 +42,291 @@ export default function RealtimePage() {
     elapsedMs,
     error,
     sourceId,
+    jobId,
+    confirmedEndMs,
     start,
     stop,
   } = useRealtimeStream();
 
   const router = useRouter();
+  const caption = useWebSpeechCaption("vi-VN");
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const [audioSource, setAudioSource] = useState<AudioSource>("microphone");
+  const [hints, setHints] = useState(EMPTY_HINTS);
+  // Client-only detection (false during SSR) to avoid hydration mismatch.
+  const captionSupported = useSyncExternalStore(
+    noopSubscribe,
+    isWebSpeechSupported,
+    () => false,
+  );
+  const trackCaptionSupported = useSyncExternalStore(
+    noopSubscribe,
+    isTrackCaptionSupported,
+    () => false,
+  );
+  const [captionActive, setCaptionActive] = useState(false);
+
+  // The system picks the mode; the user only presses record:
+  //  - Chrome/Edge + mic, or Chrome 135+ + tab audio: browser Web Speech shows
+  //    faded words instantly while RunPod (cold-started on connect) confirms
+  //    each 15 s window in solid text.
+  //  - Otherwise (Brave/Firefox/older Chrome tab audio): server only, shorter
+  //    10 s windows so the first solid text arrives sooner.
+  const handleStart = async () => {
+    const useCaption =
+      audioSource === "microphone" ? captionSupported : trackCaptionSupported;
+    const started = await start(audioSource, {
+      windowSeconds: useCaption ? 15 : 10,
+      context: hints.context,
+    });
+    setCaptionActive(useCaption && started !== null);
+    if (useCaption && started !== null) {
+      // Same track the server receives (required for tab audio).
+      caption.start(
+        started.startedAt,
+        trackCaptionSupported ? started.audioTrack : undefined,
+      );
+    }
+  };
+
+  const handleStop = () => {
+    caption.stop();
+    stop();
+  };
+
+  // Recording ended for any reason (stop, WS error) → stop captions too.
+  const stopCaption = caption.stop;
+  useEffect(() => {
+    if (!isRecording) stopCaption();
+  }, [isRecording, stopCaption]);
+
+  const interimCaption = captionActive ? caption.interim : null;
+  const captionParagraphs = captionActive
+    ? groupCaptionParagraphs(
+        unconfirmedCaptions(caption.lines, confirmedEndMs),
+        interimCaption,
+      )
+    : [];
+  const hasContent = transcripts.length > 0 || captionParagraphs.length > 0;
+
+  // After stop, the offline job (VAD + speaker diarization + ASR) starts right
+  // away on the still-warm RunPod worker. Follow it here and, when it is done,
+  // swap the realtime text for the speaker-labelled transcript.
+  const followJobId = !isRecording && !isFinalizing && hasContent ? jobId : null;
+  const job = useJobEvents(followJobId);
+  const diarized = followJobId && job.done && job.segments.length > 0 ? job.segments : null;
+  const diarizing = followJobId !== null && !job.done && !job.error;
 
   // Auto-scroll transcript panel
   useEffect(() => {
     scrollRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [transcripts.length]);
+  }, [transcripts.length, captionParagraphs.length]);
+
+  useEffect(() => {
+    scrollRef.current?.scrollIntoView({ block: "end" });
+  }, [interimCaption?.text]);
+
+  const statusTitle = isFinalizing
+    ? "Đang hoàn tất phần audio cuối…"
+    : isRecording
+      ? "Đang ghi âm"
+      : hasContent
+        ? "Ghi âm đã kết thúc"
+        : "Sẵn sàng ghi âm";
+  const statusDetail = isFinalizing
+    ? "Máy chủ đang chốt phần lời thoại cuối. Vui lòng giữ trang này mở."
+    : isRecording
+      ? "Lời thoại hiện dần ở bên cạnh."
+      : "Lời thoại hiện ngay khi bạn nói, sau đó được tách theo người nói.";
 
   return (
-    <div className="mx-auto flex h-screen w-full max-w-5xl flex-col px-6 py-8 md:px-10">
+    <div className="mx-auto flex w-full max-w-6xl flex-col px-4 py-6 sm:px-6 md:h-dvh md:px-10 md:py-8">
       {/* ---- Top bar ---- */}
-      <div className="flex items-center justify-between gap-4">
+      <div className="flex flex-wrap items-end justify-between gap-4">
         <div className="min-w-0">
           <Link
             href="/"
-            className="eyebrow inline-flex items-center gap-1.5 hover:text-brand"
+            className="eyebrow inline-flex items-center gap-1.5 transition hover:text-brand-ink"
           >
-            ← Thư viện
+            <ArrowLeft size={12} />
+            Thư viện
           </Link>
-          <h1 className="font-display mt-1.5 text-2xl font-semibold text-ink">
-            Ghi âm trực tiếp
-          </h1>
+          <div className="mt-2">
+            <PageTitle title="Ghi âm trực tiếp" lede="Bạn nói tới đâu, chữ hiện tới đó." />
+          </div>
         </div>
-        <div className="flex items-center gap-3">
+        {(isRecording || isFinalizing || hasContent) && (
           <StatusBadge status={isRecording || isFinalizing ? "processing" : "done"} />
-          {isRecording && (
-            <span className="hidden font-mono text-sm text-signal-ink sm:inline">
-              {formatDuration(elapsedMs)}
-            </span>
+        )}
+      </div>
+
+      <div className="mt-6 grid min-h-0 flex-1 gap-5 lg:grid-cols-[minmax(0,380px)_minmax(0,1fr)]">
+        {/* ---- Console: the record control and its settings ---- */}
+        <div className="flex min-h-0 flex-col gap-4 lg:overflow-y-auto">
+          <div className={`bezel transition-colors ${isRecording ? "bg-signal/10" : ""}`}>
+            <div className="bezel-core relative overflow-hidden p-6">
+              <span
+                aria-hidden="true"
+                className={`pointer-events-none absolute left-1/2 top-24 h-64 w-64 -translate-x-1/2 -translate-y-1/2 rounded-full bg-brand/15 blur-3xl transition-opacity duration-700 ${
+                  isRecording ? "opacity-100" : "opacity-30"
+                }`}
+              />
+
+              <div className="relative flex flex-col items-center text-center">
+                {/* Big record / stop button */}
+                <button
+                  id="record-btn"
+                  onClick={isRecording ? handleStop : handleStart}
+                  disabled={isFinalizing}
+                  className={`group relative mt-2 flex h-24 w-24 shrink-0 items-center justify-center rounded-full text-on-brand shadow-[inset_0_1px_0_rgb(255_255_255/0.3),0_18px_40px_-16px_rgb(242_114_79/0.7)] transition disabled:cursor-wait disabled:opacity-60 ${
+                    isRecording ? "bg-signal" : "bg-brand hover:bg-brand-ink"
+                  }`}
+                  aria-label={
+                    isFinalizing
+                      ? "Đang hoàn tất audio"
+                      : isRecording
+                        ? "Dừng ghi âm"
+                        : "Bắt đầu ghi âm"
+                  }
+                >
+                  {/* Expanding ring when recording */}
+                  {isRecording && <span className="recording-ring absolute inset-0 rounded-full" />}
+                  {isRecording ? (
+                    <Stop size={30} weight="fill" className="transition group-hover:scale-110" />
+                  ) : (
+                    <Microphone size={34} weight="fill" className="transition group-hover:scale-110" />
+                  )}
+                </button>
+
+                <p
+                  className={`mt-6 font-mono text-4xl font-medium tabular-nums tracking-tight ${
+                    isRecording ? "text-ink" : "text-ink-faint"
+                  }`}
+                  aria-live="off"
+                >
+                  {formatDuration(elapsedMs)}
+                </p>
+                <Waveform live={isRecording} bars={36} className="mt-5 h-10 w-full max-w-[260px]" />
+
+                <p className="mt-5 font-display text-lg font-semibold text-ink">{statusTitle}</p>
+                <p className="mt-1 max-w-[280px] text-sm text-ink-soft">{statusDetail}</p>
+              </div>
+
+              {/* Connection status */}
+              {(isRecording || isFinalizing) && (
+                <div className="relative mt-5 flex items-center gap-2 rounded-lg bg-surface-2 px-3 py-2">
+                  <span
+                    className={`h-2 w-2 rounded-full ${
+                      isConnected ? "bg-ok" : "bg-danger recording-dot"
+                    }`}
+                  />
+                  <span className="text-xs text-ink-soft">
+                    {isFinalizing
+                      ? "Đang chờ máy chủ xử lý phần cuối…"
+                      : isConnected
+                        ? "Đã kết nối máy chủ"
+                        : "Đang kết nối…"}
+                  </span>
+                  <span className="ml-auto font-mono text-xs tabular-nums text-ink-faint">
+                    {transcripts.length} đoạn
+                  </span>
+                </div>
+              )}
+
+              {error ? (
+                <ErrorNotice error={error} title="Ghi âm gặp sự cố" className="relative mt-4" />
+              ) : null}
+            </div>
+          </div>
+
+          {!isRecording && !isFinalizing && (
+            <div className="rounded-[var(--radius-bezel)] bg-surface p-6 shadow-[var(--shadow-card)] ring-1 ring-line/80">
+              <p id="audio-source-label" className="text-sm font-medium text-ink">
+                Nguồn âm thanh
+              </p>
+              <div
+                className="mt-2 grid grid-cols-2 gap-1 rounded-xl bg-surface-2 p-1 ring-1 ring-line-soft"
+                role="radiogroup"
+                aria-labelledby="audio-source-label"
+              >
+                <SourceOption
+                  label="Micro"
+                  icon={<Microphone size={16} />}
+                  selected={audioSource === "microphone"}
+                  onClick={() => setAudioSource("microphone")}
+                />
+                <SourceOption
+                  label="Âm thanh từ tab"
+                  icon={<Browser size={16} />}
+                  selected={audioSource === "tab"}
+                  onClick={() => setAudioSource("tab")}
+                />
+              </div>
+              <RecognitionHints value={hints} onChange={setHints} className="mt-5" />
+            </div>
+          )}
+
+          {/* ---- Navigation to document page after recording ---- */}
+          {!isRecording && !isFinalizing && hasContent && sourceId && (
+            <div className="rounded-[var(--radius-card)] border border-brand/25 bg-brand-wash p-5">
+              <p className="font-display text-base font-semibold text-ink">
+                Ghi âm đã được lưu và đang được xử lý.
+              </p>
+              <p className="mt-1 text-sm text-ink-soft">
+                Mở trang tài liệu để xem và xuất kết quả.
+              </p>
+              <button
+                id="view-document-btn"
+                onClick={() => router.push(`/sources/${sourceId}`)}
+                className="btn btn-primary mt-4 w-full"
+              >
+                <FileText size={18} />
+                Xem tài liệu
+                <span className="btn-nest">
+                  <ArrowRight size={14} weight="bold" />
+                </span>
+              </button>
+            </div>
           )}
         </div>
-      </div>
-
-      {/* ---- Control panel ---- */}
-      <div className="mt-6 rounded-2xl border border-line bg-surface p-6">
-        <div className="flex flex-col items-center gap-5 sm:flex-row sm:justify-between">
-          {/* Left: info */}
-          <div className="text-center sm:text-left">
-            <p className="font-display text-lg font-semibold text-ink">
-              {isFinalizing
-                ? "Đang hoàn tất phần audio cuối…"
-                : isRecording
-                ? "Đang ghi âm và nhận dạng…"
-                : transcripts.length > 0
-                  ? "Ghi âm đã kết thúc"
-                  : "Nhấn nút để bắt đầu ghi âm"}
-            </p>
-            <p className="mt-1 text-sm text-ink-soft">
-              {isFinalizing
-                ? "Server đang chốt transcript đã nhận; vui lòng giữ trang này mở."
-                : isRecording
-                ? "Audio được stream realtime tới server, transcript hiện dần bên dưới."
-                : "Microphone → WebSocket → ASR pipeline → Transcript"}
-            </p>
-            {error && (
-              <p className="mt-2 text-sm font-medium text-danger">{error}</p>
-            )}
-          </div>
-
-          {/* Right: record button */}
-          <div className="flex items-center gap-4">
-            {/* Waveform indicator */}
-            <Waveform live={isRecording} bars={20} className="h-10 w-28" />
-
-            {/* Big record / stop button */}
-            <button
-              id="record-btn"
-              onClick={isRecording ? stop : () => start(audioSource)}
-              disabled={isFinalizing}
-              className="group relative flex h-16 w-16 items-center justify-center rounded-full transition-shadow"
-              style={{
-                background: isRecording
-                  ? "var(--color-signal)"
-                  : "var(--color-brand)",
-                boxShadow: isRecording
-                  ? "0 0 0 4px var(--color-signal-wash)"
-                  : "0 2px 8px rgba(44,62,224,0.25)",
-              }}
-              aria-label={
-                isFinalizing
-                  ? "Đang hoàn tất audio"
-                  : isRecording
-                    ? "Dừng ghi âm"
-                    : "Bắt đầu ghi âm"
-              }
-            >
-              {/* Expanding ring when recording */}
-              {isRecording && <span className="recording-ring absolute inset-0 rounded-full" />}
-
-              {isRecording ? (
-                /* Stop icon */
-                <svg
-                  width="22"
-                  height="22"
-                  viewBox="0 0 24 24"
-                  fill="white"
-                  className="transition group-hover:scale-110"
-                >
-                  <rect x="6" y="6" width="12" height="12" rx="2" />
-                </svg>
-              ) : (
-                /* Mic icon */
-                <svg
-                  width="24"
-                  height="24"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="white"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className="transition group-hover:scale-110"
-                >
-                  <rect x="9" y="2" width="6" height="12" rx="3" />
-                  <path d="M5 10a7 7 0 0 0 14 0" />
-                  <line x1="12" y1="19" x2="12" y2="22" />
-                  <line x1="8" y1="22" x2="16" y2="22" />
-                </svg>
-              )}
-            </button>
-          </div>
-        </div>
-
-        {!isRecording && !isFinalizing && (
-          <div className="mt-5 flex flex-wrap gap-2" role="radiogroup" aria-label="Nguồn âm thanh">
-            <SourceOption label="Microphone" selected={audioSource === "microphone"} onClick={() => setAudioSource("microphone")} />
-            <SourceOption label="Âm thanh từ tab" selected={audioSource === "tab"} onClick={() => setAudioSource("tab")} />
-          </div>
-        )}
-
-        {/* Connection status bar */}
-        {(isRecording || isFinalizing) && (
-          <div className="mt-4 flex items-center gap-2 rounded-lg bg-surface-2 px-3 py-2">
-            <span
-              className={`h-2 w-2 rounded-full ${
-                isConnected ? "bg-ok" : "bg-danger recording-dot"
-              }`}
-            />
-            <span className="font-mono text-xs text-ink-faint">
-              {isFinalizing
-                ? "Đang chờ server xử lý phần audio cuối…"
-                : isConnected
-                ? "WebSocket kết nối · PCM16 mono 16kHz"
-                : "Đang kết nối…"}
-            </span>
-            <span className="ml-auto font-mono text-xs text-ink-faint">
-              {transcripts.length} segment(s)
-            </span>
-          </div>
-        )}
-      </div>
-
-      {/* ---- Navigation to document page after recording ---- */}
-      {!isRecording && !isFinalizing && transcripts.length > 0 && sourceId && (
-        <div className="mt-4 flex items-center justify-center gap-3 rounded-2xl border border-line bg-surface p-4">
-          <div className="flex-1 text-center sm:text-left">
-            <p className="font-display text-sm font-medium text-ink">
-              Ghi âm đã lưu — transcript đang được xử lý bởi server.
-            </p>
-            <p className="mt-0.5 text-xs text-ink-soft">
-              Bấm nút bên phải để xem tài liệu và xuất kết quả.
-            </p>
-          </div>
-          <button
-            id="view-document-btn"
-            onClick={() => router.push(`/sources/${sourceId}`)}
-            className="group relative inline-flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold text-white shadow-md transition-all hover:-translate-y-0.5 hover:shadow-lg"
-            style={{
-              background: "linear-gradient(135deg, #4f46e5, #7c3aed)",
-            }}
-          >
-            <svg
-              width="18"
-              height="18"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="transition group-hover:translate-x-0.5"
-            >
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-              <polyline points="14 2 14 8 20 8" />
-              <line x1="16" y1="13" x2="8" y2="13" />
-              <line x1="16" y1="17" x2="8" y2="17" />
-            </svg>
-            Xem tài liệu
-          </button>
-        </div>
-      )}
 
       {/* ---- Transcript panel ---- */}
-      <section className="mt-5 flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-line bg-surface">
+      <section className="flex min-h-[60dvh] flex-col overflow-hidden rounded-[var(--radius-bezel)] bg-surface shadow-[var(--shadow-card)] ring-1 ring-line/80 lg:min-h-0">
         <header className="flex items-center justify-between border-b border-line-soft px-5 py-3.5">
-          <p className="eyebrow">Transcript Realtime</p>
+          <p className="eyebrow">Lời thoại</p>
           <Waveform live={isRecording} bars={16} className="h-4 w-24" />
         </header>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
-          {transcripts.length === 0 ? (
-            <EmptyState isRecording={isRecording} />
+          {!hasContent ? (
+            <EmptyState isRecording={isRecording} captionActive={captionActive} />
           ) : (
             <div className="space-y-4">
-              {transcripts.map((t, i) => (
+              {diarized?.map((segment, i) => (
+                <TranscriptBlock
+                  key={segment.id ?? `${segment.startMs}-${i}`}
+                  text={segment.text}
+                  sentenceInfo={[
+                    {
+                      text: segment.text,
+                      start: segment.startMs / 1000,
+                      end: segment.endMs / 1000,
+                      speaker: segment.speaker,
+                    },
+                  ]}
+                  index={i}
+                  isLast={i === diarized.length - 1}
+                  isRecording={false}
+                  type="transcript_delta"
+                  speaker={segment.speaker}
+                  startMs={segment.startMs}
+                  endMs={segment.endMs}
+                  editJobId={followJobId}
+                  editSegmentId={segment.id}
+                />
+              ))}
+              {!diarized && transcripts.map((t, i) => (
                 <TranscriptBlock
                   key={`${t.startMs}-${i}`}
                   text={t.text}
@@ -246,11 +341,27 @@ export default function RealtimePage() {
                   endMs={t.endMs}
                 />
               ))}
+              {captionParagraphs.map((paragraph, i) => (
+                !diarized && <CaptionParagraphBlock
+                  key={paragraph.id}
+                  paragraph={paragraph}
+                  showSeparator={transcripts.length > 0 || i > 0}
+                />
+              ))}
+              {(isRecording || isFinalizing) && !interimCaption && (
+                <ListeningRow finalizing={isFinalizing} />
+              )}
+              {diarizing && (
+                <ListeningRow
+                  label={`Đang phân biệt người nói… ${Math.round(job.progress * 100)}%`}
+                />
+              )}
               <div ref={scrollRef} />
             </div>
           )}
         </div>
       </section>
+      </div>
     </div>
   );
 }
@@ -259,48 +370,62 @@ export default function RealtimePage() {
 // Sub-components
 // ----------------------------------------------------------------
 
-function EmptyState({ isRecording }: { isRecording: boolean }) {
+function EmptyState({
+  isRecording,
+  captionActive,
+}: {
+  isRecording: boolean;
+  captionActive: boolean;
+}) {
   return (
     <div className="flex h-full flex-col items-center justify-center py-16 text-center">
-      <div className="flex h-16 w-16 items-center justify-center rounded-full bg-brand-wash">
+      <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-surface-2 ring-1 ring-line">
         {isRecording ? (
           <span className="h-3 w-3 rounded-full bg-signal recording-dot" />
         ) : (
-          <svg
-            width="28"
-            height="28"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="var(--color-brand)"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <rect x="9" y="2" width="6" height="12" rx="3" />
-            <path d="M5 10a7 7 0 0 0 14 0" />
-            <line x1="12" y1="19" x2="12" y2="22" />
-            <line x1="8" y1="22" x2="16" y2="22" />
-          </svg>
+<Microphone size={28} className="text-brand" />
         )}
       </div>
       <p className="font-display mt-4 text-lg font-medium text-ink">
         {isRecording
-          ? "Đang chờ backend trả transcript…"
-          : "Chưa có transcript"}
+          ? "Đang chờ lời thoại đầu tiên…"
+          : "Chưa có lời thoại"}
       </p>
       <p className="mt-1.5 max-w-xs text-sm text-ink-soft">
         {isRecording
-          ? "Audio đang được stream tới server. Transcript sẽ xuất hiện khi VAD phát hiện đủ speech (~4 giây)."
-          : "Nhấn nút ghi âm phía trên để bắt đầu stream audio và nhận transcript thời gian thực."}
+          ? captionActive
+            ? "Hãy bắt đầu nói. Phụ đề nhanh sẽ hiện ngay từng chữ."
+            : "Audio đang được gửi tới máy chủ. Lời thoại hiện theo từng đoạn khoảng 30 giây."
+          : "Nhấn nút ghi âm để bắt đầu. Lời thoại sẽ hiện tại đây."}
       </p>
     </div>
   );
 }
 
-function SourceOption({ label, selected, onClick }: { label: string; selected: boolean; onClick: () => void }) {
+function SourceOption({
+  label,
+  icon,
+  selected,
+  onClick,
+}: {
+  label: string;
+  icon: React.ReactNode;
+  selected: boolean;
+  onClick: () => void;
+}) {
   return (
-    <button type="button" role="radio" aria-checked={selected} onClick={onClick}
-      className={`rounded-lg border px-3 py-2 text-sm font-medium transition ${selected ? "border-brand bg-brand-wash text-brand-ink" : "border-line text-ink-soft hover:border-brand"}`}>
+    <button
+      type="button"
+      role="radio"
+      aria-checked={selected}
+      onClick={onClick}
+      className={`flex items-center justify-center gap-2 whitespace-nowrap rounded-lg px-2 py-2 text-sm font-medium transition ${
+        selected
+          ? "bg-surface-3 text-ink shadow-[inset_0_1px_0_rgb(255_255_255/0.06)] ring-1 ring-line"
+          : "text-ink-faint hover:text-ink"
+      }`}
+    >
+      <span className={selected ? "text-brand" : undefined}>{icon}</span>
       {label}
     </button>
   );
@@ -317,23 +442,31 @@ function TranscriptBlock({
   speaker,
   startMs,
   endMs,
+  editJobId = null,
+  editSegmentId = null,
 }: {
   text: string;
   sentenceInfo: SentenceInfo[];
   index: number;
   isLast: boolean;
   isRecording: boolean;
-  receivedAt: number;
+  receivedAt?: number;
   type: "transcript_delta" | "transcript_partial";
   speaker: number | null;
   startMs: number;
   endMs: number;
+  /** Persisted segment (final, diarized transcript): text can be edited. */
+  editJobId?: string | null;
+  editSegmentId?: number | null;
 }) {
-  const timeStr = new Date(receivedAt).toLocaleTimeString("vi-VN", {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
+  const timeStr =
+    receivedAt === undefined
+      ? null
+      : new Date(receivedAt).toLocaleTimeString("vi-VN", {
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+        });
 
   const isPartial = type === "transcript_partial";
 
@@ -342,22 +475,15 @@ function TranscriptBlock({
       <div className="flex items-start gap-3">
         {/* Index / Speaker Badge */}
         {isPartial ? (
-          <span
-            className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-xs font-bold text-white shadow-xs"
-            style={{
-              background: "linear-gradient(135deg, #9ca3af, #6b7280)",
-            }}
-          >
+          <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-surface-2 text-xs font-bold text-ink-faint">
             …
           </span>
         ) : (
           <span
-            className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-xs font-bold text-white shadow-xs"
-            style={{
-              background: getSpeakerStyle(speaker).gradient,
-            }}
+            className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg font-mono text-xs font-bold text-on-brand"
+            style={{ backgroundColor: getSpeakerStyle(speaker).color }}
           >
-            {speaker !== null && speaker !== undefined ? `S${speaker}` : index + 1}
+            {speaker !== null && speaker !== undefined ? speaker + 1 : index + 1}
           </span>
         )}
 
@@ -365,11 +491,12 @@ function TranscriptBlock({
           {/* Header row: timestamp & status badge */}
           <div className="flex items-center gap-2">
             <span className="font-mono text-[11px] text-ink-faint">
-              {formatStamp(startMs)} - {formatStamp(endMs)} ({timeStr})
+              {formatStamp(startMs)} - {formatStamp(endMs)}
+              {timeStr && ` (${timeStr})`}
             </span>
             {isPartial && (
-              <span className="rounded-md bg-gray-100 px-1.5 py-0.5 font-mono text-[10px] font-medium text-gray-500 border border-gray-200">
-                Tạm thời (Partial)
+              <span className="rounded-md border border-line bg-surface-2 px-1.5 py-0.5 text-[11px] font-medium text-ink-faint">
+                Tạm thời
               </span>
             )}
           </div>
@@ -378,7 +505,7 @@ function TranscriptBlock({
           <div className="mt-1">
             {isPartial ? (
               /* Gray text for transcript_partial */
-              <p className="text-[15px] leading-relaxed text-gray-400 italic">
+              <p className="text-[15px] leading-relaxed text-ink-faint italic">
                 {text}
               </p>
             ) : (
@@ -390,7 +517,20 @@ function TranscriptBlock({
                       typeof sentence.speaker === "number"
                         ? sentence.speaker
                         : speaker;
-                    const style = getSpeakerStyle(spkNum);
+                    const badge = <SpeakerChip speaker={spkNum} />;
+                    if (editSegmentId !== null) {
+                      return (
+                        <div key={`${sentence.start}-${sIdx}`}>
+                          <span className="mr-2">{badge}</span>
+                          <EditableSegmentText
+                            jobId={editJobId}
+                            segmentId={editSegmentId}
+                            text={sentence.text}
+                            className="mt-1 text-[15px]"
+                          />
+                        </div>
+                      );
+                    }
                     return (
                       <p
                         key={`${sentence.start}-${sIdx}`}
@@ -398,22 +538,7 @@ function TranscriptBlock({
                           isLast && isRecording ? "caret" : ""
                         }`}
                       >
-                        <span
-                          className="mr-2 inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 font-mono text-xs font-semibold"
-                          style={{
-                            backgroundColor: style.bg,
-                            color: style.color,
-                            border: `1px solid ${style.border}`,
-                          }}
-                        >
-                          <span
-                            className="h-1.5 w-1.5 rounded-full"
-                            style={{ backgroundColor: style.color }}
-                          />
-                          {spkNum !== null && spkNum !== undefined
-                            ? `Speaker ${spkNum}`
-                            : "Người nói"}
-                        </span>
+                        <span className="mr-2">{badge}</span>
                         {sentence.text}
                       </p>
                     );
@@ -424,21 +549,8 @@ function TranscriptBlock({
                       isLast && isRecording ? "caret" : ""
                     }`}
                   >
-                    <span
-                      className="mr-2 inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 font-mono text-xs font-semibold"
-                      style={{
-                        backgroundColor: getSpeakerStyle(speaker).bg,
-                        color: getSpeakerStyle(speaker).color,
-                        border: `1px solid ${getSpeakerStyle(speaker).border}`,
-                      }}
-                    >
-                      <span
-                        className="h-1.5 w-1.5 rounded-full"
-                        style={{ backgroundColor: getSpeakerStyle(speaker).color }}
-                      />
-                      {speaker !== null && speaker !== undefined
-                        ? `Speaker ${speaker}`
-                        : "Người nói"}
+                    <span className="mr-2">
+                      <SpeakerChip speaker={speaker} />
                     </span>
                     {text}
                   </p>
@@ -451,6 +563,60 @@ function TranscriptBlock({
 
       {/* Separator */}
       {!isLast && <div className="ml-10 mt-3 border-b border-line-soft" />}
+    </div>
+  );
+}
+
+function CaptionParagraphBlock({
+  paragraph,
+  showSeparator,
+}: {
+  paragraph: CaptionParagraph;
+  showSeparator: boolean;
+}) {
+  // Same layout as a confirmed TranscriptBlock, but faded: the server replaces
+  // it with solid, speaker-labelled text once this range is confirmed.
+  return (
+    <div className="animate-transcript">
+      {showSeparator && <div className="mb-4 ml-10 border-b border-line-soft" />}
+      <div className="flex items-start gap-3">
+        <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-surface-2 text-xs font-bold text-ink-faint">
+          …
+        </span>
+        <div className="min-w-0 flex-1">
+          <span className="font-mono text-[11px] text-ink-faint">
+            {formatStamp(paragraph.startMs)} - {formatStamp(paragraph.endMs)}
+          </span>
+          <p className="mt-1 text-[15px] leading-relaxed text-ink-faint">
+            {paragraph.text}
+            {paragraph.interim && (
+              <span className="caret">
+                {paragraph.text ? " " : ""}
+                {paragraph.interim}
+              </span>
+            )}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ListeningRow({
+  finalizing = false,
+  label,
+}: {
+  finalizing?: boolean;
+  label?: string;
+}) {
+  return (
+    <div className="flex items-center gap-2 text-sm text-ink-faint" aria-live="polite">
+      <span className="flex gap-1">
+        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current" />
+        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current [animation-delay:150ms]" />
+        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current [animation-delay:300ms]" />
+      </span>
+      {label ?? (finalizing ? "Đang hoàn thiện transcript…" : "Đang nghe…")}
     </div>
   );
 }

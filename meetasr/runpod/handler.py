@@ -1,0 +1,364 @@
+import logging
+import sys
+
+# Configure logging before any other import so startup errors are captured
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(name)s] %(levelname)s %(message)s",
+    stream=sys.stderr,
+    force=True,
+)
+logger = logging.getLogger(__name__)
+
+logger.info("Handler starting — importing dependencies...")
+
+# Cache models on Network Volume if mounted, so cold starts skip HuggingFace download
+import os as _os
+_NV = "/runpod-volume"
+if _os.path.isdir(_NV):
+    _os.environ.setdefault("HF_HOME", f"{_NV}/hf_cache")
+    _os.environ.setdefault("MODELSCOPE_CACHE", f"{_NV}/ms_cache")
+    logger.info("Network Volume detected — using %s/hf_cache for model cache.", _NV)
+else:
+    logger.info("No Network Volume — models will be downloaded to container cache.")
+
+try:
+    import runpod
+    import base64
+    import asyncio
+    import os
+    logger.info("Core imports OK.")
+except Exception as exc:
+    logger.exception("Fatal: core import failed: %s", exc)
+    sys.exit(1)
+
+# Global instances for model caching (loaded at worker start, see __main__)
+pipeline = None
+realtime_pipeline = None
+
+# Cold-start diagnostics, reported by the "warmup" action.
+_load_stats: dict = {}
+
+
+def _dir_size(path: str) -> int:
+    """Bytes stored under ``path``, counting each file once.
+
+    The Hugging Face cache links ``snapshots/`` to ``blobs/``; following
+    those links counted every model twice (14 GB reported for ~7 GB).
+    """
+    total = 0
+    for root, _dirs, files in os.walk(path):
+        for name in files:
+            file_path = os.path.join(root, name)
+            try:
+                if not os.path.islink(file_path):
+                    total += os.path.getsize(file_path)
+            except OSError:
+                pass
+    return total
+
+
+def _stale_asr_caches(hub_dir: str, keep_repo: str) -> list[str]:
+    """Cached Qwen3-ASR checkpoints other than the one in use.
+
+    Args:
+        hub_dir: Hugging Face hub cache directory.
+        keep_repo: Cache folder of the configured model,
+            e.g. ``models--Qwen--Qwen3-ASR-1.7B``.
+
+    Returns:
+        Paths of other ``models--Qwen--Qwen3-ASR-*`` folders.
+    """
+    if not os.path.isdir(hub_dir):
+        return []
+    return sorted(
+        os.path.join(hub_dir, name)
+        for name in os.listdir(hub_dir)
+        if name.startswith("models--Qwen--Qwen3-ASR-") and name != keep_repo
+    )
+
+
+def init_models():
+    global pipeline, realtime_pipeline
+    if pipeline is not None:
+        return
+
+    import time
+    hf_home = os.environ.get("HF_HOME", "")
+    # Cache already populated before loading → models come from the volume.
+    _load_stats["hf_cache_bytes_before_load"] = _dir_size(hf_home) if hf_home else 0
+    _load_stats["load_started_at"] = time.time()
+    t0 = time.monotonic()
+
+    logger.info("First job received — loading ML pipeline...")
+    try:
+        from meetasr.runpod.auto.auto_pipeline import AutoPipeline
+        from meetasr.runpod.pipeline_realtime import ASRPipeline
+        import meetasr.runpod as _mrp
+        _mrp._register_all_models()
+
+        config_path = os.getenv("CONFIG_PATH", "config.yaml")
+        logger.info("Loading pipeline from config: %s", config_path)
+        pipeline = AutoPipeline.from_yaml(config_path)
+        # Models load lazily; load them all now (the first worker also
+        # downloads them to the Network Volume). The upload page sends a
+        # "warmup" job on open, so Qwen loads while the user is still
+        # uploading instead of inside the first transcription batch.
+        pipeline.asr._ensure_loaded()  # required: failing here is fatal
+        _load_optional_components(pipeline)
+        realtime_pipeline = ASRPipeline(
+            asr_model=pipeline.asr,
+            vad_model=pipeline.vad,
+            device=pipeline.device,
+            segmenter=pipeline.segmenter,
+        )
+        _load_stats["model_load_seconds"] = round(time.monotonic() - t0, 1)
+        logger.info("Pipeline loaded successfully in %.1fs.", _load_stats["model_load_seconds"])
+    except Exception as exc:
+        logger.exception("Fatal: pipeline init failed: %s", exc)
+        raise
+
+
+def _load_optional_components(pipe) -> None:
+    """Load punctuation, segmentation and separation, disabling any that fail.
+
+    A download error or corrupt weights for an optional model must not stop
+    the worker: the pipeline runs without that step and logs a warning.
+    """
+    for name in ("punc", "segmenter", "separator"):
+        component = getattr(pipe, name, None)
+        if component is None or not hasattr(component, "_ensure_loaded"):
+            continue
+        try:
+            component._ensure_loaded()
+        except Exception as exc:
+            logger.warning("Optional %s failed to load (%s); continuing without it.", name, exc)
+            setattr(pipe, name, None)
+            _load_stats[f"{name}_load_error"] = str(exc)[:200]
+
+
+def _sentence_info_to_dict(si) -> dict:
+    return {
+        "text": si.text,
+        "start": si.start,
+        "end": si.end,
+        "speaker": si.speaker,
+        "char_timestamps": si.char_timestamps,
+    }
+
+
+async def _transcribe_one(audio_b64: str, language: str) -> list[dict]:
+    from meetasr.runpod.utils.audio import load_audio
+    from meetasr.runpod.schemas import Segment
+    audio = load_audio(base64.b64decode(audio_b64))
+    duration_ms = int(len(audio) / 16000 * 1000)
+    sentences = await asyncio.to_thread(
+        pipeline.transcribe_vad_segment, audio, Segment(0, duration_ms), language=language
+    )
+    return [_sentence_info_to_dict(s) for s in sentences]
+
+
+async def run_handler(job):
+    init_models()
+    job_input = job.get('input', {})
+    action = job_input.get('action')
+    logger.info("Handling action: %s", action)
+
+    if action == "transcribe":
+        audio_bytes = base64.b64decode(job_input['audio_base64'])
+        from meetasr.runpod.utils.audio import load_audio
+        audio = load_audio(audio_bytes)
+        key = job_input.get('key')
+
+        result = await asyncio.to_thread(pipeline.transcribe, audio, key=key)
+        return {
+            "key": result.key,
+            "text": result.text,
+            "duration": result.duration,
+            "sentence_info": [_sentence_info_to_dict(s) for s in result.sentence_info],
+        }
+
+    elif action == "prepare_incremental":
+        audio_bytes = base64.b64decode(job_input['audio_base64'])
+        from meetasr.runpod.utils.audio import load_audio
+        audio = load_audio(audio_bytes)
+        profiles = {}
+        if getattr(pipeline, "diarization_first", False):
+            audio_out, vad_segments, speaker_turns, duration_ms, profiles = await asyncio.to_thread(
+                pipeline.prepare_diarization_first_transcription, audio
+            )
+        else:
+            audio_out, vad_segments, duration_ms = await asyncio.to_thread(
+                pipeline.prepare_incremental_transcription, audio
+            )
+            speaker_turns = None
+
+        response = {
+            "vad_segments": [
+                {"start_ms": s.start_ms, "end_ms": s.end_ms} for s in vad_segments
+            ],
+            "duration_ms": duration_ms,
+            "speaker_turns": None,
+            # Mean cam++ voice per speaker; sent back with overlapped turns so
+            # transcribe_segments can separate that speaker's voice.
+            "speaker_profiles": {str(k): v for k, v in profiles.items()},
+        }
+        if speaker_turns is not None:
+            response["speaker_turns"] = [
+                {
+                    "start_ms": t.start_ms,
+                    "end_ms": t.end_ms,
+                    "speaker": t.speaker,
+                    "overlaps": [list(r) for r in t.overlaps],
+                }
+                for t in speaker_turns
+            ]
+        return response
+
+    elif action == "transcribe_segment":
+        return await _transcribe_one(job_input['audio_base64'], job_input.get('language', 'auto'))
+
+    elif action == "transcribe_segments":
+        # Many speaker turns in one job: one network round-trip instead of one
+        # per turn, and no fan-out that would cold-start extra workers.
+        # All turns go to the ASR model in one batched call (GPU batching).
+        from meetasr.runpod.utils.audio import load_audio
+        language = job_input.get('language', 'auto')
+        # Each segment is base64 WAV, or {"audio_base64", "overlaps" (ms,
+        # relative), "speaker_embedding"} for a turn with overlapped speech.
+        items = [
+            item if isinstance(item, dict) else {"audio_base64": item}
+            for item in job_input['segments']
+        ]
+        chunks = [load_audio(base64.b64decode(item['audio_base64'])) for item in items]
+        # Keywords / names from the user bias Qwen3 towards the right spelling.
+        per_chunk = await asyncio.to_thread(
+            pipeline.transcribe_chunks, chunks, language=language,
+            overlaps=[[tuple(r) for r in item.get('overlaps') or []] for item in items],
+            speaker_embeddings=[item.get('speaker_embedding') for item in items],
+            context=job_input.get('context', ''),
+        )
+        return [[_sentence_info_to_dict(s) for s in sentences] for sentences in per_chunk]
+
+    elif action == "finalize_incremental":
+        from meetasr.runpod.schemas import SentenceInfo
+        sentences_data = job_input.get('sentences', [])
+        sentences = [
+            SentenceInfo(
+                text=s["text"],
+                start=s["start"],
+                end=s["end"],
+                speaker=s.get("speaker"),
+                char_timestamps=s.get("char_timestamps", []),
+            )
+            for s in sentences_data
+        ]
+
+        if 'audio_base64' in job_input:
+            audio_bytes = base64.b64decode(job_input['audio_base64'])
+            from meetasr.runpod.utils.audio import load_audio
+            from meetasr.runpod.schemas import Segment
+            audio = load_audio(audio_bytes)
+            vad_segments = [
+                Segment(s["start_ms"], s["end_ms"])
+                for s in job_input.get('vad_segments', [])
+            ]
+            result = await asyncio.to_thread(
+                pipeline.finalize_incremental_transcript, audio, sentences, vad_segments
+            )
+        else:
+            result = await asyncio.to_thread(
+                pipeline.finalize_preassigned_transcript, sentences
+            )
+        return [_sentence_info_to_dict(s) for s in result]
+
+    elif action == "realtime_transcribe":
+        audio_bytes = base64.b64decode(job_input['audio_base64'])
+        from meetasr.runpod.utils.audio import load_audio
+        audio = load_audio(audio_bytes)
+        key = job_input.get('key')
+        # Pin the language (backend sends "vi"): on "auto" Qwen3 sometimes
+        # mis-detects Vietnamese as Chinese.
+        language = job_input.get('language', 'auto')
+        result = await asyncio.to_thread(
+            realtime_pipeline.transcribe, audio, key=key, language=language,
+            context=job_input.get('context', ''),
+        )
+        return {
+            "key": result.key,
+            "text": result.text,
+            "duration": result.duration,
+            "sentence_info": [_sentence_info_to_dict(s) for s in result.sentence_info],
+        }
+
+    elif action == "warmup":
+        # Sent by the backend when a realtime session opens so the cold start
+        # overlaps with the user speaking. init_models() above did the loading;
+        # report where models came from so the Network Volume can be verified.
+        import shutil
+        import time
+        hf_home = os.environ.get("HF_HOME", "")
+        mounted = os.path.isdir(_NV)
+        info = {
+            "status": "ready",
+            "worker_id": os.environ.get("RUNPOD_POD_ID"),
+            "network_volume_mounted": mounted,
+            "hf_home": hf_home,
+            "modelscope_cache": os.environ.get("MODELSCOPE_CACHE"),
+            "hf_cache_bytes": _dir_size(hf_home) if hf_home else 0,
+            "hf_cached_repos": sorted(
+                d for d in (os.listdir(os.path.join(hf_home, "hub")) if os.path.isdir(os.path.join(hf_home, "hub")) else [])
+                if d.startswith("models--")
+            ),
+            "segmentation_provider": getattr(getattr(pipeline, "segmenter", None), "provider", None),
+            "asr_model": getattr(pipeline.asr, "model_name", None),
+            **_load_stats,
+            "loaded_seconds_ago": round(time.time() - _load_stats.get("load_started_at", time.time()), 1),
+        }
+        if mounted:
+            usage = shutil.disk_usage(_NV)
+            info["volume_free_gb"] = round(usage.free / 1e9, 1)
+            info["volume_total_gb"] = round(usage.total / 1e9, 1)
+        return info
+
+    elif action == "cleanup_cache":
+        # Delete cached Qwen3-ASR checkpoints the config no longer uses (e.g.
+        # 0.6B after switching to 1.7B). Dry run unless "confirm": true.
+        hub = os.path.join(os.environ.get("HF_HOME", ""), "hub")
+        keep = "models--" + str(getattr(pipeline.asr, "model_name", "")).replace("/", "--")
+        stale = _stale_asr_caches(hub, keep)
+        freed = sum(_dir_size(path) for path in stale)
+        if job_input.get("confirm") is True:
+            import shutil
+            for path in stale:
+                shutil.rmtree(path, ignore_errors=True)
+            logger.info("Cache cleanup removed %s (%.2f GB)", stale, freed / 1e9)
+        return {
+            "kept": keep,
+            "stale": [os.path.basename(path) for path in stale],
+            "freed_gb": round(freed / 1e9, 2),
+            "deleted": job_input.get("confirm") is True,
+        }
+
+    elif action == "realtime_recognize":
+        audio_bytes = base64.b64decode(job_input['audio_base64'])
+        from meetasr.runpod.utils.audio import load_audio
+        audio = load_audio(audio_bytes)
+        results = await asyncio.to_thread(realtime_pipeline.asr.recognize, [audio])
+        return results
+
+    else:
+        return {"error": f"Unknown action: {action}"}
+
+
+async def handler(job):
+    return await run_handler(job)
+
+
+logger.info("Handler module loaded — starting RunPod serverless worker.")
+
+if __name__ == "__main__":
+    # Load models during container start (part of the cold start), so the worker
+    # only reports ready once it can serve — the first job doesn't wait on loading.
+    init_models()
+    runpod.serverless.start({"handler": handler})

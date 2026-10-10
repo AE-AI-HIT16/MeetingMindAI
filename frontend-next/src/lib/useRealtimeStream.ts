@@ -9,6 +9,8 @@ import type {
   TranscriptDelta,
 } from "./realtimeTranscriptState";
 import type { ApiTranscriptSegment } from "./types";
+import { getWebSocketBase } from "./runtime";
+import { assertSessionHasToken } from "./api";
 
 export type { SentenceInfo, TranscriptDelta } from "./realtimeTranscriptState";
 
@@ -29,14 +31,29 @@ export interface RealtimeStreamState {
   transcripts: TranscriptDelta[];
   /** Elapsed recording time in milliseconds. */
   elapsedMs: number;
-  /** Last error message, if any. */
-  error: string | null;
+  /** Last error (message string or original error), if any. */
+  error: unknown;
   /** Source ID created by backend for this realtime session. */
   sourceId: string | null;
+  /** Offline (diarization) job ID; it starts processing right after stop. */
+  jobId: string | null;
+  /** Recording timeline (ms) already processed by server ASR. */
+  confirmedEndMs: number;
+}
+
+export interface RealtimeStreamOptions {
+  /** Server ASR window length in seconds (server clamps to 5–30). */
+  windowSeconds?: number;
+  /** Keywords / names passed to Qwen3-ASR as context. */
+  context?: string;
 }
 
 export interface RealtimeStreamActions {
-  start: (source: AudioSource) => Promise<void>;
+  /** Resolves once streaming starts (null on failure). */
+  start: (
+    source: AudioSource,
+    options?: RealtimeStreamOptions,
+  ) => Promise<{ startedAt: number; audioTrack: MediaStreamTrack } | null>;
   stop: () => void;
 }
 
@@ -44,13 +61,13 @@ export interface RealtimeStreamActions {
 // Constants
 // ----------------------------------------------------------------
 
-/** Build the WebSocket URL based on the current page location. */
-function buildWsUrl(): string {
-  const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-  // In dev, the backend runs on port 8000; in prod, behind the same host.
-  // We connect directly to the backend since Next.js rewrites don't proxy WS.
-  const host = process.env.NEXT_PUBLIC_WS_HOST ?? "127.0.0.1:8000";
-  return `${proto}//${host}/v1/realtime/stream`;
+/** Build the WebSocket URL based on the unified API base URL. */
+async function buildWsUrl(options: RealtimeStreamOptions): Promise<string> {
+  const params = new URLSearchParams();
+  if (options.windowSeconds) params.set("window", String(options.windowSeconds));
+  if (options.context?.trim()) params.set("context", options.context.trim());
+  const query = params.toString();
+  return `${getWebSocketBase()}/v1/realtime/stream${query ? `?${query}` : ""}`;
 }
 
 // ----------------------------------------------------------------
@@ -76,8 +93,10 @@ export function useRealtimeStream(): RealtimeStreamState &
   const [isConnected, setIsConnected] = useState(false);
   const [transcripts, setTranscripts] = useState<TranscriptDelta[]>([]);
   const [elapsedMs, setElapsedMs] = useState(0);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
   const [sourceId, setSourceId] = useState<string | null>(null);
+  const [jobId, setJobId] = useState<string | null>(null);
+  const [confirmedEndMs, setConfirmedEndMs] = useState(0);
 
   // ------------------------------------------------------------------
   // Cleanup helper
@@ -99,7 +118,7 @@ export function useRealtimeStream(): RealtimeStreamState &
 
     // Close AudioContext
     if (audioCtxRef.current && audioCtxRef.current.state !== "closed") {
-      audioCtxRef.current.close().catch(() => {});
+      audioCtxRef.current.close().catch(() => { });
       audioCtxRef.current = null;
     }
 
@@ -142,10 +161,12 @@ export function useRealtimeStream(): RealtimeStreamState &
   // ------------------------------------------------------------------
   // START
   // ------------------------------------------------------------------
-  const start = useCallback(async (source: AudioSource) => {
+  const start = useCallback(async (source: AudioSource, options: RealtimeStreamOptions = {}) => {
     setError(null);
     setTranscripts([]);
     setSourceId(null);
+    setJobId(null);
+    setConfirmedEndMs(0);
     setElapsedMs(0);
     finalizingRef.current = false;
     setIsFinalizing(false);
@@ -153,13 +174,13 @@ export function useRealtimeStream(): RealtimeStreamState &
     try {
       const stream = source === "microphone"
         ? await navigator.mediaDevices.getUserMedia({
-            audio: { channelCount: 1, sampleRate: 16000, echoCancellation: true, noiseSuppression: true },
-          })
+          audio: { channelCount: 1, sampleRate: 16000, echoCancellation: true, noiseSuppression: true },
+        })
         : await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
 
       if (stream.getAudioTracks().length === 0) {
         stream.getTracks().forEach((track) => track.stop());
-        throw new Error("Tab duoc chon khong chia se am thanh. Hay bat chia se am thanh khi chon tab.");
+        throw new Error("Tab bạn chọn chưa chia sẻ âm thanh. Khi chọn tab, hãy bật mục “Chia sẻ âm thanh của tab”.");
       }
       streamRef.current = stream;
 
@@ -183,30 +204,44 @@ export function useRealtimeStream(): RealtimeStreamState &
       });
 
       // 3. Open WebSocket
+      const wsUrl = await buildWsUrl(options);
       const authSession = await getSession();
-      const ws = new WebSocket(buildWsUrl());
-      ws.binaryType = "arraybuffer";
+      assertSessionHasToken(authSession);
+      const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
+      ws.binaryType = "arraybuffer";
 
       await new Promise<void>((resolve, reject) => {
+        let settled = false;
         ws.onopen = () => {
-          ws.send(
-            JSON.stringify({
-              type: "auth",
-              token: authSession?.accessToken ?? null,
-            }),
-          );
-          setIsConnected(true);
-          resolve();
+          if (!settled) {
+            settled = true;
+            ws.send(
+              JSON.stringify({
+                type: "auth",
+                token: authSession?.accessToken ?? null,
+              }),
+            );
+            setIsConnected(true);
+            resolve();
+          }
         };
-        ws.onerror = () => {
-          reject(new Error("Không thể kết nối WebSocket tới backend."));
+        ws.onerror = (ev) => {
+          if (!settled) {
+            settled = true;
+            console.error("[RealtimeStream] WebSocket onerror event triggered:", ev);
+            console.error("[RealtimeStream] Attempted WS URL:", wsUrl);
+            console.error("[RealtimeStream] Current NEXT_PUBLIC_MEETASR_API:", process.env.NEXT_PUBLIC_MEETASR_API);
+            reject(new Error("Không kết nối được tới máy chủ ghi âm. Vui lòng thử lại sau giây lát."));
+          }
         };
         // Timeout after 5 s
-        setTimeout(
-          () => reject(new Error("WebSocket connection timed out.")),
-          5000,
-        );
+        setTimeout(() => {
+          if (!settled) {
+            settled = true;
+            reject(new Error("Máy chủ ghi âm phản hồi quá chậm. Vui lòng thử lại sau giây lát."));
+          }
+        }, 5000);
       });
 
       // 4. WS message handler — receives transcript_delta JSON
@@ -222,6 +257,12 @@ export function useRealtimeStream(): RealtimeStreamState &
 
           if (data.type === "session_init") {
             setSourceId(data.source_id ?? null);
+            setJobId(data.job_id ?? null);
+            return;
+          }
+
+          if (data.type === "transcript_confirmed") {
+            setConfirmedEndMs((prev) => Math.max(prev, Number(data.end_ms) || 0));
             return;
           }
 
@@ -249,7 +290,7 @@ export function useRealtimeStream(): RealtimeStreamState &
             (data.code === "stream_drain_failed" ||
               data.code === "stream_finalization_failed")
           ) {
-            setError(data.message ?? "Không thể hoàn tất audio realtime.");
+            setError("Chưa hoàn tất được phần ghi âm cuối. Phần đã ghi vẫn được lưu và xử lý.");
             cleanup();
             return;
           }
@@ -273,13 +314,27 @@ export function useRealtimeStream(): RealtimeStreamState &
         }
       };
 
-      ws.onclose = () => {
+      ws.onclose = (ev) => {
+        // Session already finished (stream_stopped detached it): whatever close
+        // code follows (e.g. 1006 from the proxy) is not an error.
+        if (wsRef.current !== ws) {
+          setIsConnected(false);
+          return;
+        }
         if (finalizationTimerRef.current) {
           clearTimeout(finalizationTimerRef.current);
           finalizationTimerRef.current = null;
         }
         if (finalizingRef.current) {
-          setError("Kết nối đóng trước khi server hoàn tất audio.");
+          setError("Kết nối bị ngắt trước khi hoàn tất phần cuối. Phần đã ghi vẫn được lưu và xử lý.");
+        } else if (ev.code !== 1000 && ev.code !== 1005) {
+          // Abnormal close while recording (e.g. 1013 = realtime pipeline not
+          // ready on the server). Previously this closed silently.
+          setError(
+            ev.code === 1013
+              ? "Máy chủ đang khởi động. Vui lòng thử lại sau giây lát."
+              : "Mất kết nối tới máy chủ trong lúc ghi. Phần đã ghi vẫn được lưu; hãy kiểm tra mạng rồi bấm ghi lại.",
+          );
         }
         finalizingRef.current = false;
         setIsFinalizing(false);
@@ -291,7 +346,7 @@ export function useRealtimeStream(): RealtimeStreamState &
       };
 
       ws.onerror = () => {
-        setError("WebSocket error — kết nối bị gián đoạn.");
+        setError("Kết nối tới máy chủ bị gián đoạn. Vui lòng kiểm tra mạng rồi bấm ghi lại.");
         cleanup();
       };
 
@@ -314,11 +369,13 @@ export function useRealtimeStream(): RealtimeStreamState &
 
       setIsRecording(true);
       acceptAudioRef.current = true;
+      return { startedAt: startTimeRef.current, audioTrack: stream.getAudioTracks()[0] };
     } catch (err: unknown) {
-      const msg =
-        err instanceof Error ? err.message : "Lỗi không xác định khi ghi âm.";
-      setError(msg);
+      // Keep the original error so the UI can explain it (mic permission,
+      // no microphone, mic busy, connection…) — see friendlyError().
+      setError(err ?? "Chưa bắt đầu ghi âm được. Vui lòng thử lại.");
       cleanup();
+      return null;
     }
   }, [cleanup, stopCapture]);
 
@@ -334,7 +391,7 @@ export function useRealtimeStream(): RealtimeStreamState &
     stopCapture();
 
     if (ws?.readyState !== WebSocket.OPEN) {
-      setError("WebSocket đã ngắt nên không thể xác nhận audio cuối.");
+      setError("Mất kết nối trước khi kết thúc ghi âm. Phần đã ghi vẫn được lưu và xử lý.");
       cleanup();
       return;
     }
@@ -343,7 +400,7 @@ export function useRealtimeStream(): RealtimeStreamState &
     setIsFinalizing(true);
     ws.send(JSON.stringify({ type: "stop" }));
     finalizationTimerRef.current = setTimeout(() => {
-      setError("Server mất quá nhiều thời gian để hoàn tất audio.");
+      setError("Máy chủ xử lý phần cuối lâu hơn bình thường. Bản ghi vẫn được lưu, bạn có thể xem lại trong thư viện.");
       cleanup();
     }, 135_000);
   }, [cleanup, isRecording, stopCapture]);
@@ -356,6 +413,8 @@ export function useRealtimeStream(): RealtimeStreamState &
     elapsedMs,
     error,
     sourceId,
+    jobId,
+    confirmedEndMs,
     start,
     stop,
   };

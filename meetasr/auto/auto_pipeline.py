@@ -47,7 +47,9 @@ class AutoPipeline:
         if "asr" not in config:
             raise ValueError("Config must have an 'asr' section with a 'model' key.")
 
-        device = config.get("device", "cpu")
+        device = config.get("device", "auto")
+        if device == "auto":
+            device = cls._auto_detect_device()
 
         # Build ASR (required)
         asr_cfg = dict(config["asr"])
@@ -123,6 +125,16 @@ class AutoPipeline:
     # ------------------------------------------------------------------
 
     @staticmethod
+    def _auto_detect_device() -> str:
+        """Automatically detect available hardware accelerator (CUDA, MPS, or CPU)."""
+        import torch
+        if torch.cuda.is_available():
+            return "cuda:0"
+        if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            return "mps"
+        return "cpu"
+
+    @staticmethod
     def _build_optional(config: dict, key: str, device: str) -> Any:
         """Build an optional model component from config[key]."""
         if key not in config or not config[key]:
@@ -151,6 +163,11 @@ class AutoPipeline:
             key_val = client_kwargs["api_key"]
             if isinstance(key_val, str) and key_val.startswith("${"):
                 client_kwargs["api_key"] = os.environ.get(key_val[2:-1], "")
+
+        api_key = client_kwargs.get("api_key")
+        if not api_key:
+            logging.warning("No LLM API key provided. Skipping DocumentPlanner.")
+            return None
 
         client = llm_class(**client_kwargs)
         return DocumentPlanner(
@@ -188,6 +205,11 @@ class AutoPipeline:
             if isinstance(key_val, str) and key_val.startswith("${"):
                 env_name = key_val[2:-1]
                 client_kwargs["api_key"] = os.environ.get(env_name, "")
+
+        api_key = client_kwargs.get("api_key")
+        if not api_key:
+            logging.warning("No LLM API key provided. Skipping MeetingSummarizer.")
+            return None
 
         client = llm_class(**client_kwargs)
 

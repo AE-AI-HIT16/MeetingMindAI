@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from typing import Any, Literal
+from typing import Any, Literal, Union
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from pydantic import BaseModel, Field, model_validator
@@ -262,7 +262,7 @@ async def get_document_status(
 
 @router.get(
     "/v2/documents/{meeting_id}/report",
-    response_model=DocumentReportResponse | MarkdownDocumentResponse,
+    response_model=Union[DocumentReportResponse, MarkdownDocumentResponse],
 )
 async def get_document_report(
     meeting_id: str,

@@ -7,7 +7,7 @@ không thay đổi kể cả khi người dùng đổi email.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy import UniqueConstraint
@@ -24,6 +24,7 @@ class User(SQLModel, table=True):
     __tablename__ = "users"
     __table_args__ = (
         UniqueConstraint("provider", "provider_id", name="uq_provider_id"),
+        {"extend_existing": True},
     )
 
     id: str = Field(default_factory=_new_uuid, primary_key=True)
@@ -35,5 +36,5 @@ class User(SQLModel, table=True):
     name: str
     avatar_url: Optional[str] = None          # Ảnh đại diện
 
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    last_login_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    last_login_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

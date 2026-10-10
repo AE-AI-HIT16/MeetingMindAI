@@ -6,6 +6,7 @@ import type {
   DocumentGenerationStage,
   DocumentGenerationStatus,
 } from "./types";
+import { getWebSocketBase } from "./runtime";
 
 export interface DocumentGenerationEventsState {
   isConnected: boolean;
@@ -21,9 +22,7 @@ interface TrackedGenerationState extends DocumentGenerationEventsState {
 }
 
 function documentEventsUrl(generationJobId: string): string {
-  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  const host = process.env.NEXT_PUBLIC_WS_HOST ?? "127.0.0.1:8000";
-  return `${protocol}//${host}/v1/document-jobs/${generationJobId}/events`;
+  return `${getWebSocketBase()}/v1/document-jobs/${generationJobId}/events`;
 }
 
 export function useDocumentGenerationEvents(

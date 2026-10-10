@@ -8,9 +8,14 @@
     "start": "next start",
     "lint": "eslint",
     "test:pcm": "node --test tests/pcm-processor.test.mjs",
-    "test:realtime-state": "node --test tests/realtime-transcript-state.test.mjs"
+    "test:realtime-state": "node --test tests/realtime-transcript-state.test.mjs",
+    "test:live-caption": "node --test tests/live-caption-state.test.mjs",
+    "test:friendly-error": "node --test tests/friendly-error.test.mjs",
+    "test:speaker-blocks": "node --test tests/speaker-blocks.test.mjs"
   },
   "dependencies": {
+    "@phosphor-icons/react": "2.1.10",
+    "docx-preview": "0.3.6",
     "next": "16.2.10",
     "next-auth": "^4.24.15",
     "react": "19.2.4",
@@ -27,5 +32,6 @@
     "eslint-config-next": "16.2.10",
     "tailwindcss": "^4",
     "typescript": "^5"
-  }
+  },
+  "packageManager": "pnpm@9.15.4"
 }

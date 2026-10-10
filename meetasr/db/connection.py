@@ -18,9 +18,10 @@ logger = logging.getLogger(__name__)
 # Nạp biến môi trường từ tệp .env
 load_dotenv()
 
-#hệ thống sẽ ưu tiên lấy DATABASE_URL từ file .env
-# Nếu không tìm thấy file .env, nó mới lùi về dùng SQLite mặc định.
 DATABASE_URL: str = os.environ.get("DATABASE_URL", "sqlite:///meetasr.db")
+if "<neon-host>" in DATABASE_URL or "<user>" in DATABASE_URL:
+    DATABASE_URL = "sqlite:///meetasr.db"
+
 
 # Khắc phục lỗi multi-threading của SQLite khi chạy cùng FastAPI (chỉ áp dụng nếu dùng SQLite)
 _connect_args: dict = {}
@@ -50,7 +51,26 @@ def init_db() -> None:
     import meetasr.db.user_model  # noqa: F401  -- bang users
     SQLModel.metadata.create_all(engine)
     _ensure_unique_documents()
+    _ensure_job_columns()
     logger.info("Đã khởi tạo các bảng trong cơ sở dữ liệu.")
+
+
+def _ensure_job_columns() -> None:
+    """Add columns introduced after the tables were first created."""
+    from sqlalchemy import inspect
+
+    added = {
+        "jobs": {"asr_context": "TEXT"},
+        "transcript_segments": {"overlapped": "BOOLEAN NOT NULL DEFAULT FALSE"},
+    }
+    inspector = inspect(engine)
+    with engine.begin() as connection:
+        for table, columns in added.items():
+            existing = {column["name"] for column in inspector.get_columns(table)}
+            for name, sql_type in columns.items():
+                if name not in existing:
+                    connection.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {sql_type}"))
+                    logger.info("Đã thêm cột %s.%s.", table, name)
 
 
 def _ensure_unique_documents() -> None:

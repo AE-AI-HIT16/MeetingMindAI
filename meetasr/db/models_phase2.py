@@ -5,8 +5,9 @@
     Source (1) ──► Document (nhiều — summary, full_text, live…)
     Job    (1) ──► TranscriptSegment (nhiều)
 """
+
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 
 from sqlalchemy import UniqueConstraint
@@ -95,7 +96,8 @@ class Source(SQLModel, table=True):
     media_type: str                              # "audio" | "video"
     duration: Optional[float] = None            # seconds; None until extracted
     storage_path: str                           # local path or MinIO object key
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    file_size_bytes: Optional[int] = None       # original upload size in bytes
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     # Relationships
     job: Optional["Job"] = Relationship(
@@ -126,17 +128,18 @@ class Job(SQLModel, table=True):
     stage: str = Field(default="")                      # see JobStage
     progress: float = Field(default=0.0)                # 0.0 → 1.0
     error: Optional[str] = None                         # set only when status=failed
+    # Optional keywords / names from the user for Qwen3.
+    asr_context: Optional[str] = None
 
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     # Relationships
-    source: Optional[Source] = Relationship(back_populates="job")
+    source: Source = Relationship(back_populates="job")
     segments: List["TranscriptSegment"] = Relationship(
         back_populates="job",
         sa_relationship_kwargs={"cascade": "all, delete-orphan"},
     )
-
 
 
 class TranscriptSegment(SQLModel, table=True):
@@ -156,9 +159,10 @@ class TranscriptSegment(SQLModel, table=True):
     end_ms: int             # segment end, milliseconds from file beginning
     speaker: Optional[int] = None   # speaker label; None until diarization runs
     text: str               # recognised text for this segment
+    overlapped: bool = False  # another person talks at the same time
 
     # Relationships
-    job: Optional[Job] = Relationship(back_populates="segments")
+    job: Job = Relationship(back_populates="segments")
 
 
 class Document(SQLModel, table=True):
@@ -184,11 +188,11 @@ class Document(SQLModel, table=True):
 
     mode: str = Field(default=DocumentMode.LIVE)    # see DocumentMode
     markdown: str = Field(default="")               # full markdown content
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     # Relationships
-    source: Optional[Source] = Relationship(back_populates="documents")
+    source: Source = Relationship(back_populates="documents")
 
 
 class DocumentGenerationJob(SQLModel, table=True):
@@ -211,10 +215,10 @@ class DocumentGenerationJob(SQLModel, table=True):
     stage: str = Field(default=DocumentGenerationStage.QUEUED)
     progress: float = Field(default=0.0)
     error: Optional[str] = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
-    source: Optional[Source] = Relationship(
+    source: Source = Relationship(
         back_populates="document_generation_jobs"
     )
 
@@ -231,4 +235,5 @@ class DocumentDuplicateArchive(SQLModel, table=True):
     markdown: str
     original_created_at: datetime
     original_updated_at: datetime
-    archived_at: datetime = Field(default_factory=datetime.utcnow)
+    archived_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+

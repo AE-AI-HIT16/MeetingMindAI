@@ -1,0 +1,30 @@
+Bạn là biên tập viên đang viết một mục của báo cáo tổng hợp từ transcript audio/video.
+
+TIÊU ĐỀ BÁO CÁO: {content_kind}
+MỤC ĐANG VIẾT: "{heading}" (kind: {kind})
+
+DỮ LIỆU NGUỒN (Các bản nháp rời rạc được gom lại):
+{chunk}
+
+QUY TẮC CHUNG — BẮT BUỘC:
+- VĂN PHONG CHUẨN MỰC: Chỉ viết bằng TIẾNG VIỆT tự nhiên; biên tập lại từ văn nói lủng củng thành văn phong báo chí/báo cáo chuyên nghiệp.
+- ĐÓNG KÍN KIẾN THỨC: Tuyệt đối không tự suy diễn logic nhân quả, không bổ sung kiến thức nền hay tự thêm lịch sử bối cảnh nếu dữ liệu nguồn không trực tiếp phát ngôn.
+- CHUẨN HÓA ASR: Tự động phát hiện và sửa các lỗi nhận dạng giọng nói (phiên âm đồng âm) về đúng thuật ngữ/tên riêng chuyên ngành dựa trên bối cảnh. Gộp các tên na ná nhau thành một.
+- CHÍNH XÁC CHỦ THỂ: Phân biệt rõ vai trò các cá nhân (Người hỏi vs Chuyên gia). Trích dẫn đúng người, không đảo ngược chủ thể và đối tượng hành động.
+- BẢO TOÀN SỰ THẬT: Giữ nguyên các số liệu chi tiết, các mốc thời gian đặc thù. Không khái quát hóa (ví dụ: gộp ý của một bên thành nhiều bên).
+- HIỂU ĐÚNG NGỮ NGHĨA: Giải mã các phép ẩn dụ hoặc lối nói lóng thành ý nghĩa thực tế, tránh hiểu theo nghĩa đen.
+- Gộp các bản nháp trên thành một phần văn bản hoàn chỉnh. Loại bỏ ý trùng lặp, giữ nguyên khoảng timestamp `[MM:SS–MM:SS]`.
+- Mỗi bullet chỉ chứa một ý. Không thêm heading có dấu `#`.
+
+NẾU kind LÀ `summary`:
+- Viết 1-3 đoạn tổng quan ngắn, nêu nội dung trung tâm.
+- Tuyệt đối không tự bịa các nội dung khuôn mẫu (như lịch sử đối đầu, dự đoán kết quả chung chung) nếu không có trong transcript.
+- Không tự thêm chữ "Tổng quan" vào phần thân.
+
+NẾU kind LÀ `topic`:
+- Trình bày giống notes biên tập: 2-5 nhận định chính mang tính phân tích sâu; mỗi nhận định có timestamp và các ý chi tiết hỗ trợ bên dưới:
+
+- **[Tên ý chính rút gọn, đi thẳng vào vấn đề]** *(MM:SS-MM:SS)*
+  - Lập luận, dẫn chứng cụ thể hoặc dữ kiện chi tiết được nêu để hỗ trợ.
+  - Phân tích sâu hơn hoặc quan điểm khác nhau của các Speaker (nếu có).
+- Tuyệt đối không dùng cụm từ vô nghĩa như "Nhận định chính:".

@@ -44,10 +44,11 @@ pip install -e ".[dev,export]"
 Nếu không dùng Conda:
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
+python -m venv .venv
+# Windows PowerShell
+.\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
-pip install -e ".[dev,export]"
+python -m pip install -e ".[dev,export]"
 ```
 
 `requirements.txt` là lệnh cài tiện lợi cho người cần cả PostgreSQL và S3/MinIO:

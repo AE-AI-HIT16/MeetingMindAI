@@ -1,0 +1,46 @@
+# ============================================================
+# GPU Model Server Image for RunPod
+# Uses official PyTorch runtime base image with CUDA 12.1 pre-installed
+# ============================================================
+FROM pytorch/pytorch:2.6.0-cuda12.4-cudnn9-runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PORT=8001 \
+    GROQ_API_KEY=""
+
+WORKDIR /app
+
+# Install system dependencies (ffmpeg for audio processing, git, curl, build-essential)
+# Remove stale CUDA apt lists that cause GPG errors in pytorch base images
+RUN rm -f /etc/apt/sources.list.d/cuda*.list /etc/apt/sources.list.d/nvidia*.list && \
+    apt-get update -o Acquire::ForceIPv4=true || apt-get update --allow-insecure-repositories || true && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends --fix-missing \
+    ffmpeg \
+    curl \
+    git \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy project metadata & source
+COPY pyproject.toml README.md ./
+COPY configs/runpod_gpu.yaml config.yaml
+COPY meetasr ./meetasr
+
+# Install MeetASR dependencies without re-downloading PyTorch/CUDA wheels
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
+    pip install --no-cache-dir .[gpu,vad-test] && \
+    pip install --no-cache-dir runpod && \
+    find /opt/conda -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+
+# Segmentation (pyannote ONNX) on the GPU; same API as the CPU package.
+# Separate RUN so a failure here fails the build instead of hitting "|| true".
+RUN pip uninstall -y onnxruntime && \
+    pip install --no-cache-dir "onnxruntime-gpu>=1.22,<1.23" && \
+    python -c "import onnxruntime as ort; print(ort.__version__, ort.get_available_providers())"
+
+# Verify handler exists so the build fails fast if something is wrong
+RUN ls -la /app/meetasr/runpod/handler.py
+
+CMD ["python", "/app/meetasr/runpod/handler.py"]
+

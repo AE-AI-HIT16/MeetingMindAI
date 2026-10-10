@@ -58,7 +58,7 @@ async def test_upload_worker_persists_segments_document_and_done_event(
 
     class FakeASRService:
         async def prepare_incremental(self, audio_source):
-            assert audio_source == "/tmp/meeting.wav"
+            assert Path(audio_source) == Path("/tmp/meeting.wav")
             return PreparedTranscription(
                 audio=np.zeros(5 * 16000, dtype=np.float32),
                 vad_segments=[

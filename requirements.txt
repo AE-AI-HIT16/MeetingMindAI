@@ -1,4 +1,4 @@
 # Convenience install for contributors who need every supported local feature.
 # Dependency versions live in pyproject.toml so the two files cannot drift.
 # FFmpeg remains a system dependency; see README.md.
--e .[dev,export,postgres,s3]
+-e .[dev,export,s3]

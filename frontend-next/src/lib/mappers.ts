@@ -13,5 +13,6 @@ export function mapTranscriptSegment(
     endMs: segment.end_ms,
     speaker: segment.speaker,
     text: segment.text,
+    overlapped: segment.overlapped ?? false,
   };
 }

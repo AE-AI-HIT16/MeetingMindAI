@@ -6,11 +6,12 @@
  *  - Dễ mock khi test.
  *  - Xử lý lỗi thống nhất (throw APIError với code + message).
  *
- * Next.js rewrite trong next.config.ts tự proxy /v1/* → http://127.0.0.1:8000/v1/*
+ * Next.js rewrite tự proxy /v1/* → http://56.10.9.132:8000/v1/*
  * nên không cần CORS setup và không cần biết host của backend.
  */
 
 import type {
+  ApiTranscriptSegment,
   CreateSourceResponse,
   DocMode,
   DocumentData,
@@ -18,7 +19,9 @@ import type {
   ExportFormat,
   ExportPreset,
   Source,
+  StorageSummary,
 } from "./types";
+import { getApiBase } from "./runtime";
 
 // ---------------------------------------------------------------------------
 // Lỗi API có cấu trúc
@@ -34,57 +37,66 @@ export class APIError extends Error {
   }
 }
 
+/**
+ * Trả về base URL của backend.
+ * Dùng NEXT_PUBLIC_MEETASR_API cho cả Client và Server (ưu tiên biến public).
+ */
+/**
+ * Lấy URL tuyệt đối cho một API endpoint.
+ */
+export function getFullUrl(path: string): string {
+  const base = getApiBase();
+  const cleanPath = path.startsWith("/") ? path : `/${path}`;
+  try {
+    return new URL(cleanPath, base).toString();
+  } catch {
+    return `${base}${cleanPath}`;
+  }
+}
+
 /** Gửi request và throw APIError nếu response không OK. */
 async function apiFetch<T>(
   input: string,
   init?: RequestInit,
   token?: string,
 ): Promise<T> {
-  const apiBase =
-    typeof window === "undefined"
-      ? process.env.MEETASR_API ?? "http://127.0.0.1:8000"
-      : "";
-  const url = apiBase ? new URL(input, apiBase).toString() : input;
-  
+  const url = getFullUrl(input);
+  console.log(`[API] Fetching: ${url} (Base: ${getApiBase()})`);
+
   const headers = new Headers(init?.headers);
   if (token) {
     headers.set("Authorization", `Bearer ${token}`);
   }
 
-  const res = await fetch(url, { ...init, headers });
+  try {
+    const res = await fetch(url, { ...init, headers });
 
-  if (!res.ok) {
-    let message = `HTTP ${res.status}`;
-    try {
-      const body = await res.json();
-      message =
-        body?.detail ??
-        body?.message ??
-        body?.error?.message ??
-        message;
-    } catch {
-      // bỏ qua nếu body không phải JSON
+    if (!res.ok) {
+      let message = `HTTP ${res.status}`;
+      try {
+        const body = await res.json();
+        message =
+          body?.detail ??
+          body?.message ??
+          body?.error?.message ??
+          message;
+      } catch {
+        // bỏ qua nếu body không phải JSON
+      }
+      console.error(`[API Error] ${url} -> Status ${res.status}:`, message);
+      throw new APIError(res.status, message);
     }
-    throw new APIError(res.status, message);
+
+    // 204 No Content — không có body
+    if (res.status === 204) return undefined as T;
+
+    return res.json() as Promise<T>;
+  } catch (err) {
+    if (!(err instanceof APIError)) {
+      console.error(`[API Network Error] Failed to fetch ${url}:`, err);
+    }
+    throw err;
   }
-
-  // 204 No Content — không có body
-  if (res.status === 204) return undefined as T;
-
-  return res.json() as Promise<T>;
-}
-
-/**
- * Browser operations that should not depend on the Next.js rewrite use the
- * public FastAPI origin. This covers large uploads and background finalize
- * submission/status calls.
- */
-function directApiUrl(path: string): string {
-  const configured = process.env.NEXT_PUBLIC_MEETASR_API;
-  const apiBase =
-    configured ??
-    `${window.location.protocol}//${window.location.hostname}:8000`;
-  return new URL(path, apiBase).toString();
 }
 
 // ---------------------------------------------------------------------------
@@ -94,10 +106,19 @@ function directApiUrl(path: string): string {
 /**
  * Lấy danh sách tất cả Source (trang Library).
  * Tương đương: GET /v1/sources
+ * Trả về [] nếu backend chưa được cấu hình (build time).
  */
 export async function listSources(token?: string): Promise<Source[]> {
-  return apiFetch<Source[]>("/v1/sources", { cache: "no-store" }, token);
+  try {
+    return await apiFetch<Source[]>("/v1/sources", { cache: "no-store" }, token);
+  } catch (error) {
+    // Khi build tĩnh (thiếu RUNPOD_ENDPOINT_ID) → trả về mảng rỗng.
+    // Khi runtime thật sự lỗi → re-throw để UI hiển thị thông báo lỗi.
+    if (error instanceof APIError && error.status === 503) return [];
+    throw error;
+  }
 }
+
 
 /**
  * Lấy chi tiết một Source theo ID.
@@ -120,17 +141,21 @@ import { getSession } from "next-auth/react";
 export async function uploadSource(
   file: File,
   onProgress?: (percent: number) => void,
+  hints: { context?: string } = {},
 ): Promise<CreateSourceResponse> {
   const session = await getSession();
   const token = session?.accessToken;
+  assertSessionHasToken(session);
   const formData = new FormData();
   formData.append("file", file);
+  // Optional keywords / names for Qwen3.
+  if (hints.context?.trim()) formData.append("context", hints.context.trim());
 
   // Dùng XMLHttpRequest để có progress event (fetch không hỗ trợ upload progress)
   if (onProgress) {
     return new Promise<CreateSourceResponse>((resolve, reject) => {
       const xhr = new XMLHttpRequest();
-      xhr.open("POST", directApiUrl("/v1/sources"));
+      xhr.open("POST", getFullUrl("/v1/sources"));
       if (token) {
         xhr.setRequestHeader("Authorization", `Bearer ${token}`);
       }
@@ -162,27 +187,76 @@ export async function uploadSource(
         }
       });
 
-      xhr.addEventListener("error", () =>
-        reject(new APIError(0, "Lỗi kết nối mạng.")),
-      );
+      xhr.addEventListener("error", (e) => {
+        const targetUrl = getFullUrl("/v1/sources");
+        console.error("[uploadSource] XHR network error event:", e, "Target URL:", targetUrl);
+        reject(new APIError(0, `Lỗi kết nối mạng tới Backend (${targetUrl}).`));
+      });
 
       xhr.send(formData);
     });
   }
 
   // Không cần progress → dùng fetch đơn giản hơn
-  return apiFetch<CreateSourceResponse>(directApiUrl("/v1/sources"), {
+  return apiFetch<CreateSourceResponse>("/v1/sources", {
     method: "POST",
     body: formData,
   }, token);
+}
+
+/** A signed-in user without a backend token would create ownerless data
+ *  that never shows in their library — refuse instead (guests have no
+ *  session and are unaffected). */
+export function assertSessionHasToken(
+  session: { user?: unknown; accessToken?: string } | null,
+): void {
+  if (session?.user && !session.accessToken) {
+    throw new APIError(
+      401,
+      "Phiên đăng nhập chưa đồng bộ với máy chủ. Vui lòng thử lại sau vài giây hoặc đăng nhập lại.",
+    );
+  }
 }
 
 /**
  * Xóa một Source cùng toàn bộ dữ liệu liên quan.
  * Tương đương: DELETE /v1/sources/{id}
  */
-export async function deleteSource(id: string): Promise<void> {
-  await apiFetch<void>(`/v1/sources/${id}`, { method: "DELETE" });
+export async function deleteSource(id: string, token?: string): Promise<void> {
+  await apiFetch<void>(`/v1/sources/${id}`, { method: "DELETE" }, token);
+}
+
+/**
+ * Lấy tổng dung lượng đã dùng và quota của người dùng hiện tại.
+ * Tương đương: GET /v1/sources/storage
+ */
+export async function getStorageSummary(token?: string): Promise<StorageSummary> {
+  try {
+    return await apiFetch<StorageSummary>("/v1/sources/storage", { cache: "no-store" }, token);
+  } catch {
+    return { used_bytes: 0, quota_bytes: 20 * 1024 * 1024 * 1024 };
+  }
+}
+
+/**
+ * Sửa nội dung (hoặc người nói) một câu transcript rồi lưu.
+ * Tương đương: PATCH /v1/jobs/{jobId}/segments/{segmentId}
+ */
+export async function updateSegment(
+  jobId: string,
+  segmentId: number,
+  patch: { text?: string; speaker?: number },
+  token?: string,
+): Promise<ApiTranscriptSegment> {
+  return apiFetch<ApiTranscriptSegment>(
+    `/v1/jobs/${jobId}/segments/${segmentId}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    },
+    token,
+  );
 }
 
 /**
@@ -190,7 +264,7 @@ export async function deleteSource(id: string): Promise<void> {
  * Backend hỗ trợ HTTP Range nên trình duyệt có thể tua tự nhiên.
  */
 export function mediaUrl(sourceId: string): string {
-  return `/v1/sources/${sourceId}/media`;
+  return getFullUrl(`/v1/sources/${sourceId}/media`);
 }
 
 // ---------------------------------------------------------------------------
@@ -206,14 +280,16 @@ export async function getDocument(id: string, token?: string): Promise<DocumentD
 export async function finalizeDocument(
   liveDocumentId: string,
   mode: Exclude<DocMode, "live">,
+  token?: string,
 ): Promise<DocumentGeneration> {
   const generation = await apiFetch<DocumentGeneration>(
-    directApiUrl(`/v1/documents/${liveDocumentId}/finalize`),
+    `/v1/documents/${liveDocumentId}/finalize`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ mode }),
     },
+    token,
   );
   if (
     !generation?.generationJobId ||
@@ -232,7 +308,7 @@ export async function getDocumentGeneration(
   generationJobId: string,
 ): Promise<DocumentGeneration> {
   return apiFetch<DocumentGeneration>(
-    directApiUrl(`/v1/document-jobs/${generationJobId}`),
+    `/v1/document-jobs/${generationJobId}`,
     { cache: "no-store" },
   );
 }
@@ -245,4 +321,64 @@ export function documentExportUrl(
   const params = new URLSearchParams({ format });
   if (preset) params.set("preset", preset);
   return `/v1/documents/${documentId}/export?${params.toString()}`;
+}
+
+/**
+ * Download an export with the user's token (the endpoint checks ownership,
+ * so a plain <a href> without Authorization would be rejected).
+ */
+/** Fetches an export file (used both for preview and for download). */
+export async function fetchDocumentExport(
+  documentId: string,
+  format: ExportFormat,
+  preset: ExportPreset | undefined,
+  token?: string,
+): Promise<{ blob: Blob; filename: string }> {
+  const res = await fetch(getFullUrl(documentExportUrl(documentId, format, preset)), {
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+  });
+  if (!res.ok) {
+    let message = `HTTP ${res.status}`;
+    try {
+      message = (await res.json())?.detail ?? message;
+    } catch {
+      // non-JSON error body
+    }
+    throw new APIError(res.status, message);
+  }
+  const disposition = res.headers.get("Content-Disposition") ?? "";
+  const match = /filename\*=UTF-8''([^;]+)/i.exec(disposition);
+  const filename = match ? decodeURIComponent(match[1]) : `document.${format}`;
+  return { blob: await res.blob(), filename };
+}
+
+/** Saves a blob through a temporary link. */
+export function saveBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const link = window.document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+export async function downloadDocumentExport(
+  documentId: string,
+  format: ExportFormat,
+  preset: ExportPreset | undefined,
+  token?: string,
+): Promise<void> {
+  const { blob, filename } = await fetchDocumentExport(documentId, format, preset, token);
+  saveBlob(blob, filename);
+}
+
+/**
+ * Ask the backend to cold-start a RunPod worker while the user picks and
+ * uploads a file, so processing starts on a ready worker. Best effort.
+ */
+export async function warmupAsr(): Promise<void> {
+  const session = await getSession();
+  const token = session?.accessToken;
+  if (!token) return;
+  await apiFetch<unknown>("/v1/runpod/warmup", { method: "POST" }, token).catch(() => {});
 }

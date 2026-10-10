@@ -21,8 +21,8 @@ import GitHubProvider from "next-auth/providers/github";
 export const authOptions: NextAuthOptions = {
   providers: [
     GoogleProvider({
-      clientId: process.env.GOOGLE_CLIENT_ID ?? "",
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET ?? "",
+      clientId: (process.env.GOOGLE_CLIENT_ID ?? "").trim(),
+      clientSecret: (process.env.GOOGLE_CLIENT_SECRET ?? "").trim(),
     }),
     GitHubProvider({
       clientId: process.env.GITHUB_CLIENT_ID ?? "",
@@ -42,24 +42,19 @@ export const authOptions: NextAuthOptions = {
 
   callbacks: {
     async jwt({ token, account, user }) {
-      const apiBase = process.env.MEETASR_API || "http://127.0.0.1:8000";
+      const apiBase = process.env.NEXT_PUBLIC_MEETASR_API || process.env.MEETASR_API || "http://127.0.0.1:8000";
 
-      // --- Lần đăng nhập đầu tiên: Sync với Backend ---
-      if (account && user) {
+      // Sync the OAuth identity with the backend to get its JWT.
+      const syncBackend = async (identity: SyncIdentity) => {
         try {
           const res = await fetch(`${apiBase}/v1/auth/sync`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              provider: account.provider,
-              provider_id: account.providerAccountId,
-              email: user.email || "",
-              name: user.name || "",
-              avatar_url: user.image || null,
+              ...identity,
               sync_secret: process.env.NEXTAUTH_SECRET || "",
             }),
           });
-
           if (res.ok) {
             const data = await res.json();
             token.accessToken = data.access_token;
@@ -67,11 +62,32 @@ export const authOptions: NextAuthOptions = {
             // Lưu thời điểm hết hạn (expires_in trả về = giây)
             token.tokenExpiry = Date.now() + data.expires_in * 1000;
           } else {
-            console.error("Backend sync failed", await res.text());
+            console.error("[NextAuth JWT Error] Backend sync failed with status:", res.status);
           }
         } catch (error) {
           console.error("Lỗi khi gọi /v1/auth/sync:", error);
         }
+      };
+
+      // --- Lần đăng nhập đầu tiên: Sync với Backend ---
+      if (account && user) {
+        const identity: SyncIdentity = {
+          provider: account.provider,
+          provider_id: account.providerAccountId,
+          email: user.email || "",
+          name: user.name || "",
+          avatar_url: user.image || null,
+        };
+        // Kept so a failed sync (e.g. backend restarting during a deploy) can
+        // be retried later instead of leaving a session with no backend token,
+        // in which uploads/realtime silently became ownerless guest data.
+        token.syncIdentity = identity;
+        await syncBackend(identity);
+        return token;
+      }
+
+      if (!token.accessToken && token.syncIdentity) {
+        await syncBackend(token.syncIdentity as SyncIdentity);
         return token;
       }
 
@@ -95,12 +111,14 @@ export const authOptions: NextAuthOptions = {
             token.accessToken = data.access_token;
             token.tokenExpiry = Date.now() + data.expires_in * 1000;
             console.log("✅ Token đã được gia hạn tự động.");
-          } else {
-            // Token đã hết hạn hoàn toàn, xóa để buộc đăng nhập lại
-            console.warn("⚠️ Refresh thất bại, yêu cầu đăng nhập lại.");
+          } else if (res.status === 401) {
+            // Token đã hết hạn hoàn toàn: xóa để đồng bộ lại / đăng nhập lại.
+            console.warn("⚠️ Refresh thất bại (401), cần đồng bộ lại.");
             token.accessToken = undefined;
             token.tokenExpiry = undefined;
           }
+          // Other statuses (502/503 while the backend restarts): keep the
+          // still-valid token and try again on a later request.
         } catch (error) {
           console.error("Lỗi khi gọi /v1/auth/refresh:", error);
         }
@@ -116,10 +134,26 @@ export const authOptions: NextAuthOptions = {
       }
       // Gắn JWT nội bộ vào session để client gọi API
       session.accessToken = token.accessToken;
+      // No backend token: uploads would be stored without an owner and never
+      // appear in the library. "relogin" = a session from before sync retries
+      // existed (cannot recover); "syncing" = retried on the next request.
+      session.authError = token.accessToken
+        ? undefined
+        : token.syncIdentity
+          ? "syncing"
+          : "relogin";
       return session;
     },
   },
 };
+
+interface SyncIdentity {
+  provider: string;
+  provider_id: string;
+  email: string;
+  name: string;
+  avatar_url: string | null;
+}
 
 import NextAuth from "next-auth";
 const handler = NextAuth(authOptions);
