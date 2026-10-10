@@ -197,7 +197,7 @@ jobs:
           echo "Updating RunPod endpoint ${RUNPOD_ENDPOINT_ID} -> ${IMAGE}"
 
           export NEW_IMAGE="${IMAGE}"
-          python3 .github/scripts/update_runpod_endpoint.py
+          python3 -u .github/scripts/update_runpod_endpoint.py
 
           # Purge stale workers so they restart with the new image
           echo "Purging stale workers..."
