@@ -57,6 +57,14 @@ asr:
   max_inference_batch_size: 8
   max_new_tokens: 512
 
+# Qwen3 leaves ~half of conversational Vietnamese segments lowercase and
+# unpunctuated; ViBERT-CaPu restores them per speaker run at finalize
+# (~66 ms per segment on GPU).
+punc:
+  model: vibert-capu
+  hub: hf
+  device: cuda:0
+
 vad:
   model: silero-vad
   backend: onnx

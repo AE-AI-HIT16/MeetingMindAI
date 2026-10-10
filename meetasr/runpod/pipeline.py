@@ -19,6 +19,7 @@ from meetasr.runpod.schemas import (
     TranscriptResult,
 )
 from meetasr.runpod.utils.audio import load_audio
+from meetasr.runpod.utils.punctuation import punctuate_speaker_runs
 from meetasr.runpod.utils.text_filter import clean_transcript_text
 from meetasr.runpod.utils.diarization import (
     annotate_overlaps,
@@ -460,13 +461,20 @@ class MeetPipeline:
         self,
         sentence_info: list[SentenceInfo],
     ) -> list[SentenceInfo]:
-        """Restore punctuation without changing preassigned speaker turns."""
-        finalized = copy.deepcopy(sentence_info)
-        if self.punc is not None and (
-            not getattr(self.asr, "has_native_punctuation", False)
-            or _needs_external_punctuation(finalized)
-        ):
-            finalized = self._run_punc(finalized)
+        """Restore punctuation without changing preassigned speaker turns.
+
+        Runs of one speaker are punctuated together (segments are cut at
+        pauses, often mid-sentence); runs Qwen already punctuated are kept.
+        """
+        if self.punc is None:
+            return copy.deepcopy(sentence_info)
+        t0 = time.perf_counter()
+        finalized = punctuate_speaker_runs(sentence_info, self.punc.restore)
+        logging.info(
+            "Punc: %d segment(s) changed (%.2fs)",
+            sum(a.text != b.text for a, b in zip(sentence_info, finalized)),
+            time.perf_counter() - t0,
+        )
         return finalized
 
     def summarize_meeting(
@@ -874,20 +882,3 @@ def _derive_key(source) -> str:
     if isinstance(source, str):
         return os.path.splitext(os.path.basename(source))[0]
     return f"audio_{int(time.time())}"
-
-
-def _needs_external_punctuation(
-    sentences: list[SentenceInfo],
-    *,
-    min_text_chars: int = 80,
-    max_chars_per_terminal_mark: int = 240,
-) -> bool:
-    """Detect long ASR text whose claimed native punctuation is unusable."""
-    text = " ".join(sentence.text.strip() for sentence in sentences if sentence.text.strip())
-    if len(text) < min_text_chars:
-        return False
-    terminal_marks = sum(text.count(mark) for mark in ".!?。！？")
-    return (
-        terminal_marks == 0
-        or len(text) / terminal_marks > max_chars_per_terminal_mark
-    )
