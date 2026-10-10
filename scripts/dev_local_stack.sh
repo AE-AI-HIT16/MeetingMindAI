@@ -18,9 +18,10 @@ cd "$ROOT"
 
 pids=()
 cleanup() {
+  trap - EXIT INT TERM
   echo "Stopping..."
-  for pid in "${pids[@]}"; do kill "$pid" 2>/dev/null || true; done
-  wait 2>/dev/null || true
+  # The whole process group: npx/uvicorn spawn children of their own.
+  kill 0 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM
 
