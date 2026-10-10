@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { finalizeDocument } from "@/lib/api";
+import { useSession } from "next-auth/react";
 import type { DocMode, DocumentGenerationStage } from "@/lib/types";
 import { useDocumentGenerationEvents } from "@/lib/useDocumentGenerationEvents";
 
@@ -36,6 +37,7 @@ export function FinalizeDialog({
   onClose: () => void;
 }) {
   const router = useRouter();
+  const { data: authSession } = useSession();
   const [submitting, setSubmitting] = useState<DocMode | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [generationJobId, setGenerationJobId] = useState<string | null>(
@@ -80,7 +82,7 @@ export function FinalizeDialog({
     setError(null);
     setGenerationJobId(null);
     try {
-      const accepted = await finalizeDocument(liveDocumentId, mode);
+      const accepted = await finalizeDocument(liveDocumentId, mode, authSession?.accessToken);
       if (accepted.status === "done") {
         router.push(
           `/sources/${accepted.sourceId}?view=doc&documentId=${encodeURIComponent(accepted.documentId)}`,

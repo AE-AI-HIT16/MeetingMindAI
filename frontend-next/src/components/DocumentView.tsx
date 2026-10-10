@@ -9,7 +9,8 @@ import type {
   PdfExportPreset,
   Source,
 } from "@/lib/types";
-import { documentExportUrl, mediaUrl } from "@/lib/api";
+import { downloadDocumentExport, mediaUrl } from "@/lib/api";
+import { useSession } from "next-auth/react";
 import { EditableSegmentText } from "@/components/EditableSegmentText";
 import { formatDuration, formatStamp } from "@/lib/format";
 import { useJobEvents } from "@/lib/useJobEvents";
@@ -71,6 +72,9 @@ export function DocumentView({
 }) {
   const [tab, setTab] = useState<Tab>("doc");
   const [exportOpen, setExportOpen] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+  const { data: authSession } = useSession();
   const [exportFormat, setExportFormat] = useState<ExportFormat>("pdf");
   const [pdfPreset, setPdfPreset] =
     useState<PdfExportPreset>("minimal");
@@ -268,17 +272,35 @@ export function DocumentView({
                 </p>
               )}
 
-              <a
-                href={documentExportUrl(
-                  document.id,
-                  exportFormat,
-                  selectedPreset,
-                )}
-                onClick={() => setExportOpen(false)}
-                className="mt-4 flex w-full items-center justify-center rounded-xl bg-brand px-4 py-2.5 text-sm font-medium text-white transition hover:bg-brand-ink"
+              <button
+                type="button"
+                disabled={downloading}
+                onClick={async () => {
+                  setDownloading(true);
+                  setDownloadError(null);
+                  try {
+                    await downloadDocumentExport(
+                      document.id,
+                      exportFormat,
+                      selectedPreset,
+                      authSession?.accessToken,
+                    );
+                    setExportOpen(false);
+                  } catch (err) {
+                    setDownloadError(
+                      err instanceof Error ? err.message : "Không thể tải tài liệu.",
+                    );
+                  } finally {
+                    setDownloading(false);
+                  }
+                }}
+                className="mt-4 flex w-full items-center justify-center rounded-xl bg-brand px-4 py-2.5 text-sm font-medium text-white transition hover:bg-brand-ink disabled:opacity-60"
               >
-                Tải xuống .{exportFormat}
-              </a>
+                {downloading ? "Đang tạo file…" : `Tải xuống .${exportFormat}`}
+              </button>
+              {downloadError && (
+                <p className="mt-2 text-xs text-danger">{downloadError}</p>
+              )}
             </div>
           )}
         </div>

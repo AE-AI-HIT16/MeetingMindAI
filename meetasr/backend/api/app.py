@@ -170,6 +170,8 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    # Export downloads are fetched with an auth header; let JS read the filename.
+    expose_headers=["Content-Disposition"],
 )
 
 # Register route modules

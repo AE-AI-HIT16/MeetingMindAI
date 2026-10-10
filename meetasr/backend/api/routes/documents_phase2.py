@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Optional
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
@@ -13,7 +13,10 @@ from meetasr.backend.api.schemas_phase2 import (
     DocumentResponse,
     FinalizeDocumentRequest,
 )
+from meetasr.backend.api.auth_deps import get_current_user
 from meetasr.backend.db.connection import get_db
+from meetasr.backend.db.models_phase2 import Document, Source
+from meetasr.backend.db.user_model import User
 from meetasr.backend.export import (
     MissingExportDependency,
     UnsupportedExportFormat,
@@ -60,12 +63,32 @@ def _raise_service_http_error(exc: Exception) -> None:
     raise exc
 
 
+def _authorize_document(db: Session, document_id: str, user: Optional[User]) -> None:
+    """Same rule as sources: a document whose Source has an owner is only
+    visible to that owner; guest-mode documents (no owner) stay open."""
+    document = db.get(Document, document_id)
+    if document is None:
+        return  # let the service raise its usual 404
+    source = db.get(Source, document.source_id)
+    if source is not None and source.user_id is not None:
+        if user is None or source.user_id != user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Bạn không có quyền truy cập tài liệu này.",
+            )
+
+
+CurrentUser = Annotated[Optional[User], Depends(get_current_user)]
+
+
 @router.get("/{document_id}", response_model=DocumentResponse)
 def get_document(
     document_id: str,
     db: Annotated[Session, Depends(get_db)],
+    current_user: CurrentUser,
 ) -> DocumentResponse:
     """Return one persisted document by Document ID."""
+    _authorize_document(db, document_id, current_user)
     try:
         document = DocumentService(db).get_document(document_id)
     except DocumentNotFoundError as exc:
@@ -83,8 +106,10 @@ async def finalize_document(
     payload: FinalizeDocumentRequest,
     request: Request,
     db: Annotated[Session, Depends(get_db)],
+    current_user: CurrentUser,
 ) -> DocumentGenerationResponse:
     """Accept an idempotent background summary/full-text generation job."""
+    _authorize_document(db, document_id, current_user)
     pipeline = getattr(request.app.state, "pipeline", None)
     planner = getattr(pipeline, "doc_planner", None)
     try:
@@ -109,10 +134,12 @@ async def finalize_document(
 def export_document(
     document_id: str,
     db: Annotated[Session, Depends(get_db)],
+    current_user: CurrentUser,
     format: Literal["md", "docx", "pdf"] = Query(default="md"),
     preset: str | None = Query(default=None),
 ) -> Response:
     """Download a persisted document in a supported format/template preset."""
+    _authorize_document(db, document_id, current_user)
     try:
         artifact = DocumentService(db).export_document(
             document_id,

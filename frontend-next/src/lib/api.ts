@@ -262,6 +262,7 @@ export async function getDocument(id: string, token?: string): Promise<DocumentD
 export async function finalizeDocument(
   liveDocumentId: string,
   mode: Exclude<DocMode, "live">,
+  token?: string,
 ): Promise<DocumentGeneration> {
   const generation = await apiFetch<DocumentGeneration>(
     `/v1/documents/${liveDocumentId}/finalize`,
@@ -270,6 +271,7 @@ export async function finalizeDocument(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ mode }),
     },
+    token,
   );
   if (
     !generation?.generationJobId ||
@@ -301,6 +303,39 @@ export function documentExportUrl(
   const params = new URLSearchParams({ format });
   if (preset) params.set("preset", preset);
   return `/v1/documents/${documentId}/export?${params.toString()}`;
+}
+
+/**
+ * Download an export with the user's token (the endpoint checks ownership,
+ * so a plain <a href> without Authorization would be rejected).
+ */
+export async function downloadDocumentExport(
+  documentId: string,
+  format: ExportFormat,
+  preset: ExportPreset | undefined,
+  token?: string,
+): Promise<void> {
+  const res = await fetch(getFullUrl(documentExportUrl(documentId, format, preset)), {
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+  });
+  if (!res.ok) {
+    let message = `HTTP ${res.status}`;
+    try {
+      message = (await res.json())?.detail ?? message;
+    } catch {
+      // non-JSON error body
+    }
+    throw new APIError(res.status, message);
+  }
+  const disposition = res.headers.get("Content-Disposition") ?? "";
+  const match = /filename\*=UTF-8''([^;]+)/i.exec(disposition);
+  const filename = match ? decodeURIComponent(match[1]) : `document.${format}`;
+  const url = URL.createObjectURL(await res.blob());
+  const link = window.document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
 }
 
 /**
