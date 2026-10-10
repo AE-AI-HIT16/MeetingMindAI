@@ -16,7 +16,18 @@ const DOC_LABEL: Record<string, string> = {
   full_text: "Toàn văn",
 };
 
-export function SourceCard({ source }: { source: Source }) {
+export function SourceCard({
+  source,
+  selectionMode = false,
+  selected = false,
+  onToggleSelect,
+}: {
+  source: Source;
+  /** While selecting, a click toggles the card instead of opening it. */
+  selectionMode?: boolean;
+  selected?: boolean;
+  onToggleSelect?: () => void;
+}) {
   const router = useRouter();
   const { data: session } = useSession();
   const [deleting, setDeleting] = useState(false);
@@ -49,7 +60,18 @@ export function SourceCard({ source }: { source: Source }) {
     <div className="group relative">
       <Link
         href={href}
-        className="flex flex-col rounded-[var(--radius-card)] border border-line bg-surface p-5 shadow-[var(--shadow-card)] transition duration-300 hover:-translate-y-1 hover:border-transparent hover:shadow-[var(--shadow-lift)]"
+        onClick={(e) => {
+          if (selectionMode) {
+            e.preventDefault();
+            onToggleSelect?.();
+          }
+        }}
+        aria-pressed={selectionMode ? selected : undefined}
+        className={`flex flex-col rounded-[var(--radius-card)] border bg-surface p-5 shadow-[var(--shadow-card)] transition duration-300 hover:-translate-y-1 hover:shadow-[var(--shadow-lift)] ${
+          selected
+            ? "border-brand ring-2 ring-brand/40"
+            : "border-line hover:border-transparent"
+        }`}
       >
         {/* Media preview strip */}
         <div className="relative mb-4 flex h-28 items-center justify-center overflow-hidden rounded-xl bg-surface-2">
@@ -102,7 +124,33 @@ export function SourceCard({ source }: { source: Source }) {
         />
       ) : null}
 
+      {onToggleSelect && (
+        <button
+          type="button"
+          role="checkbox"
+          aria-checked={selected}
+          aria-label={`Chọn "${source.title}"`}
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onToggleSelect();
+          }}
+          className={`absolute left-2 top-2 flex h-7 w-7 items-center justify-center rounded-lg shadow-sm ring-1 transition ${
+            selected
+              ? "bg-brand text-white ring-brand opacity-100"
+              : `bg-surface text-transparent ring-line hover:ring-brand ${
+                  selectionMode ? "opacity-100" : "opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+                }`
+          }`}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M5 12l5 5L20 7" />
+          </svg>
+        </button>
+      )}
+
       {/* Delete button — hiện khi hover */}
+      {!selectionMode && (
       <button
         onClick={handleDelete}
         disabled={deleting}
@@ -122,6 +170,7 @@ export function SourceCard({ source }: { source: Source }) {
           </svg>
         )}
       </button>
+      )}
     </div>
   );
 }

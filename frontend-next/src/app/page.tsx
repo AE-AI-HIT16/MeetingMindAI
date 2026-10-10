@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/route";
-import { SourceCard } from "@/components/SourceCard";
+import { LibraryGrid } from "@/components/LibraryGrid";
 import { PageHeader } from "@/components/ui";
 import { APIError, listSources } from "@/lib/api";
 import { ErrorNotice } from "@/components/ErrorNotice";
@@ -90,28 +90,7 @@ export default async function LibraryPage() {
         />
       )}
 
-      <div className="mt-8 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
-        <Link
-          href="/upload"
-          className="group flex min-h-[260px] flex-col items-center justify-center rounded-[var(--radius-card)] border-2 border-dashed border-line bg-surface/50 p-5 text-center transition hover:border-brand hover:bg-brand-wash/40"
-        >
-          <span className="flex h-12 w-12 items-center justify-center rounded-full bg-brand-wash text-brand transition group-hover:scale-110">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
-              <path d="M12 5v14M5 12h14" />
-            </svg>
-          </span>
-          <span className="mt-3 font-display text-lg font-medium text-ink">
-            Tài liệu mới
-          </span>
-          <span className="mt-1 text-xs text-ink-faint">
-            Kéo thả hoặc chọn tệp media
-          </span>
-        </Link>
-
-        {sources.map((s) => (
-          <SourceCard key={s.id} source={s} />
-        ))}
-      </div>
+      <LibraryGrid sources={sources} />
     </div>
   );
 }
