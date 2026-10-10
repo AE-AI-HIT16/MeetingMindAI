@@ -73,10 +73,12 @@ def init_models():
         config_path = os.getenv("CONFIG_PATH", "config.yaml")
         logger.info("Loading pipeline from config: %s", config_path)
         pipeline = AutoPipeline.from_yaml(config_path)
-        # Overlap models load lazily; load them now (first worker also
-        # downloads them to the Network Volume) so no job waits on it.
-        for component in (pipeline.segmenter, pipeline.separator):
-            if component is not None:
+        # Models load lazily; load them all now (the first worker also
+        # downloads them to the Network Volume). The upload page sends a
+        # "warmup" job on open, so Qwen loads while the user is still
+        # uploading instead of inside the first transcription batch.
+        for component in (pipeline.asr, pipeline.punc, pipeline.segmenter, pipeline.separator):
+            if component is not None and hasattr(component, "_ensure_loaded"):
                 component._ensure_loaded()
         realtime_pipeline = ASRPipeline(
             asr_model=pipeline.asr,
