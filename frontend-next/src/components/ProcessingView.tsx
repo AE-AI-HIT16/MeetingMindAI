@@ -11,6 +11,7 @@ import { StageProgress } from "@/components/StageProgress";
 import { MarkdownLite } from "@/components/MarkdownLite";
 import { FinalizeDialog } from "@/components/FinalizeDialog";
 import { mediaUrl } from "@/lib/api";
+import { ErrorNotice } from "@/components/ErrorNotice";
 
 export function ProcessingView({
   source,
@@ -104,14 +105,9 @@ export function ProcessingView({
         </div>
       )}
 
-      {error && (
-        <p
-          role="alert"
-          className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
-        >
-          {error}
-        </p>
-      )}
+      {error ? (
+        <ErrorNotice error={error} title="Xử lý chưa hoàn tất" className="mt-4" />
+      ) : null}
 
       {/* Two columns — voice on the left, document on the right */}
       <div className="mt-5 grid min-h-0 flex-1 grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">

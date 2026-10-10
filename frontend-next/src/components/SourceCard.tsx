@@ -8,6 +8,7 @@ import type { Source } from "@/lib/types";
 import { formatDate, formatDuration } from "@/lib/format";
 import { StatusBadge, Waveform } from "@/components/ui";
 import { deleteSource } from "@/lib/api";
+import { ErrorNotice } from "@/components/ErrorNotice";
 
 const DOC_LABEL: Record<string, string> = {
   live: "Đang tạo",
@@ -19,6 +20,7 @@ export function SourceCard({ source }: { source: Source }) {
   const router = useRouter();
   const { data: session } = useSession();
   const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<unknown>(null);
 
   const isVideo = source.mediaType === "video";
   const finalDocument =
@@ -38,7 +40,7 @@ export function SourceCard({ source }: { source: Source }) {
       router.refresh();
     } catch (err) {
       console.error("[SourceCard] delete failed:", err);
-      alert("Không thể xóa tài liệu. Vui lòng thử lại.");
+      setDeleteError(err);
       setDeleting(false);
     }
   }
@@ -89,6 +91,16 @@ export function SourceCard({ source }: { source: Source }) {
           </div>
         </div>
       </Link>
+
+      {deleteError ? (
+        <ErrorNotice
+          compact
+          error={deleteError}
+          title="Chưa xóa được tài liệu"
+          onDismiss={() => setDeleteError(null)}
+          className="mt-2"
+        />
+      ) : null}
 
       {/* Delete button — hiện khi hover */}
       <button

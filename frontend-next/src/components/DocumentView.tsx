@@ -16,6 +16,7 @@ import { formatDuration, formatStamp } from "@/lib/format";
 import { useJobEvents } from "@/lib/useJobEvents";
 import { MarkdownLite } from "@/components/MarkdownLite";
 import { SpeakerChip } from "@/components/ui";
+import { ErrorNotice } from "@/components/ErrorNotice";
 
 type Tab = "doc" | "transcript" | "media";
 
@@ -73,7 +74,7 @@ export function DocumentView({
   const [tab, setTab] = useState<Tab>("doc");
   const [exportOpen, setExportOpen] = useState(false);
   const [downloading, setDownloading] = useState(false);
-  const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [downloadError, setDownloadError] = useState<unknown>(null);
   const { data: authSession } = useSession();
   const [exportFormat, setExportFormat] = useState<ExportFormat>("pdf");
   const [pdfPreset, setPdfPreset] =
@@ -287,9 +288,7 @@ export function DocumentView({
                     );
                     setExportOpen(false);
                   } catch (err) {
-                    setDownloadError(
-                      err instanceof Error ? err.message : "Không thể tải tài liệu.",
-                    );
+                    setDownloadError(err);
                   } finally {
                     setDownloading(false);
                   }
@@ -298,9 +297,14 @@ export function DocumentView({
               >
                 {downloading ? "Đang tạo file…" : `Tải xuống .${exportFormat}`}
               </button>
-              {downloadError && (
-                <p className="mt-2 text-xs text-danger">{downloadError}</p>
-              )}
+              {downloadError ? (
+                <ErrorNotice
+                  compact
+                  error={downloadError}
+                  title="Chưa tải được tài liệu"
+                  className="mt-2"
+                />
+              ) : null}
             </div>
           )}
         </div>

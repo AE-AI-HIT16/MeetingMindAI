@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useSession } from "next-auth/react";
 import { updateSegment } from "@/lib/api";
+import { ErrorNotice } from "@/components/ErrorNotice";
 
 /**
  * One transcript sentence with an always-visible "Sửa" button (also
@@ -24,7 +25,7 @@ export function EditableSegmentText({
   const [saved, setSaved] = useState<string | null>(null);
   const [draft, setDraft] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
 
   const shown = saved ?? text;
   const editable = jobId !== null && segmentId !== null;
@@ -47,8 +48,8 @@ export function EditableSegmentText({
       const updated = await updateSegment(jobId, segmentId, { text: draft }, authSession?.accessToken);
       setSaved(updated.text);
       setDraft(null);
-    } catch {
-      setError("Không thể lưu chỉnh sửa. Vui lòng thử lại.");
+    } catch (err) {
+      setError(err);
     } finally {
       setSaving(false);
     }
@@ -86,7 +87,15 @@ export function EditableSegmentText({
           </button>
           <span className="text-[11px] text-ink-faint">Ctrl+Enter để lưu · Esc để hủy</span>
         </div>
-        {error && <p className="mt-1 text-xs text-danger">{error}</p>}
+        {error ? (
+          <ErrorNotice
+            compact
+            error={error}
+            title="Chưa lưu được chỉnh sửa"
+            onRetry={() => void save()}
+            className="mt-2"
+          />
+        ) : null}
       </div>
     );
   }

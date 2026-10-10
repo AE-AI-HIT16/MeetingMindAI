@@ -30,8 +30,8 @@ export interface RealtimeStreamState {
   transcripts: TranscriptDelta[];
   /** Elapsed recording time in milliseconds. */
   elapsedMs: number;
-  /** Last error message, if any. */
-  error: string | null;
+  /** Last error (message string or original error), if any. */
+  error: unknown;
   /** Source ID created by backend for this realtime session. */
   sourceId: string | null;
   /** Offline (diarization) job ID; it starts processing right after stop. */
@@ -89,7 +89,7 @@ export function useRealtimeStream(): RealtimeStreamState &
   const [isConnected, setIsConnected] = useState(false);
   const [transcripts, setTranscripts] = useState<TranscriptDelta[]>([]);
   const [elapsedMs, setElapsedMs] = useState(0);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
   const [sourceId, setSourceId] = useState<string | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
   const [confirmedEndMs, setConfirmedEndMs] = useState(0);
@@ -176,7 +176,7 @@ export function useRealtimeStream(): RealtimeStreamState &
 
       if (stream.getAudioTracks().length === 0) {
         stream.getTracks().forEach((track) => track.stop());
-        throw new Error("Tab duoc chon khong chia se am thanh. Hay bat chia se am thanh khi chon tab.");
+        throw new Error("Tab bạn chọn chưa chia sẻ âm thanh. Khi chọn tab, hãy bật mục “Chia sẻ âm thanh của tab”.");
       }
       streamRef.current = stream;
 
@@ -227,14 +227,14 @@ export function useRealtimeStream(): RealtimeStreamState &
             console.error("[RealtimeStream] WebSocket onerror event triggered:", ev);
             console.error("[RealtimeStream] Attempted WS URL:", wsUrl);
             console.error("[RealtimeStream] Current NEXT_PUBLIC_MEETASR_API:", process.env.NEXT_PUBLIC_MEETASR_API);
-            reject(new Error(`Không thể kết nối WebSocket tới backend (${wsUrl}).`));
+            reject(new Error("Không kết nối được tới máy chủ ghi âm. Vui lòng thử lại sau giây lát."));
           }
         };
         // Timeout after 5 s
         setTimeout(() => {
           if (!settled) {
             settled = true;
-            reject(new Error(`WebSocket connection to ${wsUrl} timed out.`));
+            reject(new Error("Máy chủ ghi âm phản hồi quá chậm. Vui lòng thử lại sau giây lát."));
           }
         }, 5000);
       });
@@ -285,7 +285,7 @@ export function useRealtimeStream(): RealtimeStreamState &
             (data.code === "stream_drain_failed" ||
               data.code === "stream_finalization_failed")
           ) {
-            setError(data.message ?? "Không thể hoàn tất audio realtime.");
+            setError("Chưa hoàn tất được phần ghi âm cuối. Phần đã ghi vẫn được lưu và xử lý.");
             cleanup();
             return;
           }
@@ -321,14 +321,14 @@ export function useRealtimeStream(): RealtimeStreamState &
           finalizationTimerRef.current = null;
         }
         if (finalizingRef.current) {
-          setError("Kết nối đóng trước khi server hoàn tất audio.");
+          setError("Kết nối bị ngắt trước khi hoàn tất phần cuối. Phần đã ghi vẫn được lưu và xử lý.");
         } else if (ev.code !== 1000 && ev.code !== 1005) {
           // Abnormal close while recording (e.g. 1013 = realtime pipeline not
           // ready on the server). Previously this closed silently.
           setError(
             ev.code === 1013
-              ? "Máy chủ realtime chưa sẵn sàng. Vui lòng thử lại sau giây lát."
-              : `Kết nối realtime bị đóng (mã ${ev.code}). Vui lòng thử lại.`,
+              ? "Máy chủ đang khởi động. Vui lòng thử lại sau giây lát."
+              : "Mất kết nối tới máy chủ trong lúc ghi. Phần đã ghi vẫn được lưu; hãy kiểm tra mạng rồi bấm ghi lại.",
           );
         }
         finalizingRef.current = false;
@@ -341,7 +341,7 @@ export function useRealtimeStream(): RealtimeStreamState &
       };
 
       ws.onerror = () => {
-        setError("WebSocket error — kết nối bị gián đoạn.");
+        setError("Kết nối tới máy chủ bị gián đoạn. Vui lòng kiểm tra mạng rồi bấm ghi lại.");
         cleanup();
       };
 
@@ -366,9 +366,9 @@ export function useRealtimeStream(): RealtimeStreamState &
       acceptAudioRef.current = true;
       return { startedAt: startTimeRef.current, audioTrack: stream.getAudioTracks()[0] };
     } catch (err: unknown) {
-      const msg =
-        err instanceof Error ? err.message : "Lỗi không xác định khi ghi âm.";
-      setError(msg);
+      // Keep the original error so the UI can explain it (mic permission,
+      // no microphone, mic busy, connection…) — see friendlyError().
+      setError(err ?? "Chưa bắt đầu ghi âm được. Vui lòng thử lại.");
       cleanup();
       return null;
     }
@@ -386,7 +386,7 @@ export function useRealtimeStream(): RealtimeStreamState &
     stopCapture();
 
     if (ws?.readyState !== WebSocket.OPEN) {
-      setError("WebSocket đã ngắt nên không thể xác nhận audio cuối.");
+      setError("Mất kết nối trước khi kết thúc ghi âm. Phần đã ghi vẫn được lưu và xử lý.");
       cleanup();
       return;
     }
@@ -395,7 +395,7 @@ export function useRealtimeStream(): RealtimeStreamState &
     setIsFinalizing(true);
     ws.send(JSON.stringify({ type: "stop" }));
     finalizationTimerRef.current = setTimeout(() => {
-      setError("Server mất quá nhiều thời gian để hoàn tất audio.");
+      setError("Máy chủ xử lý phần cuối lâu hơn bình thường. Bản ghi vẫn được lưu, bạn có thể xem lại trong thư viện.");
       cleanup();
     }, 135_000);
   }, [cleanup, isRecording, stopCapture]);

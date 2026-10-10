@@ -4,6 +4,8 @@ import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 import { SourceCard } from "@/components/SourceCard";
 import { PageHeader } from "@/components/ui";
 import { APIError, listSources } from "@/lib/api";
+import { ErrorNotice } from "@/components/ErrorNotice";
+import { friendlyError } from "@/lib/friendlyError";
 
 // Luôn render động — không bao giờ tạo tĩnh lúc build.
 // Vì trang này cần session (auth) và kết nối backend (RunPod).
@@ -46,10 +48,10 @@ export default async function LibraryPage() {
     .then((items) => ({ sources: items, loadError: null }))
     .catch((error: unknown) => {
       console.error("[LibraryPage Server Error] listSources failed:", error);
-      const detail = error instanceof Error ? error.message : String(error);
       return {
         sources: [],
-        loadError: `Không thể kết nối tới máy chủ (${detail}).`,
+        // Friendly text only; technical detail stays in the server log.
+        loadError: friendlyError(error, "Chưa tải được thư viện"),
       };
     });
   const processing = sources.filter((s) => s.status === "processing").length;
@@ -81,12 +83,11 @@ export default async function LibraryPage() {
       </p>
 
       {loadError && (
-        <div
-          role="alert"
-          className="mt-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
-        >
-          Không thể tải thư viện: {loadError}
-        </div>
+        <ErrorNotice
+          error={loadError.message}
+          title={loadError.title}
+          className="mt-6"
+        />
       )}
 
       <div className="mt-8 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">

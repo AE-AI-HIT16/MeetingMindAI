@@ -6,6 +6,7 @@ import { finalizeDocument } from "@/lib/api";
 import { useSession } from "next-auth/react";
 import type { DocMode, DocumentGenerationStage } from "@/lib/types";
 import { useDocumentGenerationEvents } from "@/lib/useDocumentGenerationEvents";
+import { ErrorNotice } from "@/components/ErrorNotice";
 
 const CHOICES: {
   mode: Exclude<DocMode, "live">;
@@ -39,7 +40,7 @@ export function FinalizeDialog({
   const router = useRouter();
   const { data: authSession } = useSession();
   const [submitting, setSubmitting] = useState<DocMode | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
   const [generationJobId, setGenerationJobId] = useState<string | null>(
     null,
   );
@@ -92,11 +93,7 @@ export function FinalizeDialog({
       setGenerationSourceId(accepted.sourceId);
       setGenerationJobId(accepted.generationJobId);
     } catch (finalizeError) {
-      setError(
-        finalizeError instanceof Error
-          ? finalizeError.message
-          : "Không thể tạo tài liệu.",
-      );
+      setError(finalizeError);
       setSubmitting(null);
     }
   }
@@ -169,15 +166,21 @@ export function FinalizeDialog({
         )}
 
         {!liveDocumentId && (
-          <p className="mt-4 text-sm text-red-700">
-            Job chưa tạo xong tài liệu live để finalize.
-          </p>
+          <ErrorNotice
+            compact
+            title="Tài liệu chưa sẵn sàng"
+            error="Hệ thống vẫn đang xử lý lời thoại. Vui lòng đợi xử lý xong rồi chọn đầu ra."
+            className="mt-4"
+          />
         )}
-        {displayError && (
-          <p role="alert" className="mt-4 text-sm text-red-700">
-            {displayError}
-          </p>
-        )}
+        {displayError ? (
+          <ErrorNotice
+            compact
+            error={displayError}
+            title="Chưa tạo được tài liệu"
+            className="mt-4"
+          />
+        ) : null}
 
         <button
           disabled={controlsLocked}

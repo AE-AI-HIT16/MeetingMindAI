@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { PageHeader, Waveform } from "@/components/ui";
 import { uploadSource, warmupAsr } from "@/lib/api";
+import { ErrorNotice } from "@/components/ErrorNotice";
 
 const ACCEPT = "video/*,audio/*";
 const MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024;
@@ -15,7 +16,7 @@ export default function UploadPage() {
   const [picked, setPicked] = useState<string | null>(null);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploading, setUploading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
 
   // Start the RunPod cold start now; by the time the file is uploaded the
   // worker is (nearly) ready.
@@ -57,11 +58,7 @@ export default function UploadPage() {
         `/sources/${result.sourceId}?jobId=${encodeURIComponent(result.jobId)}`,
       );
     } catch (uploadError) {
-      setError(
-        uploadError instanceof Error
-          ? uploadError.message
-          : "Không thể tải file lên.",
-      );
+      setError(uploadError);
       setUploading(false);
       if (inputRef.current) inputRef.current.value = "";
     }
@@ -128,14 +125,14 @@ export default function UploadPage() {
         />
       </button>
 
-      {error && (
-        <p
-          role="alert"
-          className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
-        >
-          {error}
-        </p>
-      )}
+      {error ? (
+        <ErrorNotice
+          error={error}
+          title="Chưa tải lên được"
+          onDismiss={() => setError(null)}
+          className="mt-4"
+        />
+      ) : null}
 
       {/* What happens next — set expectations, in the user's terms */}
       <ol className="mt-8 grid gap-3 sm:grid-cols-3">

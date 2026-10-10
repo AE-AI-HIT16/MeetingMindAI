@@ -16,6 +16,7 @@ import { groupCaptionParagraphs, unconfirmedCaptions } from "@/lib/liveCaptionSt
 import type { CaptionParagraph } from "@/lib/liveCaptionState";
 import { formatDuration, formatStamp, getSpeakerStyle } from "@/lib/format";
 import { StatusBadge, Waveform } from "@/components/ui";
+import { ErrorNotice } from "@/components/ErrorNotice";
 
 // ----------------------------------------------------------------
 // Page
@@ -161,9 +162,9 @@ export default function RealtimePage() {
                 ? "Audio được stream realtime tới server, transcript hiện dần bên dưới."
                 : "Microphone → WebSocket → ASR pipeline → Transcript"}
             </p>
-            {error && (
-              <p className="mt-2 text-sm font-medium text-danger">{error}</p>
-            )}
+            {error ? (
+              <ErrorNotice error={error} title="Ghi âm gặp sự cố" className="mt-3" />
+            ) : null}
 
           </div>
 

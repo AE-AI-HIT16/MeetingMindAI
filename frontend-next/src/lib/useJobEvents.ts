@@ -209,7 +209,7 @@ export function useJobEvents(jobId: string | null): JobEventsState {
 
       socket.onerror = (ev) => {
         console.error("[useJobEvents] WebSocket connection error:", url, ev);
-        setError(`Không thể kết nối tới luồng tiến trình (${url}).`);
+        setError("Mất kết nối tới máy chủ, đang tự kết nối lại…");
       };
       socket.onclose = () => {
         setIsConnected(false);
