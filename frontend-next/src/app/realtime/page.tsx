@@ -1,16 +1,21 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useRealtimeStream } from "@/lib/useRealtimeStream";
 import type { AudioSource, SentenceInfo } from "@/lib/useRealtimeStream";
+import { isWebSpeechSupported, useWebSpeechCaption } from "@/lib/useWebSpeechCaption";
+import { unconfirmedCaptions } from "@/lib/liveCaptionState";
+import type { CaptionLine } from "@/lib/liveCaptionState";
 import { formatDuration, formatStamp, getSpeakerStyle } from "@/lib/format";
 import { StatusBadge, Waveform } from "@/components/ui";
 
 // ----------------------------------------------------------------
 // Page
 // ----------------------------------------------------------------
+
+const noopSubscribe = () => () => {};
 
 export default function RealtimePage() {
   const {
@@ -21,19 +26,66 @@ export default function RealtimePage() {
     elapsedMs,
     error,
     sourceId,
+    confirmedEndMs,
     start,
     stop,
   } = useRealtimeStream();
 
   const router = useRouter();
+  const caption = useWebSpeechCaption("vi-VN");
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const [audioSource, setAudioSource] = useState<AudioSource>("microphone");
+  // Client-only detection (false during SSR) to avoid hydration mismatch.
+  const captionSupported = useSyncExternalStore(
+    noopSubscribe,
+    isWebSpeechSupported,
+    () => false,
+  );
+  const [captionActive, setCaptionActive] = useState(false);
+
+  // The system picks the mode; the user only presses record:
+  //  - Chrome/Edge + mic: browser Web Speech shows faded words instantly while
+  //    RunPod (warmed up on connect) confirms each 15 s window in solid text.
+  //  - Otherwise (Brave/Firefox/tab audio): server only, shorter 10 s windows
+  //    so the first solid text arrives sooner.
+  const handleStart = async () => {
+    const useCaption = captionSupported && audioSource === "microphone";
+    const startedAt = await start(audioSource, {
+      windowSeconds: useCaption ? 15 : 10,
+    });
+    setCaptionActive(useCaption && startedAt !== null);
+    if (useCaption && startedAt !== null) {
+      caption.start(startedAt);
+    }
+  };
+
+  const handleStop = () => {
+    caption.stop();
+    stop();
+  };
+
+  // Recording ended for any reason (stop, WS error) → stop captions too.
+  const stopCaption = caption.stop;
+  useEffect(() => {
+    if (!isRecording) stopCaption();
+  }, [isRecording, stopCaption]);
+
+  const pendingCaptions = captionActive
+    ? unconfirmedCaptions(caption.lines, confirmedEndMs)
+    : [];
+  const interimCaption = captionActive ? caption.interim : null;
+  const hasContent =
+    transcripts.length > 0 || pendingCaptions.length > 0 || interimCaption !== null;
 
   // Auto-scroll transcript panel
   useEffect(() => {
     scrollRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [transcripts.length]);
+  }, [transcripts.length, pendingCaptions.length]);
+
+  useEffect(() => {
+    scrollRef.current?.scrollIntoView({ block: "end" });
+  }, [interimCaption?.text]);
 
   return (
     <div className="mx-auto flex h-screen w-full max-w-5xl flex-col px-6 py-8 md:px-10">
@@ -70,7 +122,7 @@ export default function RealtimePage() {
                 ? "Đang hoàn tất phần audio cuối…"
                 : isRecording
                 ? "Đang ghi âm và nhận dạng…"
-                : transcripts.length > 0
+                : hasContent
                   ? "Ghi âm đã kết thúc"
                   : "Nhấn nút để bắt đầu ghi âm"}
             </p>
@@ -84,6 +136,7 @@ export default function RealtimePage() {
             {error && (
               <p className="mt-2 text-sm font-medium text-danger">{error}</p>
             )}
+
           </div>
 
           {/* Right: record button */}
@@ -94,7 +147,7 @@ export default function RealtimePage() {
             {/* Big record / stop button */}
             <button
               id="record-btn"
-              onClick={isRecording ? stop : () => start(audioSource)}
+              onClick={isRecording ? handleStop : handleStart}
               disabled={isFinalizing}
               className="group relative flex h-16 w-16 items-center justify-center rounded-full transition-shadow"
               style={{
@@ -180,7 +233,7 @@ export default function RealtimePage() {
       </div>
 
       {/* ---- Navigation to document page after recording ---- */}
-      {!isRecording && !isFinalizing && transcripts.length > 0 && sourceId && (
+      {!isRecording && !isFinalizing && hasContent && sourceId && (
         <div className="mt-4 flex items-center justify-center gap-3 rounded-2xl border border-line bg-surface p-4">
           <div className="flex-1 text-center sm:text-left">
             <p className="font-display text-sm font-medium text-ink">
@@ -227,8 +280,8 @@ export default function RealtimePage() {
         </header>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
-          {transcripts.length === 0 ? (
-            <EmptyState isRecording={isRecording} />
+          {!hasContent ? (
+            <EmptyState isRecording={isRecording} captionActive={captionActive} />
           ) : (
             <div className="space-y-4">
               {transcripts.map((t, i) => (
@@ -246,6 +299,12 @@ export default function RealtimePage() {
                   endMs={t.endMs}
                 />
               ))}
+              {(pendingCaptions.length > 0 || interimCaption) && (
+                <CaptionBlock lines={pendingCaptions} interim={interimCaption} />
+              )}
+              {(isRecording || isFinalizing) && !interimCaption && (
+                <ListeningRow finalizing={isFinalizing} />
+              )}
               <div ref={scrollRef} />
             </div>
           )}
@@ -259,7 +318,13 @@ export default function RealtimePage() {
 // Sub-components
 // ----------------------------------------------------------------
 
-function EmptyState({ isRecording }: { isRecording: boolean }) {
+function EmptyState({
+  isRecording,
+  captionActive,
+}: {
+  isRecording: boolean;
+  captionActive: boolean;
+}) {
   return (
     <div className="flex h-full flex-col items-center justify-center py-16 text-center">
       <div className="flex h-16 w-16 items-center justify-center rounded-full bg-brand-wash">
@@ -290,7 +355,9 @@ function EmptyState({ isRecording }: { isRecording: boolean }) {
       </p>
       <p className="mt-1.5 max-w-xs text-sm text-ink-soft">
         {isRecording
-          ? "Audio đang được stream tới server. Transcript sẽ xuất hiện khi VAD phát hiện đủ speech (~4 giây)."
+          ? captionActive
+            ? "Hãy bắt đầu nói — phụ đề nhanh sẽ hiện ngay từng chữ."
+            : "Audio đang được stream tới server. Transcript hiện theo từng đoạn ~30 giây."
           : "Nhấn nút ghi âm phía trên để bắt đầu stream audio và nhận transcript thời gian thực."}
       </p>
     </div>
@@ -451,6 +518,37 @@ function TranscriptBlock({
 
       {/* Separator */}
       {!isLast && <div className="ml-10 mt-3 border-b border-line-soft" />}
+    </div>
+  );
+}
+
+function CaptionBlock({
+  lines,
+  interim,
+}: {
+  lines: CaptionLine[];
+  interim: CaptionLine | null;
+}) {
+  return (
+    // Faded until the server confirms this range, then replaced by solid text.
+    <p className="text-[15px] leading-relaxed text-ink-faint transition-opacity">
+      {lines.map((line) => (
+        <span key={line.id}>{line.text} </span>
+      ))}
+      {interim && <span className="caret">{interim.text}</span>}
+    </p>
+  );
+}
+
+function ListeningRow({ finalizing }: { finalizing: boolean }) {
+  return (
+    <div className="flex items-center gap-2 text-sm text-ink-faint" aria-live="polite">
+      <span className="flex gap-1">
+        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current" />
+        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current [animation-delay:150ms]" />
+        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current [animation-delay:300ms]" />
+      </span>
+      {finalizing ? "Đang hoàn thiện transcript…" : "Đang nghe…"}
     </div>
   );
 }

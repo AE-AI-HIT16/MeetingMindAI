@@ -8,10 +8,12 @@ import wave
 import asyncio
 import logging
 
+import numpy as np
+
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends
 from sqlmodel import Session
 from meetasr.backend.db.connection import get_db, engine
-from meetasr.backend.db.models_phase2 import Source, MediaType, Job, JobStatus, JobStage
+from meetasr.backend.db.models_phase2 import Source, MediaType, Job, JobStatus
 
 def pcm_to_wav_bytes(pcm_bytes: bytes, sample_rate: int = 16000) -> bytes:
     wav_io = io.BytesIO()
@@ -25,6 +27,18 @@ def pcm_to_wav_bytes(pcm_bytes: bytes, sample_rate: int = 16000) -> bytes:
 router = APIRouter()
 
 logger = logging.getLogger("realtime")
+
+
+# Offline jobs started at stop outlive the WS handler; keep refs so they aren't GC'd.
+_background_tasks: set[asyncio.Task] = set()
+
+
+async def _warmup(asr_service) -> None:
+    try:
+        await asr_service.warmup()
+        logger.info("RunPod warmup job queued")
+    except Exception:
+        logger.warning("RunPod warmup failed", exc_info=True)
 
 
 @router.websocket("/v1/realtime/stream")
@@ -90,7 +104,17 @@ async def realtime_stream(websocket: WebSocket, db: Session = Depends(get_db)):
         type(pipeline.vad).__name__,
     )
 
+    # ?window=N → ASR window length (5–30 s). Shorter windows confirm the
+    # browser's live captions sooner.
+    try:
+        session.max_window_seconds = min(30.0, max(5.0, float(websocket.query_params.get("window", 30))))
+    except ValueError:
+        pass
+
     window_builder = SegmentWindowBuilder(session)
+
+    # Boot a serverless worker now so the first window doesn't pay cold start.
+    warmup_task = asyncio.create_task(_warmup(asr_service))  # keep a ref (avoid GC)
 
     asr_worker = ASRWorker(
         session,
@@ -103,7 +127,7 @@ async def realtime_stream(websocket: WebSocket, db: Session = Depends(get_db)):
 
     # Sentence-level realtime: partial (live word-by-word) ASR is disabled on
     # production. It would call RunPod every ~1s (costly + ~1-2s network latency
-    # each, so not truly live). We only run the final per-window ASR below.
+    # each, so not truly live). Live words come from browser Web Speech instead.
 
     worker = AudioWorker(
         session,
@@ -172,6 +196,16 @@ async def realtime_stream(websocket: WebSocket, db: Session = Depends(get_db)):
 
             await receiver.flush()
 
+            # Chờ AudioWorker xử lý hết chunk, rồi đẩy nốt phần audio còn kẹt
+            # (pending_audio < 2 segment + buffer window cuối) vào ASR —
+            # trước đây tối đa 30 s audio cuối không bao giờ được transcribe.
+            await asyncio.wait_for(session.audio_queue.join(), timeout=5.0)
+            if session.pending_audio.size:
+                session.ready_segments.append(session.pending_audio.copy())
+                session.pending_audio = np.empty(0, dtype=np.float32)
+            await window_builder.process()
+            await window_builder.flush()
+
             # Chờ transcribe nốt các window còn trong hàng đợi (tối đa ~20s)
             # rồi báo frontend đã hoàn tất để nó đóng kết nối sạch sẽ.
             try:
@@ -207,7 +241,11 @@ async def realtime_stream(websocket: WebSocket, db: Session = Depends(get_db)):
                 # Upload WAV to Cloudflare R2
                 storage_key = await storage.save(wav_bytes, filename)
                 
-                # Update DB Source path and Job status to QUEUED
+                # Update DB Source path and Job status. If the offline ASR service
+                # is available, start the job right away (RunPod worker is still
+                # warm from the realtime windows); otherwise leave it QUEUED so the
+                # job-events WebSocket triggers it on demand.
+                offline_asr = getattr(websocket.app.state, "asr_service", None)
                 with Session(engine) as session_db:
                     db_source = session_db.get(Source, session.source_id)
                     db_job = session_db.get(Job, session.job_id)
@@ -215,15 +253,25 @@ async def realtime_stream(websocket: WebSocket, db: Session = Depends(get_db)):
                         db_source.storage_path = storage_key
                         session_db.add(db_source)
                     if db_job:
-                        db_job.status = JobStatus.QUEUED
-                        db_job.stage = JobStage.QUEUED
+                        # (JobStage has no QUEUED — that AttributeError used to
+                        # abort this commit, so realtime jobs never got processed.)
+                        db_job.status = JobStatus.PROCESSING if offline_asr else JobStatus.QUEUED
                         db_job.progress = 0.0
                         session_db.add(db_job)
                     session_db.commit()
                     
+                if offline_asr is not None:
+                    from meetasr.backend.realtime.job_worker import run_job_processing
+                    task = asyncio.create_task(
+                        run_job_processing(session.job_id, offline_asr, storage)
+                    )
+                    _background_tasks.add(task)
+                    task.add_done_callback(_background_tasks.discard)
+
                 logger.info(
-                    "Offline transcription audio saved to storage key=%s, job queued",
+                    "Offline transcription audio saved to storage key=%s, job %s",
                     storage_key,
+                    "started" if offline_asr else "queued",
                 )
         except Exception:
             logger.exception("Failed to save audio archive and queue offline job")

@@ -52,9 +52,13 @@ class ASRWorker:
                         result = await self._transcribe(audio)
                         print("DEBUG: _transcribe() OK")
                     except Exception:
+                        # Skip this window (keep the timeline moving) instead of
+                        # killing the worker: later windows still get transcribed
+                        # and stop doesn't hang on asr_queue.join().
                         print("DEBUG: _transcribe() FAILED")
                         traceback.print_exc()
-                        raise
+                        self.offset_ms += int(len(audio) / 16000 * 1000)
+                        continue
 
                     print(f"ASR: done text_len={len(result.text)}")
 
@@ -129,6 +133,15 @@ class ASRWorker:
                     "segment": segment.model_dump(mode="json"),
                 }
             )
+
+        # Timeline confirmed up to here (even if the window had no speech), so
+        # the frontend can settle its live browser captions for this range.
+        await self.session.websocket.send_json(
+            {
+                "type": "transcript_confirmed",
+                "end_ms": self.offset_ms,
+            }
+        )
 
     async def _publish_cut_event(
             self,

@@ -179,6 +179,10 @@ async def run_handler(job):
             "sentence_info": [_sentence_info_to_dict(s) for s in result.sentence_info],
         }
 
+    elif action == "warmup":
+        # init_models() above already loaded the pipeline; nothing else to do.
+        return {"status": "warm"}
+
     elif action == "realtime_recognize":
         audio_bytes = base64.b64decode(job_input['audio_base64'])
         from meetasr.runpod.utils.audio import load_audio

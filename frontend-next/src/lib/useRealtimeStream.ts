@@ -34,10 +34,18 @@ export interface RealtimeStreamState {
   error: string | null;
   /** Source ID created by backend for this realtime session. */
   sourceId: string | null;
+  /** Recording timeline (ms) already processed by server ASR. */
+  confirmedEndMs: number;
+}
+
+export interface RealtimeStreamOptions {
+  /** Server ASR window length in seconds (server clamps to 5–30). */
+  windowSeconds?: number;
 }
 
 export interface RealtimeStreamActions {
-  start: (source: AudioSource) => Promise<void>;
+  /** Resolves to the recording start timestamp (ms), or null on failure. */
+  start: (source: AudioSource, options?: RealtimeStreamOptions) => Promise<number | null>;
   stop: () => void;
 }
 
@@ -46,8 +54,11 @@ export interface RealtimeStreamActions {
 // ----------------------------------------------------------------
 
 /** Build the WebSocket URL based on the unified API base URL. */
-async function buildWsUrl(): Promise<string> {
-  return `${getWebSocketBase()}/v1/realtime/stream`;
+async function buildWsUrl(options: RealtimeStreamOptions): Promise<string> {
+  const params = new URLSearchParams();
+  if (options.windowSeconds) params.set("window", String(options.windowSeconds));
+  const query = params.toString();
+  return `${getWebSocketBase()}/v1/realtime/stream${query ? `?${query}` : ""}`;
 }
 
 // ----------------------------------------------------------------
@@ -75,6 +86,7 @@ export function useRealtimeStream(): RealtimeStreamState &
   const [elapsedMs, setElapsedMs] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [sourceId, setSourceId] = useState<string | null>(null);
+  const [confirmedEndMs, setConfirmedEndMs] = useState(0);
 
   // ------------------------------------------------------------------
   // Cleanup helper
@@ -139,10 +151,11 @@ export function useRealtimeStream(): RealtimeStreamState &
   // ------------------------------------------------------------------
   // START
   // ------------------------------------------------------------------
-  const start = useCallback(async (source: AudioSource) => {
+  const start = useCallback(async (source: AudioSource, options: RealtimeStreamOptions = {}) => {
     setError(null);
     setTranscripts([]);
     setSourceId(null);
+    setConfirmedEndMs(0);
     setElapsedMs(0);
     finalizingRef.current = false;
     setIsFinalizing(false);
@@ -180,7 +193,7 @@ export function useRealtimeStream(): RealtimeStreamState &
       });
 
       // 3. Open WebSocket
-      const wsUrl = await buildWsUrl();
+      const wsUrl = await buildWsUrl(options);
       const authSession = await getSession();
       const ws = new WebSocket(wsUrl);
       ws.binaryType = "arraybuffer";
@@ -231,6 +244,11 @@ export function useRealtimeStream(): RealtimeStreamState &
 
           if (data.type === "session_init") {
             setSourceId(data.source_id ?? null);
+            return;
+          }
+
+          if (data.type === "transcript_confirmed") {
+            setConfirmedEndMs((prev) => Math.max(prev, Number(data.end_ms) || 0));
             return;
           }
 
@@ -331,11 +349,13 @@ export function useRealtimeStream(): RealtimeStreamState &
 
       setIsRecording(true);
       acceptAudioRef.current = true;
+      return startTimeRef.current;
     } catch (err: unknown) {
       const msg =
         err instanceof Error ? err.message : "Lỗi không xác định khi ghi âm.";
       setError(msg);
       cleanup();
+      return null;
     }
   }, [cleanup, stopCapture]);
 
@@ -373,6 +393,7 @@ export function useRealtimeStream(): RealtimeStreamState &
     elapsedMs,
     error,
     sourceId,
+    confirmedEndMs,
     start,
     stop,
   };

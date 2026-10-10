@@ -51,7 +51,8 @@ class SegmentWindowBuilder:
         - Chỉ cắt khi chính segment lớn hơn MAX_WINDOW_SECONDS.
         """
 
-        max_samples = int(MAX_WINDOW_SECONDS * SAMPLE_RATE)
+        max_seconds = getattr(self.session, "max_window_seconds", MAX_WINDOW_SECONDS)
+        max_samples = int(max_seconds * SAMPLE_RATE)
         remaining = segment
 
         while len(remaining) > 0:

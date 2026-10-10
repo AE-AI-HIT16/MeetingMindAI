@@ -34,6 +34,19 @@ class RealtimeASRService:
         # Reuse ASRService's /runsync caller (handles IN_QUEUE/IN_PROGRESS polling)
         self._serverless = ASRService(runpod_url=self.runpod_url, api_key=self.api_key)
 
+    async def warmup(self) -> None:
+        """Queue a no-op job (async /run, not awaited) so a serverless worker
+        boots and loads models while the user is already seeing browser captions.
+        Old images without a "warmup" action still load models in init_models()."""
+        if not self._is_serverless:
+            return
+        async with httpx.AsyncClient(timeout=10.0, headers=self.headers) as client:
+            response = await client.post(
+                f"{self.runpod_url}/run",
+                json={"input": {"action": "warmup"}},
+            )
+            response.raise_for_status()
+
     async def transcribe(
         self,
         audio: Any,

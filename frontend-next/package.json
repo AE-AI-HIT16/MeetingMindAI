@@ -13,7 +13,8 @@
     "desktop:start": "electron --no-sandbox desktop/main.cjs",
     "desktop:dist": "pnpm desktop:build && electron-builder",
     "test:pcm": "node --test tests/pcm-processor.test.mjs",
-    "test:realtime-state": "node --test tests/realtime-transcript-state.test.mjs"
+    "test:realtime-state": "node --test tests/realtime-transcript-state.test.mjs",
+    "test:live-caption": "node --test tests/live-caption-state.test.mjs"
   },
   "build": {
     "appId": "com.meetingmind.app",
