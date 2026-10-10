@@ -17,6 +17,26 @@ class LLMCompletionTruncatedError(RuntimeError):
     """Provider stopped because the configured completion budget was exhausted."""
 
 
+class LLMQuotaExhaustedError(RuntimeError):
+    """Every configured API key is rate-limited, out of quota or invalid."""
+
+
+# Status codes that mean "this key cannot be used right now" → try another key.
+_KEY_UNUSABLE_STATUSES = (401, 403, 429)
+# Invalid/revoked keys (401/403) are skipped for this long.
+_INVALID_KEY_COOLDOWN_S = 24 * 3600
+
+# key -> monotonic time until which it must not be used. Shared by all clients
+# (summarizer + planner) so an exhausted key is skipped everywhere.
+_key_cooldowns: dict[str, float] = {}
+_key_cooldowns_lock = threading.Lock()
+
+
+def split_api_keys(api_key: str) -> list[str]:
+    """``"k1, k2\nk3"`` -> ``["k1", "k2", "k3"]`` (empty parts dropped)."""
+    return [k.strip() for k in re.split(r"[,\s]+", api_key or "") if k.strip()]
+
+
 @tables.register("llm_classes", key="openai")
 class OpenAIClient(AbsLLMClient):
     """LLM client for OpenAI API and any OpenAI-compatible endpoint.
@@ -50,7 +70,11 @@ class OpenAIClient(AbsLLMClient):
         self._rate_limit_lock = threading.Lock()
         self._rate_limit_remaining_tokens: int | None = None
         self._rate_limit_reset_at: float | None = None
-        self._init_client(api_key, base_url)
+        # Several keys may be given comma-separated; rotate when one is
+        # rate-limited / out of quota / revoked.
+        self._api_keys = split_api_keys(api_key) or [api_key]
+        self._key_index = 0
+        self._init_client(self._api_keys[0], base_url)
         self.base_url = base_url
 
     def _init_client(self, api_key: str, base_url: Optional[str]):
@@ -118,6 +142,19 @@ class OpenAIClient(AbsLLMClient):
         return self._complete_with_retries(request)
 
     def _complete_with_retries(self, request: dict[str, Any]) -> str:
+        """Complete one request; on a key-level failure switch to the next key."""
+        while True:
+            try:
+                return self._complete_with_current_key(request)
+            except _KeyUnusable as unusable:
+                self._cool_down_current_key(unusable.cooldown_s)
+                if not self._switch_to_available_key():
+                    raise LLMQuotaExhaustedError(
+                        f"All {len(self._api_keys)} API key(s) are rate-limited "
+                        f"or out of quota: {unusable.error}"
+                    ) from unusable.error
+
+    def _complete_with_current_key(self, request: dict[str, Any]) -> str:
         """Complete one request, honoring pacing and bounded retries."""
         last_error: Exception | None = None
         attempts_used = 0
@@ -150,6 +187,13 @@ class OpenAIClient(AbsLLMClient):
                     getattr(response, "headers", None)
                 )
                 wait = _retry_wait_seconds(e, attempt)
+                status = _status_code(e)
+                if status in _KEY_UNUSABLE_STATUSES:
+                    # 429 with several keys: switch now instead of sleeping.
+                    # Single key: retry 429 as before, then report exhaustion.
+                    if len(self._api_keys) > 1 or status != 429 or attempt + 1 >= self.retry_attempts:
+                        cooldown = wait if status == 429 else _INVALID_KEY_COOLDOWN_S
+                        raise _KeyUnusable(e, cooldown) from e
                 retryable = _is_retryable_error(e)
                 if attempt + 1 < self.retry_attempts and retryable:
                     logging.warning(
@@ -173,6 +217,34 @@ class OpenAIClient(AbsLLMClient):
         raise RuntimeError(
             f"LLM call failed after {attempts_used} attempts: {last_error}"
         )
+
+    def _cool_down_current_key(self, seconds: float) -> None:
+        key = self._api_keys[self._key_index]
+        with _key_cooldowns_lock:
+            _key_cooldowns[key] = time.monotonic() + max(seconds, 1.0)
+        logging.warning(
+            "LLM API key #%d/%d unusable; cooling down %.0fs.",
+            self._key_index + 1, len(self._api_keys), seconds,
+        )
+
+    def _switch_to_available_key(self) -> bool:
+        """Point the client at the next key not cooling down; False if none."""
+        now = time.monotonic()
+        count = len(self._api_keys)
+        for step in range(1, count + 1):
+            index = (self._key_index + step) % count
+            key = self._api_keys[index]
+            with _key_cooldowns_lock:
+                available = _key_cooldowns.get(key, 0.0) <= now
+            if available:
+                self._key_index = index
+                self._init_client(key, self.base_url)
+                # Token-window pacing state belongs to the previous key.
+                self._rate_limit_remaining_tokens = None
+                self._rate_limit_reset_at = None
+                logging.info("Switched to LLM API key #%d/%d.", index + 1, count)
+                return True
+        return False
 
     def _create_completion(
         self,
@@ -284,6 +356,25 @@ def _parse_duration_seconds(value: object) -> float | None:
     try:
         return sum(float(amount) * units[unit] for amount, unit in matches)
     except (KeyError, ValueError):
+        return None
+
+
+class _KeyUnusable(Exception):
+    """Internal: the current key cannot serve requests for ``cooldown_s``."""
+
+    def __init__(self, error: Exception, cooldown_s: float):
+        super().__init__(str(error))
+        self.error = error
+        self.cooldown_s = cooldown_s
+
+
+def _status_code(error: Exception) -> int | None:
+    status = getattr(error, "status_code", None)
+    if status is None:
+        status = getattr(getattr(error, "response", None), "status_code", None)
+    try:
+        return int(status) if status is not None else None
+    except (TypeError, ValueError):
         return None
 
 

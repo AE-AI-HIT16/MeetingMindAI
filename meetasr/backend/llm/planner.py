@@ -30,6 +30,7 @@ from meetasr.backend.llm.planner_validation import (
 )
 from meetasr.backend.schemas import TranscriptResult
 from meetasr.backend.schemas_doc import DocSection, DocumentReport
+from meetasr.backend.llm.openai_client import LLMQuotaExhaustedError
 
 logger = logging.getLogger(__name__)
 
@@ -231,6 +232,8 @@ class DocumentPlanner:
             outline = normalize_report_outline(data.get("outline"))
             return content_kind, outline
         except Exception as exc:
+            if isinstance(exc, LLMQuotaExhaustedError):
+                raise  # no fallback can help: every API key is exhausted
             logger.warning(
                 "Plan step failed (%s); using the required fallback outline.",
                 exc,
@@ -264,6 +267,8 @@ class DocumentPlanner:
             response = self.client.chat(prompt, **call_kwargs)
             return self._validate_multi_write_response(response, outline)
         except Exception as primary_exc:
+            if isinstance(primary_exc, LLMQuotaExhaustedError):
+                raise  # no fallback can help: every API key is exhausted
             partial = self._usable_multi_write_partial(response, outline)
             if self._reasoning_effort() == "low":
                 logger.warning(
@@ -338,6 +343,8 @@ class DocumentPlanner:
                 raise ValueError("reduce returned empty content")
             return response.strip()
         except Exception as primary_exc:
+            if isinstance(primary_exc, LLMQuotaExhaustedError):
+                raise  # no fallback can help: every API key is exhausted
             if self._reasoning_effort() == "low":
                 logger.warning(
                     "Low-reasoning reduce failed for section '%s' (%s); "
