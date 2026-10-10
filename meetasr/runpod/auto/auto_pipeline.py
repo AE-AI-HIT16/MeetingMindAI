@@ -83,7 +83,7 @@ class AutoPipeline:
         overlap_cfg = dict(pipeline_cfg.get("overlap_detection") or {})
         segmenter = None
         if spk_model is not None and overlap_cfg.pop("enabled", False):
-            from meetasr.runpod.utils.overlap import SpeakerSegmenter
+            from meetasr.runpod.models.seg.segmenter import SpeakerSegmenter
 
             overlap_cfg.setdefault("device", device)
             segmenter = SpeakerSegmenter(**overlap_cfg)

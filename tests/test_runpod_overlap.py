@@ -6,12 +6,11 @@ import numpy as np
 
 from meetasr.runpod.schemas import SpeakerTurn
 from meetasr.runpod.utils.diarization import annotate_overlaps, build_speaker_turns
-from meetasr.runpod.utils.overlap import (
+from meetasr.runpod.utils.overlap import activity_to_segments, overlap_aware_activity
+from meetasr.runpod.utils.segmentation import (
     FRAME_STEP_S,
     LocalSegmentation,
-    activity_to_segments,
     frame_of,
-    overlap_aware_activity,
     speech_ratio,
 )
 
@@ -104,7 +103,7 @@ def test_annotate_overlaps_marks_ranges_shared_with_other_speakers():
 
 def test_overlap_regions_and_assignment_to_turns():
     from meetasr.runpod.utils.diarization import assign_overlap_regions
-    from meetasr.runpod.utils.overlap import overlap_regions
+    from meetasr.runpod.utils.segmentation import overlap_regions
 
     count = np.ones(1000, dtype=np.int64)
     count[frame_of(2.0):frame_of(3.0)] = 2   # 1 s of crosstalk

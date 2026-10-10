@@ -8,8 +8,10 @@ from typing import Optional
 
 import numpy as np
 
+from meetasr.runpod.models.abs_models import AbsSegmenter
 from meetasr.runpod.schemas import Segment, SentenceInfo, TranscriptResult
 from meetasr.runpod.utils.audio import load_audio
+from meetasr.runpod.utils.overlap_steps import gate_non_speech
 from meetasr.runpod.utils.text_filter import clean_transcript_text
 from meetasr.runpod.utils.timestamp import merge_vad_segments
 
@@ -36,7 +38,7 @@ class ASRPipeline:
         asr_model,
         vad_model=None,
         device: str = "cpu",
-        segmenter=None,
+        segmenter: AbsSegmenter | None = None,
     ):
         self.asr = asr_model
         self.vad = vad_model
@@ -63,14 +65,7 @@ class ASRPipeline:
 
         segments = self._run_vad(audio)
         if self.segmenter is not None and segments:
-            from meetasr.runpod.utils.overlap import speech_ratio
-
-            segmentation = self.segmenter(audio)
-            segments = [
-                segment for segment in segments
-                if speech_ratio(segmentation, segment.start_s, segment.end_s)
-                >= self.segmenter.min_speech_ratio
-            ]
+            _, segments = gate_non_speech(self.segmenter, audio, segments)
 
         sentence_info = []
 

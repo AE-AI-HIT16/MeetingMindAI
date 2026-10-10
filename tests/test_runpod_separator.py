@@ -35,7 +35,7 @@ def test_tiny_overlaps_are_left_alone():
 
 
 def test_mostly_overlapped_turn_is_relabelled_from_separated_voice():
-    from meetasr.runpod.pipeline import MeetPipeline
+    from meetasr.runpod.utils.overlap_steps import verify_overlap_speakers
     from meetasr.runpod.schemas import SpeakerTurn
 
     class FakeSpk:
@@ -43,9 +43,6 @@ def test_mostly_overlapped_turn_is_relabelled_from_separated_voice():
             # stream 0 sounds like speaker 0 (talking over), stream 1 like speaker 2
             return np.array([[1.0, 0.0, 0.0], [0.0, 0.0, 1.0]])
 
-    pipeline = MeetPipeline.__new__(MeetPipeline)
-    pipeline.spk = FakeSpk()
-    pipeline.separator = FakeSeparator()
     profiles = {0: [1.0, 0.0, 0.0], 1: [0.0, 1.0, 0.0], 2: [0.0, 0.0, 1.0]}
     turns = [
         SpeakerTurn(0, 5000, 0, overlaps=[(2000, 3000)]),
@@ -53,6 +50,8 @@ def test_mostly_overlapped_turn_is_relabelled_from_separated_voice():
         SpeakerTurn(6000, 8000, 1),
     ]
 
-    pipeline._verify_overlap_speakers(np.zeros(16000 * 8, np.float32), turns, profiles)
+    verify_overlap_speakers(
+        FakeSeparator(), FakeSpk(), np.zeros(16000 * 8, np.float32), turns, profiles
+    )
 
     assert [t.speaker for t in turns] == [0, 2, 1]

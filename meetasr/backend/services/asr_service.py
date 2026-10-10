@@ -50,8 +50,17 @@ def numpy_to_wav_bytes(audio: np.ndarray, sample_rate: int = 16000) -> bytes:
 
 
 def numpy_to_flac_bytes(audio: np.ndarray, sample_rate: int = 16000) -> bytes:
-    """Lossless FLAC with the same 16-bit samples as ``numpy_to_wav_bytes``
-    (about half the size), so ASR input is unchanged."""
+    """Encode audio as lossless FLAC with the same 16-bit samples as WAV.
+
+    About 65% of the WAV size for speech, so ASR input is unchanged.
+
+    Args:
+        audio: Float32 (or int16) mono samples.
+        sample_rate: Samples per second.
+
+    Returns:
+        FLAC file bytes.
+    """
     import io
     import soundfile as sf
 
@@ -77,6 +86,14 @@ def numpy_to_diarization_audio_bytes(audio: np.ndarray, sample_rate: int = 16000
     highest bitrate that fits. The previous OGG/Vorbis 24 kbps encoding made
     cam++ hear two real speakers as one; Opus >= 32 kbps matches WAV on our
     diarization tests. libsndfile on the RunPod side decodes both.
+
+    Args:
+        audio: Float32 mono samples of the whole recording.
+        sample_rate: Samples per second.
+
+    Returns:
+        FLAC or Ogg/Opus bytes within ``MAX_PREPARE_AUDIO_BYTES`` when
+        possible (WAV only if encoding fails).
     """
     try:
         flac = numpy_to_flac_bytes(audio, sample_rate)

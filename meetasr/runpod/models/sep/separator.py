@@ -14,6 +14,8 @@ from typing import Callable
 
 import numpy as np
 
+from meetasr.runpod.models.abs_models import AbsSeparator
+
 logger = logging.getLogger(__name__)
 
 SAMPLE_RATE = 16000
@@ -26,7 +28,7 @@ _ARGS = types.SimpleNamespace(
 )
 
 
-class SpeechSeparator:
+class SpeechSeparator(AbsSeparator):
     """MossFormer2 2-speaker separation applied to selected regions."""
 
     def __init__(
@@ -97,7 +99,14 @@ class SpeechSeparator:
         logger.info("Speech separator loaded: %s on %s", path, self.device)
 
     def separate(self, audio: np.ndarray) -> list[np.ndarray]:
-        """Two streams with the input's loudness."""
+        """Split mixed speech into two streams.
+
+        Args:
+            audio: Float32 mono audio at 16kHz.
+
+        Returns:
+            Two streams with the input's length and loudness.
+        """
         import torch
 
         self._ensure_loaded()
@@ -121,8 +130,14 @@ class SpeechSeparator:
     ) -> np.ndarray:
         """Replace each overlapped region of ``chunk`` with the target voice.
 
-        ``regions_ms`` are relative to ``chunk``; ``embed_batch`` is cam++'s
-        batch embedder and ``target_embedding`` the speaker's centroid.
+        Args:
+            chunk: Float32 mono audio at 16kHz (one speaker turn).
+            regions_ms: Overlapped ``(start_ms, end_ms)`` ranges in ``chunk``.
+            target_embedding: The turn speaker's mean cam++ embedding.
+            embed_batch: cam++ batch embedder used to pick the stream.
+
+        Returns:
+            A copy of ``chunk`` with the target voice in those regions.
         """
         output = chunk.astype(np.float32, copy=True)
         target = np.asarray(target_embedding, dtype=np.float32)

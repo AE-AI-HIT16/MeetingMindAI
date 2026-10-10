@@ -3,8 +3,13 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING, Callable
+
 import numpy as np
 from meetasr.runpod.schemas import Segment
+
+if TYPE_CHECKING:
+    from meetasr.runpod.utils.segmentation import LocalSegmentation
 
 
 class AbsVAD(ABC):
@@ -88,5 +93,78 @@ class AbsSpk(ABC):
 
         Returns:
             List of integer speaker labels of length N.
+        """
+        ...
+
+
+class AbsSegmenter(ABC):
+    """Abstract frame-level speaker segmentation (who-speaks-when, overlaps)."""
+
+    @abstractmethod
+    def __call__(self, audio: np.ndarray) -> "LocalSegmentation":
+        """Predict local speaker activity over the whole audio.
+
+        Args:
+            audio: Float32 mono audio at 16kHz.
+
+        Returns:
+            LocalSegmentation with per-window activity and per-frame counts.
+        """
+        ...
+
+    @abstractmethod
+    def refine(
+        self,
+        audio: np.ndarray,
+        cluster_segments: list[list],
+        segmentation: "LocalSegmentation | None" = None,
+    ) -> tuple[list[list], float]:
+        """Turn clustering segments into overlap-aware speaker segments.
+
+        Args:
+            audio: Float32 mono audio at 16kHz.
+            cluster_segments: ``[start_s, end_s, speaker]`` from clustering.
+            segmentation: Precomputed output of ``__call__`` (optional).
+
+        Returns:
+            ``([start_s, end_s, speaker], ...)`` (may overlap) and the number
+            of overlapped seconds.
+        """
+        ...
+
+
+class AbsSeparator(ABC):
+    """Abstract speech separation for overlapped speech."""
+
+    @abstractmethod
+    def separate(self, audio: np.ndarray) -> list[np.ndarray]:
+        """Split mixed speech into one stream per voice.
+
+        Args:
+            audio: Float32 mono audio at 16kHz.
+
+        Returns:
+            Streams with the input's length and loudness.
+        """
+        ...
+
+    @abstractmethod
+    def extract(
+        self,
+        chunk: np.ndarray,
+        regions_ms: list[tuple[int, int]],
+        target_embedding: np.ndarray,
+        embed_batch: Callable[[list[np.ndarray]], object],
+    ) -> np.ndarray:
+        """Replace overlapped regions of ``chunk`` with the target voice.
+
+        Args:
+            chunk: Float32 mono audio at 16kHz.
+            regions_ms: Overlapped ``(start_ms, end_ms)`` ranges in ``chunk``.
+            target_embedding: Voice embedding of the speaker to keep.
+            embed_batch: Speaker embedder used to pick the target stream.
+
+        Returns:
+            Audio of the same length with the target voice in those regions.
         """
         ...

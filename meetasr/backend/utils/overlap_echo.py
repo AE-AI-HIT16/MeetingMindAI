@@ -20,7 +20,16 @@ def _words(text: str) -> list[str]:
 
 
 def overlap_ratio(start_ms: int, end_ms: int, overlaps: list[tuple[int, int]]) -> float:
-    """Share of ``[start_ms, end_ms]`` covered by ``overlaps``."""
+    """Share of a time range covered by overlapped speech.
+
+    Args:
+        start_ms: Range start.
+        end_ms: Range end.
+        overlaps: ``(start_ms, end_ms)`` overlapped ranges.
+
+    Returns:
+        Fraction in [0, 1]; 0.0 for an empty range.
+    """
     if end_ms <= start_ms:
         return 0.0
     covered = sum(
@@ -30,7 +39,17 @@ def overlap_ratio(start_ms: int, end_ms: int, overlaps: list[tuple[int, int]]) -
 
 
 def is_overlap_echo(text: str, ratio: float, concurrent_texts: list[str]) -> bool:
-    """True if a mostly-overlapped turn repeats a concurrent turn's words."""
+    """Whether a mostly-overlapped turn only repeats another speaker.
+
+    Args:
+        text: Transcript of the overlapped turn.
+        ratio: Share of the turn that is overlapped (``overlap_ratio``).
+        concurrent_texts: Transcripts of other speakers' turns at that time.
+
+    Returns:
+        True if at least ``MIN_OVERLAP_RATIO`` is overlapped and at least
+        ``MIN_ECHO_RATIO`` of its words appear in the concurrent turns.
+    """
     if ratio < MIN_OVERLAP_RATIO or not concurrent_texts:
         return False
     words = _words(text)

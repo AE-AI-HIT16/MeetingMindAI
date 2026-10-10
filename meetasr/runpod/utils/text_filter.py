@@ -50,7 +50,16 @@ def _collapse_loops(words: list[str]) -> list[str]:
 
 
 def clean_transcript_text(text: str, duration_s: float) -> str:
-    """Return ``text`` cleaned of non-speech output, or "" to drop it."""
+    """Clean non-speech output from one ASR result.
+
+    Args:
+        text: Text Qwen3-ASR returned for one chunk.
+        duration_s: Length of that chunk in seconds.
+
+    Returns:
+        The text with repetition loops cut, or "" when it is a sound tag,
+        laughter or an impossible speaking rate (drop the segment).
+    """
     stripped = text.strip()
     normalized = _normalize(stripped)
     if not normalized:

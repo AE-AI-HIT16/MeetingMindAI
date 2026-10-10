@@ -126,7 +126,14 @@ def build_speaker_turns(
 
 
 def first_appearance_mapping(diar_segments: list[list]) -> dict[int, int]:
-    """Raw cluster id -> turn speaker id, as ``build_speaker_turns`` numbers them."""
+    """Map raw cluster ids to the speaker ids ``build_speaker_turns`` uses.
+
+    Args:
+        diar_segments: ``[start_s, end_s, cluster_id]`` segments.
+
+    Returns:
+        ``{cluster_id: speaker_id}`` numbered by first appearance.
+    """
     mapping: dict[int, int] = {}
     for _start, _end, speaker in sorted(diar_segments, key=lambda item: (item[0], item[1])):
         mapping.setdefault(int(speaker), len(mapping))
@@ -139,7 +146,16 @@ def annotate_overlaps(
     *,
     min_overlap_ms: int = 150,
 ) -> list[SpeakerTurn]:
-    """Fill ``turn.overlaps`` with ranges where another speaker also talks."""
+    """Fill ``turn.overlaps`` with ranges where another speaker also talks.
+
+    Args:
+        turns: Speaker turns from ``build_speaker_turns`` (updated in place).
+        diar_segments: The (possibly overlapping) diarization segments.
+        min_overlap_ms: Shorter shared ranges are ignored.
+
+    Returns:
+        The same turns.
+    """
     mapping = first_appearance_mapping(diar_segments)
     others = [
         (int(round(start * 1000)), int(round(end * 1000)), mapping[int(speaker)])
@@ -169,7 +185,16 @@ def assign_overlap_regions(
     *,
     min_overlap_ms: int = 150,
 ) -> list[SpeakerTurn]:
-    """Fill ``turn.overlaps`` from detected overlapped-speech ranges."""
+    """Fill ``turn.overlaps`` from detected overlapped-speech ranges.
+
+    Args:
+        turns: Speaker turns (updated in place).
+        regions_ms: ``(start_ms, end_ms)`` ranges with two or more voices.
+        min_overlap_ms: Shorter intersections are ignored.
+
+    Returns:
+        The same turns.
+    """
     for turn in turns:
         turn.overlaps = [
             (max(turn.start_ms, start), min(turn.end_ms, end))

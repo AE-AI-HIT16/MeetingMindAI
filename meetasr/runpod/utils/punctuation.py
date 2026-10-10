@@ -25,7 +25,14 @@ MAX_WORDS_PER_CALL = 150
 
 
 def needs_punctuation(text: str) -> bool:
-    """No sentence-final mark, or starts lowercase."""
+    """Whether a segment still lacks Vietnamese sentence punctuation.
+
+    Args:
+        text: Segment text.
+
+    Returns:
+        True if it has no sentence-final mark or starts lowercase.
+    """
     stripped = text.strip()
     if not stripped:
         return False
@@ -48,6 +55,14 @@ def punctuate_speaker_runs(
     the input words, that piece keeps its original text. Words Qwen already
     capitalized mid-segment (names, often from the user's keywords) keep
     their capitals.
+
+    Args:
+        sentences: Segments in timeline order with speakers.
+        restore: Punctuation model call (text in, punctuated text out).
+        max_words: Longest piece of a run sent to ``restore`` at once.
+
+    Returns:
+        A new list with the same number of segments and punctuated text.
     """
     result = copy.deepcopy(sentences)
     index = 0
