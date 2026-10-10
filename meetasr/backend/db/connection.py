@@ -60,7 +60,7 @@ def _ensure_job_columns() -> None:
     from sqlalchemy import inspect
 
     added = {
-        "jobs": {"asr_context": "TEXT", "num_speakers": "INTEGER"},
+        "jobs": {"asr_context": "TEXT"},
         "transcript_segments": {"overlapped": "BOOLEAN NOT NULL DEFAULT FALSE"},
     }
     inspector = inspect(engine)

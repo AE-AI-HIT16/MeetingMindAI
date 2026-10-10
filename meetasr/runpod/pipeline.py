@@ -224,7 +224,6 @@ class MeetPipeline:
     def prepare_diarization_first_transcription(
         self,
         audio_source,
-        num_speakers: int | None = None,
     ) -> tuple[
         np.ndarray, list[Segment], list[SpeakerTurn] | None, int, dict[int, list[float]]
     ]:
@@ -234,8 +233,7 @@ class MeetPipeline:
         fallback. This preserves transcript availability when diarization is
         disabled, produces no usable chunks, or fails.
 
-        ``num_speakers`` (from the user) fixes the cluster count. The last
-        item maps each turn speaker to its mean cam++ embedding, used to pick
+        The last item maps each turn speaker to its mean cam++ embedding, used to pick
         that speaker's voice when separating overlapped speech.
         """
         audio = load_audio(audio_source)
@@ -254,7 +252,6 @@ class MeetPipeline:
             diar_segments = self._diarize_segments(
                 audio,
                 vad_segments,
-                num_speakers=num_speakers,
                 segmentation=segmentation,
                 profiles=raw_profiles,
             )
@@ -819,7 +816,6 @@ class MeetPipeline:
         self,
         audio: np.ndarray,
         segments: list[Segment],
-        num_speakers: int | None = None,
         segmentation=None,
         profiles: dict[int, np.ndarray] | None = None,
     ) -> list[list]:
@@ -863,18 +859,7 @@ class MeetPipeline:
             "SPK diarize: %d VAD seg -> %d chunks -> %d embeddings",
             len(segments), len(all_chunks), all_embs.shape[0],
         )
-        # The user's speaker count only adds speakers auto-detection missed
-        # (usually someone who barely talks). Forcing a count that is too
-        # low merged two people into one label (DER 13% -> 38%), so a hint
-        # below the detected count is ignored.
         labels = self.spk.cluster(all_embs)
-        detected = len(set(labels))
-        if num_speakers and detected < num_speakers:
-            logging.info(
-                "SPK: user expects %d speakers, detected %d; using the user's count.",
-                num_speakers, detected,
-            )
-            labels = self.spk.cluster(all_embs, oracle_num=num_speakers)
         usable_count = min(len(embedded_chunks), len(labels))
         if usable_count != len(embedded_chunks):
             logging.warning(

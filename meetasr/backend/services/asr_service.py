@@ -461,8 +461,6 @@ class ASRService:
     async def prepare_incremental(
         self,
         audio_source: Any,
-        *,
-        num_speakers: int | None = None,
     ) -> PreparedTranscription:
         """Decode audio locally, run VAD + diarization on the WHOLE file once.
 
@@ -475,12 +473,9 @@ class ASRService:
             # Compress whole-file audio (FLAC) to stay under RunPod's request limit.
             import base64
             audio_b64 = base64.b64encode(numpy_to_diarization_audio_bytes(audio)).decode()
-            payload: dict = {"audio_base64": audio_b64}
-            if num_speakers:
-                payload["num_speakers"] = num_speakers
             res_json = await self._call_serverless(
                 "prepare_incremental",
-                payload,
+                {"audio_base64": audio_b64},
                 timeout=600.0,
             )
         else:

@@ -164,7 +164,6 @@ def get_storage_summary(
 
 
 MAX_CONTEXT_CHARS = 1000
-MAX_SPEAKERS = 20
 
 
 # ---------------------------------------------------------------------------
@@ -178,7 +177,6 @@ async def create_source(
     storage: Annotated[StorageBackend, Depends(get_storage_backend)],
     current_user: Annotated[Optional[User], Depends(get_current_user)],
     context: Annotated[str, Form(max_length=MAX_CONTEXT_CHARS, description="Từ khóa, tên riêng giúp ASR nhận đúng.")] = "",
-    num_speakers: Annotated[Optional[int], Form(ge=1, le=MAX_SPEAKERS, description="Số người nói nếu biết.")] = None,
 ) -> CreateSourceResponse:
     """Upload file media, lưu vào Storage, tạo Source và Job trong DB.
 
@@ -190,7 +188,6 @@ async def create_source(
         db:      DB session (Dependency Injection).
         storage: Storage backend — local hoặc MinIO (từ biến môi trường).
         context: Từ khóa / tên riêng (tùy chọn) đưa vào Qwen3-ASR.
-        num_speakers: Số người nói (tùy chọn) cho bước phân người nói.
 
     Returns:
         ``sourceId`` để mở Source và ``jobId`` để theo dõi tiến trình xử lý.
@@ -244,7 +241,6 @@ async def create_source(
         source_id=source.id,
         status=JobStatus.QUEUED,
         asr_context=context.strip() or None,
-        num_speakers=num_speakers,
     )
     db.add(job)
     db.commit()

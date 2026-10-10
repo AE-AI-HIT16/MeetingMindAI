@@ -17,11 +17,7 @@ import type { CaptionParagraph } from "@/lib/liveCaptionState";
 import { formatDuration, formatStamp, getSpeakerStyle } from "@/lib/format";
 import { StatusBadge, Waveform } from "@/components/ui";
 import { ErrorNotice } from "@/components/ErrorNotice";
-import {
-  EMPTY_HINTS,
-  RecognitionHints,
-  hintSpeakerCount,
-} from "@/components/RecognitionHints";
+import { EMPTY_HINTS, RecognitionHints } from "@/components/RecognitionHints";
 
 // ----------------------------------------------------------------
 // Page
@@ -75,7 +71,6 @@ export default function RealtimePage() {
     const started = await start(audioSource, {
       windowSeconds: useCaption ? 15 : 10,
       context: hints.context,
-      speakers: hintSpeakerCount(hints),
     });
     setCaptionActive(useCaption && started !== null);
     if (useCaption && started !== null) {

@@ -98,11 +98,8 @@ class JobQueue:
             #  1. VAD + speaker diarization on the WHOLE file -> consistent speakers
             #  2. transcribe each speaker turn, streaming segments as they complete
             #  3. finalize (punctuation / speaker projection)
-            asr_context, num_speakers = self._job_hints(job_id)
-            prepared = await self._asr_service.prepare_incremental(
-                audio_source,
-                num_speakers=num_speakers,
-            )
+            asr_context = self._job_context(job_id)
+            prepared = await self._asr_service.prepare_incremental(audio_source)
             provisional_sentences: list[SentenceInfo] = []
             persisted: list[TranscriptSegmentPayload] = []
             speaker_first = prepared.speaker_turns is not None
@@ -262,13 +259,11 @@ class JobQueue:
             if temporary_path is not None:
                 await asyncio.to_thread(temporary_path.unlink, missing_ok=True)
 
-    def _job_hints(self, job_id: str) -> tuple[str, int | None]:
-        """User hints stored on the Job: Qwen3 keywords and speaker count."""
+    def _job_context(self, job_id: str) -> str:
+        """Keywords / names the user gave for Qwen3 (stored on the Job)."""
         with Session(engine) as db:
             job = db.get(Job, job_id)
-            if job is None:
-                return "", None
-            return job.asr_context or "", job.num_speakers
+            return (job.asr_context or "") if job is not None else ""
 
     def _prepare_job(self, job_id: str) -> Source | None:
         with Session(engine) as db:

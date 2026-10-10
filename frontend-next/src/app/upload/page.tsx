@@ -5,11 +5,7 @@ import { useRouter } from "next/navigation";
 import { PageHeader, Waveform } from "@/components/ui";
 import { uploadSource, warmupAsr } from "@/lib/api";
 import { ErrorNotice } from "@/components/ErrorNotice";
-import {
-  EMPTY_HINTS,
-  RecognitionHints,
-  hintSpeakerCount,
-} from "@/components/RecognitionHints";
+import { EMPTY_HINTS, RecognitionHints } from "@/components/RecognitionHints";
 
 const ACCEPT = "video/*,audio/*";
 const MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024;
@@ -61,7 +57,6 @@ export default function UploadPage() {
     try {
       const result = await uploadSource(file, onProgress, {
         context: hints.context,
-        numSpeakers: hintSpeakerCount(hints),
       });
       router.push(
         `/sources/${result.sourceId}?jobId=${encodeURIComponent(result.jobId)}`,

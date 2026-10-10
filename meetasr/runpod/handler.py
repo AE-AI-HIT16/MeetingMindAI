@@ -141,9 +141,7 @@ async def run_handler(job):
         profiles = {}
         if getattr(pipeline, "diarization_first", False):
             audio_out, vad_segments, speaker_turns, duration_ms, profiles = await asyncio.to_thread(
-                pipeline.prepare_diarization_first_transcription,
-                audio,
-                job_input.get('num_speakers'),
+                pipeline.prepare_diarization_first_transcription, audio
             )
         else:
             audio_out, vad_segments, duration_ms = await asyncio.to_thread(

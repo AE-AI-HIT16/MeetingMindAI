@@ -121,37 +121,3 @@ def test_overlap_regions_and_assignment_to_turns():
     assert turns[1].overlaps == [(2500, regions[0][1])]
     assert turns[2].overlaps == []
 
-
-class _FakeSpk:
-    """Auto-detects 2 speakers; with oracle_num returns that many labels."""
-
-    def __init__(self):
-        self.calls = []
-
-    def embed_batch(self, chunks):
-        import torch
-
-        return torch.ones(len(chunks), 4)
-
-    def cluster(self, embeddings, oracle_num=None):
-        self.calls.append(oracle_num)
-        n = oracle_num or 2
-        return [i % n for i in range(embeddings.shape[0])]
-
-
-def _diarize_with_hint(hint):
-    from meetasr.runpod.pipeline import MeetPipeline
-    from meetasr.runpod.schemas import Segment
-
-    pipeline = MeetPipeline.__new__(MeetPipeline)
-    pipeline.spk = _FakeSpk()
-    pipeline.segmenter = None
-    pipeline._diarize_segments(np.zeros(16000 * 10, np.float32), [Segment(0, 9000)], num_speakers=hint)
-    return pipeline.spk.calls
-
-
-def test_speaker_hint_only_adds_speakers_auto_detection_missed():
-    assert _diarize_with_hint(None) == [None]
-    assert _diarize_with_hint(1) == [None]      # undercount ignored (2 detected)
-    assert _diarize_with_hint(2) == [None]      # matches detection
-    assert _diarize_with_hint(3) == [None, 3]   # more than detected: trust the user

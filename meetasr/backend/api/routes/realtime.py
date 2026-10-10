@@ -108,19 +108,12 @@ async def realtime_stream(websocket: WebSocket, db: Session = Depends(get_db)):
     source = Source(filename=temp_filename, media_type=MediaType.AUDIO, storage_path="")
     db.add(source)
     db.flush()  # obtain source.id
-    # Optional hints from the page: ?context=keywords&speakers=N
+    # Optional keywords / names from the page: ?context=...
     asr_context = websocket.query_params.get("context", "").strip()[:1000]
-    try:
-        num_speakers = int(websocket.query_params.get("speakers", ""))
-    except ValueError:
-        num_speakers = None
-    if num_speakers is not None and not 1 <= num_speakers <= 20:
-        num_speakers = None
     job = Job(
         source_id=source.id,
         status=JobStatus.PROCESSING,
         asr_context=asr_context or None,
-        num_speakers=num_speakers,
     )
     db.add(job)
     db.commit()
