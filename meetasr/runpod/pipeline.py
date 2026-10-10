@@ -628,7 +628,7 @@ class MeetPipeline:
             return []
 
         embedded_chunks = []
-        embeddings = []
+        chunk_audio = []
         for st, ed in all_chunks:
             chunk_np = audio[int(st * sample_rate):int(ed * sample_rate)]
             if len(chunk_np) == 0:
@@ -636,12 +636,15 @@ class MeetPipeline:
             if len(chunk_np) < target_len:
                 tensor = torch.from_numpy(chunk_np).float()
                 chunk_np = circle_pad(tensor, target_len).numpy()
-            embeddings.append(self.spk.embed(chunk_np.astype(np.float32)))
+            chunk_audio.append(chunk_np[:target_len].astype(np.float32))
             embedded_chunks.append([st, ed])
 
-        if not embeddings:
+        if not chunk_audio:
             return []
-        all_embs = torch.cat(embeddings, dim=0)
+        if hasattr(self.spk, "embed_batch"):
+            all_embs = self.spk.embed_batch(chunk_audio)
+        else:
+            all_embs = torch.cat([self.spk.embed(c) for c in chunk_audio], dim=0)
         logging.info(
             "SPK diarize: %d VAD seg -> %d chunks -> %d embeddings",
             len(segments), len(all_chunks), all_embs.shape[0],

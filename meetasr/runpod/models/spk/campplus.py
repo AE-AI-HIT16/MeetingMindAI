@@ -107,6 +107,28 @@ class CAMPlusPlus(AbsSpk):
             return emb
         return torch.zeros(1, 192)
 
+    def embed_batch(self, audios: list[np.ndarray], batch_size: int = 64) -> "torch.Tensor":
+        """Embeddings for many equal-length chunks, ``batch_size`` per forward.
+
+        One generate() per chunk (Python/feature/empty_cache overhead each) made
+        diarization take minutes on long files. Returns [N, 192].
+        """
+        import torch
+        self._ensure_loaded()
+        embeddings = []
+        for i in range(0, len(audios), batch_size):
+            # CAM++ inference returns one {"spk_embedding": [B, 192]} per batch.
+            for result in self._inner.generate(
+                input=audios[i:i + batch_size],
+                batch_size=batch_size,
+                disable_pbar=True,
+            ):
+                emb = result["spk_embedding"]
+                if not isinstance(emb, torch.Tensor):
+                    emb = torch.from_numpy(np.array(emb, dtype=np.float32))
+                embeddings.append(emb.reshape(-1, emb.shape[-1]))
+        return torch.cat(embeddings, dim=0)
+
     def cluster(
         self,
         embeddings: "torch.Tensor",
