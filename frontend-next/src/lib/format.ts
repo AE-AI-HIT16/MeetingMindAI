@@ -30,61 +30,54 @@ export interface SpeakerStyle {
   color: string;
   bg: string;
   border: string;
-  gradient: string;
 }
 
+// Readable on white: deep text on a light tint of the same hue.
 const SPEAKER_PALETTES: SpeakerStyle[] = [
   {
-    // Speaker 0: Ultramarine / Indigo
-    color: "#2c3ee0",
-    bg: "#eef0fd",
-    border: "rgba(44, 62, 224, 0.25)",
-    gradient: "linear-gradient(135deg, #2c3ee0, #4f46e5)",
+    // Speaker 0: Ultramarine
+    color: "#3b4fd8",
+    bg: "rgb(59 79 216 / 0.08)",
+    border: "rgb(59 79 216 / 0.22)",
   },
   {
-    // Speaker 1: Teal / Emerald
-    color: "#0e9e8e",
-    bg: "#e6f7f5",
-    border: "rgba(14, 158, 142, 0.25)",
-    gradient: "linear-gradient(135deg, #0e9e8e, #10b981)",
+    // Speaker 1: Teal
+    color: "#0a7f72",
+    bg: "rgb(10 127 114 / 0.08)",
+    border: "rgb(10 127 114 / 0.22)",
   },
   {
-    // Speaker 2: Amber / Coral
-    color: "#b3591d",
-    bg: "#fef3eb",
-    border: "rgba(179, 89, 29, 0.25)",
-    gradient: "linear-gradient(135deg, #b3591d, #f59e0b)",
+    // Speaker 2: Amber
+    color: "#a2551b",
+    bg: "rgb(162 85 27 / 0.08)",
+    border: "rgb(162 85 27 / 0.22)",
   },
   {
-    // Speaker 3: Violet / Purple
-    color: "#7c5cfc",
-    bg: "#f3f0ff",
-    border: "rgba(124, 92, 252, 0.25)",
-    gradient: "linear-gradient(135deg, #7c5cfc, #8b5cf6)",
+    // Speaker 3: Violet
+    color: "#6d45e0",
+    bg: "rgb(109 69 224 / 0.08)",
+    border: "rgb(109 69 224 / 0.22)",
   },
   {
-    // Speaker 4: Rose / Pink
-    color: "#c02c74",
-    bg: "#fce8f3",
-    border: "rgba(192, 44, 116, 0.25)",
-    gradient: "linear-gradient(135deg, #c02c74, #ec4899)",
+    // Speaker 4: Rose
+    color: "#b42a6a",
+    bg: "rgb(180 42 106 / 0.08)",
+    border: "rgb(180 42 106 / 0.22)",
   },
   {
-    // Speaker 5: Cyan / Sky
-    color: "#0284c7",
-    bg: "#e0f2fe",
-    border: "rgba(2, 132, 199, 0.25)",
-    gradient: "linear-gradient(135deg, #0284c7, #38bdf8)",
+    // Speaker 5: Sky
+    color: "#0369a1",
+    bg: "rgb(3 105 161 / 0.08)",
+    border: "rgb(3 105 161 / 0.22)",
   },
 ];
 
 export function getSpeakerStyle(speaker: number | null): SpeakerStyle {
   if (speaker === null || speaker === undefined) {
     return {
-      color: "#6b7280",
-      bg: "#f3f4f6",
-      border: "rgba(107, 114, 128, 0.2)",
-      gradient: "linear-gradient(135deg, #6b7280, #9ca3af)",
+      color: "#4f545e",
+      bg: "rgb(79 84 94 / 0.07)",
+      border: "rgb(79 84 94 / 0.18)",
     };
   }
   const index = Math.abs(speaker) % SPEAKER_PALETTES.length;

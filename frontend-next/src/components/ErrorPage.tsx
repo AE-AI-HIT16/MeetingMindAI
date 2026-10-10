@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { WarningCircle } from "@phosphor-icons/react/dist/ssr";
 
 /** Full-page friendly message used by error.tsx / not-found.tsx. */
 export function ErrorPage({
@@ -12,12 +13,8 @@ export function ErrorPage({
 }) {
   return (
     <div className="mx-auto flex min-h-[70vh] max-w-md flex-col items-center justify-center px-6 text-center">
-      <div className="flex h-14 w-14 items-center justify-center rounded-full bg-signal-wash text-warn">
-        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <circle cx="12" cy="12" r="10" />
-          <line x1="12" y1="8" x2="12" y2="12.5" />
-          <line x1="12" y1="16" x2="12.01" y2="16" />
-        </svg>
+      <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-surface-2 text-warn ring-1 ring-line">
+        <WarningCircle size={28} aria-hidden="true" />
       </div>
       <h1 className="font-display mt-5 text-xl font-semibold text-ink">{title}</h1>
       <p className="mt-2 text-sm text-ink-soft">{message}</p>
@@ -25,7 +22,7 @@ export function ErrorPage({
         {action}
         <Link
           href="/"
-          className="rounded-xl border border-line px-4 py-2.5 text-sm font-medium text-ink-soft transition hover:border-brand hover:text-brand"
+          className="btn btn-secondary"
         >
           Về thư viện
         </Link>

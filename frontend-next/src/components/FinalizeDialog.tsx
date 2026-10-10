@@ -7,6 +7,7 @@ import { useSession } from "next-auth/react";
 import type { DocMode, DocumentGenerationStage } from "@/lib/types";
 import { useDocumentGenerationEvents } from "@/lib/useDocumentGenerationEvents";
 import { ErrorNotice } from "@/components/ErrorNotice";
+import { Check, ListBullets, TextAlignJustify, WarningCircle } from "@phosphor-icons/react";
 
 const CHOICES: {
   mode: Exclude<DocMode, "live">;
@@ -18,13 +19,13 @@ const CHOICES: {
     mode: "summary",
     title: "Tóm tắt",
     desc: "Rút gọn thành các chủ đề, quyết định và việc cần làm. Ngắn, dễ đọc.",
-    icon: <SummaryIcon />,
+    icon: <ListBullets size={20} />,
   },
   {
     mode: "full_text",
     title: "Toàn văn",
     desc: "Giữ nguyên toàn bộ nội dung đã tổng hợp, chỉ chỉnh cho gọn gàng.",
-    icon: <FullTextIcon />,
+    icon: <TextAlignJustify size={20} />,
   },
 ];
 
@@ -32,10 +33,13 @@ export function FinalizeDialog({
   open,
   liveDocumentId,
   onClose,
+  onOpen,
 }: {
   open: boolean;
   liveDocumentId: string | null;
   onClose: () => void;
+  /** Reopens the dialog from the background progress pill. */
+  onOpen: () => void;
 }) {
   const router = useRouter();
   const { data: authSession } = useSession();
@@ -57,25 +61,58 @@ export function FinalizeDialog({
     error ??
     (generation.status === "failed" ? generation.error : null);
 
-  useEffect(() => {
-    if (
-      generation.status === "done" &&
-      generation.documentId &&
-      generationSourceId
-    ) {
-      router.push(
-        `/sources/${generationSourceId}?view=doc&documentId=${encodeURIComponent(generation.documentId)}`,
-      );
-      return;
-    }
-  }, [
-    generation.documentId,
-    generation.status,
-    generationSourceId,
-    router,
-  ]);
+  const readyHref =
+    generation.status === "done" && generation.documentId && generationSourceId
+      ? `/sources/${generationSourceId}?view=doc&documentId=${encodeURIComponent(generation.documentId)}`
+      : null;
+  const chosen = CHOICES.find((c) => c.mode === submitting);
 
-  if (!open) return null;
+  // Open the result automatically only while the dialog is on screen. If the
+  // user hid it, the pill offers the result instead of yanking the page.
+  useEffect(() => {
+    if (open && readyHref) router.push(readyHref);
+  }, [open, readyHref, router]);
+
+  if (!open) {
+    // Generation needs this page's connection to keep running on the server,
+    // so it continues while the dialog is hidden and says so.
+    if (!submitting) return null;
+    return (
+      <div className="animate-enter fixed bottom-5 right-5 z-40 w-[min(22rem,calc(100vw-2.5rem))]" aria-live="polite">
+        <div className="bezel bg-white/40 backdrop-blur-xl">
+          <div className="bezel-core flex items-center gap-3 p-3 pr-3.5">
+            <span className={`relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-on-brand ${readyHref ? "bg-ok" : displayError ? "bg-danger" : "bg-brand"}`}>
+              {controlsLocked && (
+                <span aria-hidden="true" className="orb-ring absolute inset-0 rounded-full border border-brand/50" />
+              )}
+              {readyHref ? <Check size={18} weight="bold" /> : displayError ? <WarningCircle size={18} weight="bold" /> : chosen?.icon}
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-semibold text-ink">
+                {readyHref
+                  ? `${chosen?.title ?? "Tài liệu"} đã sẵn sàng`
+                  : displayError
+                    ? "Chưa tạo được tài liệu"
+                    : `Đang tạo ${chosen?.title.toLowerCase() ?? "tài liệu"} · ${Math.round(generation.progress * 100)}%`}
+              </p>
+              <p className="truncate text-xs text-ink-faint">
+                {readyHref ? "Bấm để mở tài liệu." : displayError ? "Mở để xem chi tiết." : "Giữ trang này mở cho tới khi xong."}
+              </p>
+            </div>
+            {readyHref ? (
+              <button type="button" onClick={() => router.push(readyHref)} className="btn btn-primary px-4 py-2">
+                Mở
+              </button>
+            ) : (
+              <button type="button" onClick={onOpen} className="btn btn-secondary px-4 py-2">
+                Xem
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   async function choose(mode: Exclude<DocMode, "live">) {
     if (!liveDocumentId || controlsLocked) return;
@@ -100,95 +137,101 @@ export function FinalizeDialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4 backdrop-blur-sm"
-      onClick={() => {
-        if (!controlsLocked) onClose();
-      }}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-ink/25 p-4 backdrop-blur-sm"
+      onClick={onClose}
     >
       <div
-        className="w-full max-w-lg rounded-[var(--radius-card)] border border-line bg-surface p-7 shadow-[var(--shadow-lift)]"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="finalize-title"
+        className="animate-enter bezel w-full max-w-xl bg-white/40 backdrop-blur-xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <p className="eyebrow">Xử lý xong · Bước 3 / 3</p>
-        <h2 className="font-display mt-2 text-2xl font-semibold text-ink">
-          Bạn muốn tài liệu dạng nào?
-        </h2>
-        <p className="mt-1.5 text-sm text-ink-soft">
-          Có thể tạo dạng còn lại bất cứ lúc nào sau đó.
-        </p>
+        <div className="bezel-core p-7 sm:p-8">
+          <p className="eyebrow">Xử lý xong</p>
+          <h2 id="finalize-title" className="font-display mt-2 text-3xl font-semibold tracking-[-0.03em] text-ink">
+            Bạn muốn tài liệu dạng nào?
+          </h2>
+          <p className="mt-1.5 text-sm text-ink-soft">
+            Có thể tạo dạng còn lại bất cứ lúc nào sau đó.
+          </p>
 
-        <div className="mt-6 grid gap-3 sm:grid-cols-2">
-          {CHOICES.map((c) => (
-            <button
-              key={c.mode}
-              disabled={!liveDocumentId || controlsLocked}
-              onClick={() => void choose(c.mode)}
-              className="group flex flex-col items-start rounded-2xl border border-line bg-surface-2 p-5 text-left transition hover:-translate-y-0.5 hover:border-brand hover:bg-brand-wash/50 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-wash text-brand transition group-hover:bg-brand group-hover:text-white">
-                {c.icon}
-              </span>
-              <span className="mt-3 font-display text-lg font-medium text-ink">
-                {c.title}
-              </span>
-              <span className="mt-1 text-xs leading-relaxed text-ink-soft">
-                {controlsLocked && submitting === c.mode
-                  ? generationStageLabel(generation.stage)
-                  : c.desc}
-              </span>
-            </button>
-          ))}
-        </div>
-
-        {controlsLocked && (
-          <div className="mt-4" aria-live="polite">
-            <div className="mb-1.5 flex items-center justify-between text-xs text-ink-soft">
-              <span>{generationStageLabel(generation.stage)}</span>
-              <span>{Math.round(generation.progress * 100)}%</span>
-            </div>
-            <div className="h-1.5 overflow-hidden rounded-full bg-line">
-              <div
-                className="h-full rounded-full bg-brand transition-[width] duration-300"
-                style={{
-                  width: `${Math.max(
-                    submitting && !generationJobId ? 3 : 0,
-                    Math.round(generation.progress * 100),
-                  )}%`,
-                }}
-              />
-            </div>
-            {generationJobId && !generation.isConnected && (
-              <p className="mt-2 text-xs text-ink-faint">
-                Đang kết nối lại với tiến trình trên server…
-              </p>
-            )}
+          <div className="mt-6 grid gap-3 sm:grid-cols-2">
+            {CHOICES.map((c) => (
+              <button
+                key={c.mode}
+                disabled={!liveDocumentId || controlsLocked}
+                onClick={() => void choose(c.mode)}
+                className={`group flex flex-col items-start rounded-2xl p-5 text-left ring-1 transition duration-300 hover:-translate-y-0.5 disabled:cursor-not-allowed ${
+                  submitting === c.mode
+                    ? "bg-brand-wash ring-brand/40"
+                    : "bg-surface-2 ring-line-soft hover:bg-surface hover:shadow-[var(--shadow-card)] hover:ring-line disabled:opacity-50"
+                }`}
+              >
+                <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-wash text-brand transition group-hover:bg-brand group-hover:text-on-brand">
+                  {c.icon}
+                </span>
+                <span className="mt-3 font-display text-lg font-medium text-ink">
+                  {c.title}
+                </span>
+                <span className="mt-1 text-xs leading-relaxed text-ink-soft">
+                  {controlsLocked && submitting === c.mode
+                    ? generationStageLabel(generation.stage)
+                    : c.desc}
+                </span>
+              </button>
+            ))}
           </div>
-        )}
 
-        {!liveDocumentId && (
-          <ErrorNotice
-            compact
-            title="Tài liệu chưa sẵn sàng"
-            error="Hệ thống vẫn đang xử lý lời thoại. Vui lòng đợi xử lý xong rồi chọn đầu ra."
-            className="mt-4"
-          />
-        )}
-        {displayError ? (
-          <ErrorNotice
-            compact
-            error={displayError}
-            title="Chưa tạo được tài liệu"
-            className="mt-4"
-          />
-        ) : null}
+          {controlsLocked && (
+            <div className="mt-4" aria-live="polite">
+              <div className="mb-1.5 flex items-center justify-between text-xs text-ink-soft">
+                <span>{generationStageLabel(generation.stage)}</span>
+                <span>{Math.round(generation.progress * 100)}%</span>
+              </div>
+              <div className="h-1.5 overflow-hidden rounded-full bg-line">
+                <div
+                  className="shimmer h-full rounded-full bg-brand transition-[width] duration-300"
+                  style={{
+                    width: `${Math.max(
+                      submitting && !generationJobId ? 3 : 0,
+                      Math.round(generation.progress * 100),
+                    )}%`,
+                  }}
+                />
+              </div>
+              {generationJobId && !generation.isConnected && (
+                <p className="mt-2 text-xs text-ink-faint">
+                  Đang kết nối lại với tiến trình trên server…
+                </p>
+              )}
+            </div>
+          )}
 
-        <button
-          disabled={controlsLocked}
-          onClick={onClose}
-          className="mt-5 w-full text-center text-sm text-ink-faint hover:text-ink disabled:opacity-50"
-        >
-          Để sau
-        </button>
+          {!liveDocumentId && (
+            <ErrorNotice
+              compact
+              title="Tài liệu chưa sẵn sàng"
+              error="Hệ thống vẫn đang xử lý lời thoại. Vui lòng đợi xử lý xong rồi chọn đầu ra."
+              className="mt-4"
+            />
+          )}
+          {displayError ? (
+            <ErrorNotice
+              compact
+              error={displayError}
+              title="Chưa tạo được tài liệu"
+              className="mt-4"
+            />
+          ) : null}
+
+          <button
+            onClick={onClose}
+            className="mt-6 w-full rounded-full py-2 text-center text-sm font-medium text-ink-soft transition hover:bg-surface-2 hover:text-ink"
+          >
+            {controlsLocked ? "Ẩn đi, tạo tiếp ở nền" : "Để sau"}
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -211,19 +254,4 @@ function generationStageLabel(
     default:
       return "Đang gửi yêu cầu…";
   }
-}
-
-function SummaryIcon() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
-      <path d="M4 7h16M4 12h10M4 17h7" />
-    </svg>
-  );
-}
-function FullTextIcon() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
-      <path d="M5 4h14M5 8h14M5 12h14M5 16h14M5 20h10" />
-    </svg>
-  );
 }

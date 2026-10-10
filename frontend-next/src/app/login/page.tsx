@@ -2,7 +2,19 @@
 
 import { signIn, useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import {
+  ArrowRight,
+  CircleNotch,
+  FileText,
+  GithubLogo,
+  UserCircleDashed,
+  UsersThree,
+  Waveform as WaveformIcon,
+  type Icon,
+} from "@phosphor-icons/react";
+import { Logo } from "@/components/Sidebar";
+import { Waveform } from "@/components/ui";
 
 function GoogleIcon() {
   return (
@@ -15,21 +27,8 @@ function GoogleIcon() {
   );
 }
 
-function GitHubIcon() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" fill="currentColor">
-      <path d="M12 0C5.37 0 0 5.37 0 12c0 5.3 3.44 9.8 8.2 11.39.6.11.82-.26.82-.58 0-.28-.01-1.02-.02-2C5.67 21.47 4.97 19.23 4.97 19.23c-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.21.08 1.84 1.24 1.84 1.24 1.07 1.83 2.81 1.3 3.5.99.11-.78.42-1.3.76-1.6-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.12-.3-.54-1.52.12-3.17 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 3-.4c1.02.005 2.04.14 3 .4 2.28-1.55 3.29-1.23 3.29-1.23.66 1.65.24 2.87.12 3.17.77.84 1.24 1.91 1.24 3.22 0 4.61-2.81 5.62-5.48 5.92.43.37.81 1.1.81 2.22 0 1.6-.01 2.89-.01 3.28 0 .32.21.7.82.58C20.56 21.79 24 17.3 24 12c0-6.63-5.37-12-12-12z" />
-    </svg>
-  );
-}
-
 function Spinner() {
-  return (
-    <svg className="h-5 w-5 animate-spin" viewBox="0 0 24 24" fill="none">
-      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
-    </svg>
-  );
+  return <CircleNotch size={20} className="animate-spin" />;
 }
 
 export default function LoginPage() {
@@ -57,116 +56,168 @@ export default function LoginPage() {
 
   const isDisabled = !!loading || status === "loading";
 
+  // Soft spotlight that trails the pointer. It is a fixed-size layer moved
+  // with transform only (compositor, no repaint, no React re-render).
+  const spotRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const spot = spotRef.current;
+    const finePointer = window.matchMedia("(pointer: fine)").matches;
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (!spot || !finePointer || reduce) return;
+    let frame = 0;
+    const onMove = (e: PointerEvent) => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        spot.style.transform = `translate3d(${e.clientX}px, ${e.clientY}px, 0)`;
+        spot.style.opacity = "1";
+      });
+    };
+    window.addEventListener("pointermove", onMove);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener("pointermove", onMove);
+    };
+  }, []);
+
   return (
-    <div className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden bg-[#f8f7f4]">
-      {/* Background gradient */}
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-0"
-        style={{
-          background:
-            "radial-gradient(ellipse 80% 60% at 50% -10%, rgba(99,102,241,0.12) 0%, transparent 70%)",
-        }}
-      />
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute bottom-0 left-0 right-0 h-64"
-        style={{
-          background:
-            "radial-gradient(ellipse 60% 50% at 50% 110%, rgba(99,102,241,0.08) 0%, transparent 70%)",
-        }}
-      />
+    <div className="relative isolate min-h-dvh overflow-hidden">
+      {/* Background, all decorative: drifting light pools, a dot grid that
+          fades out from the center, a live waveform horizon, a pointer
+          spotlight. Grain comes from body::after. */}
+      <div aria-hidden="true" className="pointer-events-none absolute inset-0 -z-10">
+        <div className="drift absolute -left-40 -top-48 h-[38rem] w-[38rem] rounded-full bg-[radial-gradient(circle,rgb(224_85_47/0.24),transparent_65%)]" />
+        <div className="drift-slow absolute -bottom-56 -right-40 h-[44rem] w-[44rem] rounded-full bg-[radial-gradient(circle,rgb(59_79_216/0.18),transparent_65%)]" />
+        <div className="drift absolute left-[38%] top-[30%] h-[26rem] w-[26rem] rounded-full bg-[radial-gradient(circle,rgb(242_176_102/0.18),transparent_65%)] [animation-delay:-9s]" />
+        <div className="dot-grid absolute inset-0 [mask-image:radial-gradient(ellipse_70%_60%_at_50%_45%,black,transparent)]" />
+        <div ref={spotRef} className="spotlight fixed left-0 top-0 opacity-0 transition-opacity duration-700" />
+        <div className="absolute inset-x-0 bottom-0 h-48 opacity-25 [mask-image:linear-gradient(to_top,black,transparent)]">
+          <Waveform live bars={64} className="h-full w-full" />
+        </div>
+      </div>
 
-      <div className="relative z-10 w-full max-w-sm px-6">
-        {/* Logo + Brand */}
-        <div className="mb-10 flex flex-col items-center gap-4 text-center">
-          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[#3d3ef7] shadow-lg shadow-indigo-200">
-            <svg width="28" height="28" viewBox="0 0 18 18" fill="none">
-              <rect x="1" y="7" width="2" height="4" rx="1" fill="white" />
-              <rect x="5" y="3" width="2" height="12" rx="1" fill="white" />
-              <rect x="9" y="5" width="2" height="8" rx="1" fill="white" />
-              <rect x="13" y="8" width="2" height="2" rx="1" fill="#FF6B4A" />
-            </svg>
-          </div>
-          <div>
-            <h1 className="font-display text-2xl font-semibold text-[#111]">
+      <div className="mx-auto grid min-h-dvh w-full max-w-6xl items-center gap-12 px-4 py-12 sm:px-6 lg:grid-cols-[minmax(0,1.25fr)_minmax(0,0.85fr)] lg:gap-16 lg:px-10">
+        {/* Story */}
+        <section className="animate-enter">
+          <div className="flex items-center gap-2.5">
+            <Logo size={36} />
+            <span className="font-display text-xl font-semibold tracking-tight text-ink">
               MeetingMind
-            </h1>
-            <p className="mt-1 text-sm text-[#888]">
-              Tu giong noi thanh tai lieu
-            </p>
-          </div>
-        </div>
-
-        {/* Card dang nhap */}
-        <div className="rounded-2xl border border-[#e8e6e0] bg-white px-8 py-8 shadow-sm shadow-black/[0.04]">
-          <h2 className="mb-1 text-center text-[15px] font-semibold text-[#111]">
-            Chao mung ban tro lai
-          </h2>
-          <p className="mb-7 text-center text-xs text-[#999]">
-            Dang nhap de luu lich su va tai lieu cua ban
-          </p>
-
-          {/* Google */}
-          <button
-            id="google-login-btn"
-            type="button"
-            onClick={() => handleSignIn("google")}
-            disabled={isDisabled}
-            className="mb-3 flex w-full items-center justify-center gap-3 rounded-xl border border-[#e2e0da] bg-white px-5 py-3 text-sm font-medium text-[#222] shadow-[0_1px_2px_rgba(0,0,0,0.06)] transition-all hover:bg-[#fafaf8] hover:shadow-md active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {loading === "google" ? <Spinner /> : <GoogleIcon />}
-            <span>Tiep tuc bang Google</span>
-          </button>
-
-          {/* GitHub */}
-          <button
-            id="github-login-btn"
-            type="button"
-            onClick={() => handleSignIn("github")}
-            disabled={isDisabled}
-            className="flex w-full items-center justify-center gap-3 rounded-xl bg-[#24292e] px-5 py-3 text-sm font-medium text-white shadow-[0_1px_2px_rgba(0,0,0,0.2)] transition-all hover:bg-[#1a1f24] hover:shadow-md active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {loading === "github" ? <Spinner /> : <GitHubIcon />}
-            <span>Tiep tuc bang GitHub</span>
-          </button>
-
-          {/* Divider */}
-          <div className="my-5 flex items-center gap-3">
-            <div className="h-px flex-1 bg-[#eee]" />
-            <span className="text-xs text-[#bbb]">hoac</span>
-            <div className="h-px flex-1 bg-[#eee]" />
+            </span>
           </div>
 
-          {/* Guest */}
-          <button
-            id="guest-btn"
-            type="button"
-            onClick={handleGuest}
-            disabled={isDisabled}
-            className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-[#ddd] px-5 py-2.5 text-sm text-[#888] transition-all hover:border-[#bbb] hover:text-[#555] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {loading === "guest" ? (
-              <Spinner />
-            ) : (
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-                <circle cx="12" cy="7" r="4" />
-              </svg>
-            )}
-            <span>Su dung khong can dang nhap</span>
-          </button>
-
-          {/* Note */}
-          <p className="mt-4 text-center text-[11px] leading-relaxed text-[#bbb]">
-            Su dung khach se khong luu lich su sau khi dong trinh duyet.
+          {/* Lục bát couplet: "ga" rhymes with "ra". */}
+          <h1 className="mt-14 font-display text-[34px] font-semibold leading-[1.12] tracking-[-0.035em] text-ink sm:text-[42px] lg:text-[34px] xl:text-[40px]">
+            <span className="block">Họp hành cứ nói thả ga.</span>
+            <span className="block text-ink-faint sm:whitespace-nowrap">
+              Biên bản <span className="text-brand">để máy</span>, sếp ra là xong.
+            </span>
+          </h1>
+          <p className="mt-6 max-w-md text-lg leading-relaxed text-ink-soft">
+            Ai nói gì, chốt việc gì, ai làm tiếp. MeetingMind ghi đủ cả.
           </p>
-        </div>
 
-        <p className="mt-6 text-center text-xs text-[#bbb]">
-          © {new Date().getFullYear()} MeetingMind
-        </p>
+          <ul className="mt-12 hidden gap-x-8 gap-y-5 sm:grid sm:grid-cols-3 lg:max-w-xl">
+            {FEATURES.map(({ icon: FeatureIcon, title, desc }) => (
+              <li key={title}>
+                <FeatureIcon size={22} className="text-ink" />
+                <p className="mt-3 text-sm font-semibold text-ink">{title}</p>
+                <p className="mt-1 text-[13px] leading-relaxed text-ink-faint">{desc}</p>
+              </li>
+            ))}
+          </ul>
+        </section>
+
+        {/* Sign-in */}
+        <section className="animate-enter w-full max-w-md justify-self-center [animation-delay:120ms] lg:justify-self-end">
+          <div className="relative">
+          {/* Slow aurora glowing around the card edges */}
+          <div aria-hidden="true" className="aurora pointer-events-none absolute -inset-6 -z-10 rounded-[3rem] opacity-50" />
+          <div className="bezel bg-white/40 backdrop-blur-xl">
+            <div className="bezel-core px-7 py-9 sm:px-9">
+              <h2 className="font-display text-2xl font-semibold tracking-tight text-ink">
+                Chào mừng trở lại
+              </h2>
+              <p className="mt-1.5 text-sm text-ink-soft">
+                Đăng nhập để lưu lịch sử và tài liệu của bạn.
+              </p>
+
+              <div className="mt-8 space-y-3">
+                {/* Google */}
+                <button
+                  id="google-login-btn"
+                  type="button"
+                  onClick={() => handleSignIn("google")}
+                  disabled={isDisabled}
+                  className="btn btn-primary w-full py-3"
+                >
+                  {loading === "google" ? <Spinner /> : <GoogleIcon />}
+                  <span>Tiếp tục bằng Google</span>
+                </button>
+
+                {/* GitHub */}
+                <button
+                  id="github-login-btn"
+                  type="button"
+                  onClick={() => handleSignIn("github")}
+                  disabled={isDisabled}
+                  className="btn btn-secondary w-full py-3"
+                >
+                  {loading === "github" ? <Spinner /> : <GithubLogo size={20} weight="fill" />}
+                  <span>Tiếp tục bằng GitHub</span>
+                </button>
+              </div>
+
+              {/* Divider */}
+              <div className="my-7 flex items-center gap-3">
+                <div className="h-px flex-1 bg-line" />
+                <span className="text-xs text-ink-faint">hoặc</span>
+                <div className="h-px flex-1 bg-line" />
+              </div>
+
+              {/* Guest */}
+              <button
+                id="guest-btn"
+                type="button"
+                onClick={handleGuest}
+                disabled={isDisabled}
+                className="group flex w-full items-center justify-between gap-3 rounded-2xl bg-surface-2 px-4 py-3.5 text-left ring-1 ring-line-soft transition hover:bg-surface-3 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <span className="flex items-center gap-3">
+                  {loading === "guest" ? <Spinner /> : <UserCircleDashed size={22} className="text-ink-soft" />}
+                  <span>
+                    <span className="block text-sm font-semibold text-ink">Dùng thử không cần tài khoản</span>
+                    <span className="block text-xs text-ink-faint">Lịch sử không được lưu khi đóng trình duyệt.</span>
+                  </span>
+                </span>
+                <ArrowRight size={16} className="shrink-0 text-ink-faint transition group-hover:translate-x-0.5 group-hover:text-ink" />
+              </button>
+            </div>
+          </div>
+
+          </div>
+          <p className="mt-6 text-center text-xs text-ink-faint">
+            © {new Date().getFullYear()} MeetingMind
+          </p>
+        </section>
       </div>
     </div>
   );
 }
+
+const FEATURES: { icon: Icon; title: string; desc: string }[] = [
+  {
+    icon: WaveformIcon,
+    title: "Ghi âm hoặc tải lên",
+    desc: "Micro, âm thanh từ tab, hoặc video/audio đến 2 GB.",
+  },
+  {
+    icon: UsersThree,
+    title: "Tự tách người nói",
+    desc: "Mỗi người một màu, đánh dấu chỗ nói chồng.",
+  },
+  {
+    icon: FileText,
+    title: "Tóm tắt hoặc toàn văn",
+    desc: "Xuất PDF, DOCX hoặc Markdown chỉ với một lần bấm.",
+  },
+];

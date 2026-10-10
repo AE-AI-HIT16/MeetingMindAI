@@ -83,6 +83,10 @@ async def lifespan(app: FastAPI):
     """Load ML pipeline on startup, release on shutdown."""
     logger.info("Loading ML pipeline from %s ...", CONFIG_PATH)
     try:
+        # Same as handler.py: model modules register themselves on import.
+        import meetasr.runpod as _mrp
+        _mrp._register_all_models()
+
         pipeline = AutoPipeline.from_yaml(CONFIG_PATH)
         app.state.pipeline = pipeline
         logger.info("MeetPipeline loaded successfully.")

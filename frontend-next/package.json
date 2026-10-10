@@ -14,6 +14,8 @@
     "test:speaker-blocks": "node --test tests/speaker-blocks.test.mjs"
   },
   "dependencies": {
+    "@phosphor-icons/react": "2.1.10",
+    "docx-preview": "0.3.6",
     "next": "16.2.10",
     "next-auth": "^4.24.15",
     "react": "19.2.4",

@@ -72,10 +72,10 @@ function AccessProblem({ status }: { status: number }) {
           : "Tài liệu thuộc về một tài khoản khác. Hãy đăng nhập đúng tài khoản đã tạo tài liệu."}
       </p>
       <div className="mt-5 flex gap-3">
-        <Link href="/login" className="rounded-xl bg-brand px-4 py-2.5 text-sm font-medium text-white hover:bg-brand-ink">
+        <Link href="/login" className="btn btn-primary">
           Đăng nhập
         </Link>
-        <Link href="/" className="rounded-xl border border-line px-4 py-2.5 text-sm font-medium text-ink-soft hover:border-brand">
+        <Link href="/" className="btn btn-secondary">
           Về thư viện
         </Link>
       </div>

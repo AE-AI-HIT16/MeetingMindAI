@@ -21,7 +21,7 @@ export function RecognitionHints({
 }) {
   return (
     <label className={`block ${className}`}>
-      <span className="text-xs font-medium text-ink-soft">
+      <span className="text-sm font-medium text-ink">
         Từ khóa, tên riêng (tùy chọn)
       </span>
       <input
@@ -31,10 +31,10 @@ export function RecognitionHints({
         disabled={disabled}
         onChange={(e) => onChange({ context: e.target.value })}
         placeholder="VD: anh Tuấn, chị Lan, Kubernetes, OKR"
-        className="mt-1 w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink placeholder:text-ink-faint focus:border-brand focus:outline-none disabled:opacity-60"
+        className="mt-2 w-full rounded-lg border border-line bg-surface-2 px-3 py-2.5 text-sm text-ink placeholder:text-ink-faint transition focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/25 disabled:opacity-60"
       />
-      <span className="mt-1 block text-xs text-ink-faint">
-        Chỉ cần tên người, thuật ngữ, viết tắt — từ thông dụng không cần nhập.
+      <span className="mt-2 block text-xs leading-relaxed text-ink-faint">
+        Chỉ cần tên người, thuật ngữ, viết tắt. Từ thông dụng không cần nhập.
         Số người nói được nhận tự động.
       </span>
     </label>

@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useSession } from "next-auth/react";
@@ -9,6 +8,7 @@ import { deleteSource } from "@/lib/api";
 import { computeLibraryStats, formatTotalDuration } from "@/lib/libraryStats";
 import { SourceCard } from "@/components/SourceCard";
 import { ErrorNotice } from "@/components/ErrorNotice";
+import { Waveform } from "@/components/ui";
 
 const DELETE_CONCURRENCY = 4;
 
@@ -81,7 +81,8 @@ export function LibraryGrid({ sources }: { sources: Source[] }) {
   return (
     <>
       {/* Overview */}
-      <dl className="mt-8 grid grid-cols-2 gap-3 lg:grid-cols-4">
+      {/* One instrument panel, columns split by hairlines (not four cards) */}
+      <dl className="mt-4 grid grid-cols-2 overflow-hidden rounded-[var(--radius-bezel)] bg-surface shadow-[var(--shadow-card)] ring-1 ring-line/80 lg:grid-cols-4 [&>div]:border-line [&>div:nth-child(odd)]:border-r lg:[&>div]:border-r lg:[&>div:last-child]:border-r-0 [&>div:nth-child(-n+2)]:border-b lg:[&>div]:border-b-0">
         <StatTile
           label="Tổng tài liệu"
           value={String(stats.total)}
@@ -106,14 +107,19 @@ export function LibraryGrid({ sources }: { sources: Source[] }) {
 
       {/* Selection toolbar */}
       {sources.length > 0 && (
-        <div className="sticky top-0 z-10 mt-6 flex flex-wrap items-center gap-2 rounded-xl border border-line bg-surface/95 px-3 py-2 backdrop-blur">
+        <div className="sticky top-3 z-10 mt-12 flex flex-wrap items-center gap-2 rounded-2xl bg-surface/85 px-3 py-2 shadow-[var(--shadow-card)] ring-1 ring-line/80 backdrop-blur-xl">
           {!selectionMode ? (
             <>
-              <span className="text-sm text-ink-soft">{stats.total} tài liệu</span>
+              <h2 className="px-1 font-display text-lg font-semibold tracking-tight text-ink">
+                Gần đây
+                <span className="ml-2 font-mono text-xs font-normal tabular-nums text-ink-faint">
+                  {stats.total}
+                </span>
+              </h2>
               <button
                 type="button"
                 onClick={() => setSelecting(true)}
-                className="ml-auto rounded-lg border border-line px-3 py-1.5 text-sm font-medium text-ink-soft transition hover:border-brand hover:text-brand-ink"
+                className="ml-auto rounded-full border border-line bg-surface px-3.5 py-1.5 text-sm font-medium text-ink-soft transition hover:border-brand hover:text-brand-ink"
               >
                 Chọn nhiều
               </button>
@@ -129,7 +135,7 @@ export function LibraryGrid({ sources }: { sources: Source[] }) {
                   setSelected(allSelected ? new Set() : new Set(sources.map((s) => s.id)))
                 }
                 disabled={progress !== null}
-                className="rounded-lg border border-line px-3 py-1.5 text-sm text-ink-soft transition hover:border-brand hover:text-brand-ink disabled:opacity-50"
+                className="rounded-full border border-line bg-surface px-3.5 py-1.5 text-sm text-ink-soft transition hover:border-brand hover:text-brand-ink disabled:opacity-50"
               >
                 {allSelected ? "Bỏ chọn tất cả" : "Chọn tất cả"}
               </button>
@@ -146,14 +152,14 @@ export function LibraryGrid({ sources }: { sources: Source[] }) {
                     <button
                       type="button"
                       onClick={() => setConfirming(false)}
-                      className="rounded-lg border border-line px-3 py-1.5 text-sm text-ink-soft transition hover:bg-surface-2"
+                      className="rounded-full border border-line bg-surface px-3.5 py-1.5 text-sm text-ink-soft transition hover:bg-surface-2"
                     >
                       Hủy
                     </button>
                     <button
                       type="button"
                       onClick={() => void deleteSelected()}
-                      className="rounded-lg bg-red-600 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-red-700"
+                      className="rounded-full bg-danger px-3.5 py-1.5 text-sm font-medium text-on-brand transition hover:bg-danger-ink"
                     >
                       Xóa {selected.size} tài liệu
                     </button>
@@ -164,14 +170,14 @@ export function LibraryGrid({ sources }: { sources: Source[] }) {
                       type="button"
                       onClick={() => setConfirming(true)}
                       disabled={selected.size === 0}
-                      className="rounded-lg border border-red-200 px-3 py-1.5 text-sm font-medium text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
+                      className="rounded-full border border-danger/30 bg-surface px-3.5 py-1.5 text-sm font-medium text-danger transition hover:bg-danger-wash disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       Xóa{selected.size > 0 ? ` (${selected.size})` : ""}
                     </button>
                     <button
                       type="button"
                       onClick={exitSelection}
-                      className="rounded-lg border border-line px-3 py-1.5 text-sm text-ink-soft transition hover:bg-surface-2"
+                      className="rounded-full border border-line bg-surface px-3.5 py-1.5 text-sm text-ink-soft transition hover:bg-surface-2"
                     >
                       Xong
                     </button>
@@ -194,32 +200,33 @@ export function LibraryGrid({ sources }: { sources: Source[] }) {
         />
       )}
 
-      <div className="mt-6 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
-        <Link
-          href="/upload"
-          className="group flex min-h-[260px] flex-col items-center justify-center rounded-[var(--radius-card)] border-2 border-dashed border-line bg-surface/50 p-5 text-center transition hover:border-brand hover:bg-brand-wash/40"
-        >
-          <span className="flex h-12 w-12 items-center justify-center rounded-full bg-brand-wash text-brand transition group-hover:scale-110">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
-              <path d="M12 5v14M5 12h14" />
-            </svg>
-          </span>
-          <span className="mt-3 font-display text-lg font-medium text-ink">
-            Tài liệu mới
-          </span>
-          <span className="mt-1 text-xs text-ink-faint">
-            Kéo thả hoặc chọn tệp media
-          </span>
-        </Link>
+      {sources.length === 0 && (
+        <div className="mt-10 flex flex-col items-center rounded-[var(--radius-card)] border border-dashed border-line px-6 py-16 text-center">
+          <Waveform bars={36} className="h-12 w-56" />
+          <p className="mt-6 font-display text-lg font-semibold text-ink">Chưa có tài liệu nào</p>
+          <p className="mt-1 max-w-sm text-sm text-ink-soft">
+            Ghi âm một cuộc họp hoặc tải file lên ở phía trên. Tài liệu sẽ xuất hiện tại đây.
+          </p>
+        </div>
+      )}
 
-        {sources.map((s) => (
-          <SourceCard
+      <div className="mt-6 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
+        {sources.map((s, i) => (
+          <div
             key={s.id}
-            source={s}
-            selectionMode={selectionMode}
-            selected={selected.has(s.id)}
-            onToggleSelect={() => toggle(s.id)}
-          />
+            // The first (latest) file gets a wide slot so the grid has a focal point.
+            className={`animate-enter ${i === 0 ? "sm:col-span-2" : ""}`}
+            // Stagger the first rows only; later cards appear at once.
+            style={{ animationDelay: `${Math.min(i, 8) * 40}ms` }}
+          >
+            <SourceCard
+              featured={i === 0}
+              source={s}
+              selectionMode={selectionMode}
+              selected={selected.has(s.id)}
+              onToggleSelect={() => toggle(s.id)}
+            />
+          </div>
         ))}
       </div>
     </>
@@ -228,9 +235,9 @@ export function LibraryGrid({ sources }: { sources: Source[] }) {
 
 function StatTile({ label, value, detail }: { label: string; value: string; detail: string }) {
   return (
-    <div className="rounded-xl border border-line bg-surface px-4 py-3">
+    <div className="px-5 py-4">
       <dt className="text-xs font-medium text-ink-faint">{label}</dt>
-      <dd className="mt-1 font-display text-2xl font-medium tabular-nums text-ink">{value}</dd>
+      <dd className="mt-1.5 font-mono text-2xl font-medium tracking-tight tabular-nums text-ink">{value}</dd>
       <dd className="mt-0.5 text-xs text-ink-soft">{detail}</dd>
     </div>
   );

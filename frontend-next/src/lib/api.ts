@@ -327,12 +327,13 @@ export function documentExportUrl(
  * Download an export with the user's token (the endpoint checks ownership,
  * so a plain <a href> without Authorization would be rejected).
  */
-export async function downloadDocumentExport(
+/** Fetches an export file (used both for preview and for download). */
+export async function fetchDocumentExport(
   documentId: string,
   format: ExportFormat,
   preset: ExportPreset | undefined,
   token?: string,
-): Promise<void> {
+): Promise<{ blob: Blob; filename: string }> {
   const res = await fetch(getFullUrl(documentExportUrl(documentId, format, preset)), {
     headers: token ? { Authorization: `Bearer ${token}` } : undefined,
   });
@@ -348,12 +349,27 @@ export async function downloadDocumentExport(
   const disposition = res.headers.get("Content-Disposition") ?? "";
   const match = /filename\*=UTF-8''([^;]+)/i.exec(disposition);
   const filename = match ? decodeURIComponent(match[1]) : `document.${format}`;
-  const url = URL.createObjectURL(await res.blob());
+  return { blob: await res.blob(), filename };
+}
+
+/** Saves a blob through a temporary link. */
+export function saveBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
   const link = window.document.createElement("a");
   link.href = url;
   link.download = filename;
   link.click();
   URL.revokeObjectURL(url);
+}
+
+export async function downloadDocumentExport(
+  documentId: string,
+  format: ExportFormat,
+  preset: ExportPreset | undefined,
+  token?: string,
+): Promise<void> {
+  const { blob, filename } = await fetchDocumentExport(documentId, format, preset, token);
+  saveBlob(blob, filename);
 }
 
 /**

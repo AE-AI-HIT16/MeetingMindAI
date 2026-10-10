@@ -2,27 +2,31 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import type { Source } from "@/lib/types";
 import { formatDate, formatDuration } from "@/lib/format";
-import { StatusBadge, Waveform } from "@/components/ui";
+import { DocModeBadge, StatusBadge, Waveform } from "@/components/ui";
 import { deleteSource } from "@/lib/api";
 import { ErrorNotice } from "@/components/ErrorNotice";
-
-const DOC_LABEL: Record<string, string> = {
-  live: "Đang tạo",
-  summary: "Tóm tắt",
-  full_text: "Toàn văn",
-};
+import {
+  Check,
+  CircleNotch,
+  Trash,
+  VideoCamera,
+  Waveform as AudioIcon,
+} from "@phosphor-icons/react";
 
 export function SourceCard({
   source,
   selectionMode = false,
   selected = false,
   onToggleSelect,
+  featured = false,
 }: {
   source: Source;
+  /** Wide variant for the first card of the library grid. */
+  featured?: boolean;
   /** While selecting, a click toggles the card instead of opening it. */
   selectionMode?: boolean;
   selected?: boolean;
@@ -31,7 +35,15 @@ export function SourceCard({
   const router = useRouter();
   const { data: session } = useSession();
   const [deleting, setDeleting] = useState(false);
+  // First click arms the delete button, a second click deletes.
+  const [armed, setArmed] = useState(false);
   const [deleteError, setDeleteError] = useState<unknown>(null);
+
+  useEffect(() => {
+    if (!armed) return;
+    const timer = window.setTimeout(() => setArmed(false), 3000);
+    return () => window.clearTimeout(timer);
+  }, [armed]);
 
   const isVideo = source.mediaType === "video";
   const finalDocument =
@@ -44,7 +56,11 @@ export function SourceCard({
   async function handleDelete(e: React.MouseEvent) {
     e.preventDefault();
     e.stopPropagation();
-    if (!confirm(`Xóa "${source.title}"?`)) return;
+    if (!armed) {
+      setArmed(true);
+      return;
+    }
+    setArmed(false);
     setDeleting(true);
     try {
       await deleteSource(source.id, session?.accessToken);
@@ -57,7 +73,7 @@ export function SourceCard({
   }
 
   return (
-    <div className="group relative">
+    <div className="group relative flex h-full flex-col">
       <Link
         href={href}
         onClick={(e) => {
@@ -67,22 +83,26 @@ export function SourceCard({
           }
         }}
         aria-pressed={selectionMode ? selected : undefined}
-        className={`flex flex-col rounded-[var(--radius-card)] border bg-surface p-5 shadow-[var(--shadow-card)] transition duration-300 hover:-translate-y-1 hover:shadow-[var(--shadow-lift)] ${
+        className={`flex flex-1 flex-col rounded-[var(--radius-card)] border bg-surface p-5 shadow-[var(--shadow-card)] transition duration-300 hover:-translate-y-1 hover:shadow-[var(--shadow-lift)] ${
           selected
             ? "border-brand ring-2 ring-brand/40"
-            : "border-line hover:border-transparent"
+            : "border-line hover:border-ink-faint/40"
         }`}
       >
         {/* Media preview strip */}
-        <div className="relative mb-4 flex h-28 items-center justify-center overflow-hidden rounded-xl bg-surface-2">
+        <div
+          className={`relative mb-4 flex items-end overflow-hidden rounded-xl bg-surface-2 p-3 ring-1 ring-line-soft ${
+            featured ? "h-36" : "h-28"
+          }`}
+        >
           <Waveform
             live={source.status === "processing"}
-            bars={32}
-            className="absolute inset-x-5 inset-y-8 opacity-70"
+            bars={featured ? 72 : 32}
+            className="absolute inset-x-4 inset-y-6 opacity-60 transition-opacity duration-300 group-hover:opacity-90"
           />
-          <span className="relative flex items-center gap-1.5 rounded-full bg-surface/90 px-2.5 py-1 font-mono text-[11px] font-bold text-ink-soft ring-1 ring-line backdrop-blur">
-            {isVideo ? <VideoIcon /> : <AudioIcon />}
-            {isVideo ? "VIDEO" : "AUDIO"}
+          <span className="relative flex items-center gap-1.5 rounded-md bg-paper/80 px-2 py-1 text-[11px] font-semibold text-ink-soft ring-1 ring-line backdrop-blur">
+            {isVideo ? <VideoCamera size={13} /> : <AudioIcon size={13} />}
+            {isVideo ? "Video" : "Audio"}
           </span>
         </div>
 
@@ -93,7 +113,11 @@ export function SourceCard({
           <StatusBadge status={source.status} />
         </div>
 
-        <h3 className="mt-2 line-clamp-2 font-display text-[17px] font-medium leading-snug text-ink transition group-hover:text-brand-ink">
+        <h3
+          className={`mt-2 line-clamp-2 font-display font-semibold leading-snug tracking-tight text-ink [overflow-wrap:anywhere] transition group-hover:text-brand-ink ${
+            featured ? "text-2xl" : "text-[17px]"
+          }`}
+        >
           {source.title}
         </h3>
 
@@ -103,12 +127,7 @@ export function SourceCard({
           </span>
           <div className="flex gap-1.5">
             {source.docs.map((d) => (
-              <span
-                key={d}
-                className="rounded-md bg-brand-wash px-2 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wide text-brand-ink"
-              >
-                {DOC_LABEL[d]}
-              </span>
+              <DocModeBadge key={d} mode={d} />
             ))}
           </div>
         </div>
@@ -137,15 +156,15 @@ export function SourceCard({
           }}
           className={`absolute left-2 top-2 flex h-7 w-7 items-center justify-center rounded-lg shadow-sm ring-1 transition ${
             selected
-              ? "bg-brand text-white ring-brand opacity-100"
-              : `bg-surface text-transparent ring-line hover:ring-brand ${
-                  selectionMode ? "opacity-100" : "opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+              ? "bg-brand text-on-brand ring-brand opacity-100"
+              : `bg-surface-2 text-transparent ring-line hover:ring-brand ${
+                  selectionMode
+                    ? "opacity-100"
+                    : "opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
                 }`
           }`}
         >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <path d="M5 12l5 5L20 7" />
-          </svg>
+          <Check size={14} weight="bold" aria-hidden="true" />
         </button>
       )}
 
@@ -153,40 +172,25 @@ export function SourceCard({
       {!selectionMode && (
       <button
         onClick={handleDelete}
+        onBlur={() => setArmed(false)}
         disabled={deleting}
-        title="Xóa tài liệu"
-        className="absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-lg bg-surface opacity-0 shadow-sm ring-1 ring-line transition hover:bg-red-50 hover:text-red-500 hover:ring-red-200 group-hover:opacity-100 disabled:opacity-50"
+        title={armed ? "Bấm lần nữa để xóa" : "Xóa tài liệu"}
+        aria-label={armed ? `Xác nhận xóa "${source.title}"` : `Xóa "${source.title}"`}
+        className={`absolute right-2 top-2 flex h-7 items-center justify-center gap-1 rounded-lg shadow-sm ring-1 transition group-hover:opacity-100 focus-visible:opacity-100 disabled:opacity-50 [@media(hover:none)]:opacity-100 ${
+          armed
+            ? "bg-danger px-2 text-xs font-medium text-on-brand opacity-100 ring-danger"
+            : "w-7 bg-surface-2 text-ink-soft opacity-0 ring-line hover:bg-danger-wash hover:text-danger-ink hover:ring-danger/30"
+        }`}
       >
-        {deleting ? (
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="animate-spin">
-            <path d="M21 12a9 9 0 1 1-6.219-8.56" />
-          </svg>
+        {armed ? (
+          "Xóa?"
+        ) : deleting ? (
+          <CircleNotch size={13} className="animate-spin" />
         ) : (
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="3 6 5 6 21 6" />
-            <path d="M19 6l-1 14H6L5 6" />
-            <path d="M10 11v6M14 11v6" />
-            <path d="M9 6V4h6v2" />
-          </svg>
+          <Trash size={13} />
         )}
       </button>
       )}
     </div>
-  );
-}
-
-function VideoIcon() {
-  return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="2" y="5" width="15" height="14" rx="2" />
-      <path d="M17 9l5-3v12l-5-3" />
-    </svg>
-  );
-}
-function AudioIcon() {
-  return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M12 3v18M8 7v10M4 10v4M16 6v12M20 9v6" />
-    </svg>
   );
 }
