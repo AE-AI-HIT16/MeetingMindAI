@@ -83,6 +83,9 @@ export function DocumentView({
   const [docxPreset, setDocxPreset] =
     useState<DocxExportPreset>("minimal");
   const [playbackMs, setPlaybackMs] = useState<number | null>(null);
+  // Speaker block being edited (one sentence per line) and saved edits.
+  const [editingBlock, setEditingBlock] = useState<string | null>(null);
+  const [editedText, setEditedText] = useState<Record<string, string>>({});
   const audioRef = useRef<HTMLAudioElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const segmentRefs = useRef(new Map<string, HTMLElement>());
@@ -450,7 +453,52 @@ export function DocumentView({
                             Đang phát
                           </span>
                         )}
+                        {source.jobId && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setEditingBlock(editingBlock === keys[0] ? null : keys[0])
+                            }
+                            aria-pressed={editingBlock === keys[0]}
+                            className={`ml-auto inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs font-medium transition ${
+                              editingBlock === keys[0]
+                                ? "border-brand bg-brand text-white"
+                                : "border-line text-ink-soft hover:border-brand hover:bg-brand-wash hover:text-brand-ink"
+                            }`}
+                          >
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                              <path d="M12 20h9" />
+                              <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                            </svg>
+                            {editingBlock === keys[0] ? "Xong" : "Sửa"}
+                          </button>
+                        )}
                       </div>
+                      {editingBlock === keys[0] ? (
+                        <div className="mt-2 space-y-2">
+                          {block.segments.map((seg, index) => (
+                            <div key={keys[index]} className="flex gap-3">
+                              <button
+                                type="button"
+                                onClick={() => seekTo(seg.startMs)}
+                                title={`Phát từ ${formatStamp(seg.startMs)}`}
+                                className="w-10 shrink-0 pt-1 text-left font-mono text-[11px] text-ink-faint hover:text-brand"
+                              >
+                                {formatStamp(seg.startMs)}
+                              </button>
+                              <EditableSegmentText
+                                jobId={source.jobId}
+                                segmentId={seg.id}
+                                text={editedText[keys[index]] ?? seg.text}
+                                onSaved={(text) =>
+                                  setEditedText((prev) => ({ ...prev, [keys[index]]: text }))
+                                }
+                                className="min-w-0 flex-1 text-[15px]"
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
                       <div className="mt-1 text-[15px]">
                         {block.segments.map((seg, index) => {
                           const key = keys[index];
@@ -472,7 +520,10 @@ export function DocumentView({
                                 inline
                                 jobId={source.jobId}
                                 segmentId={seg.id}
-                                text={seg.text}
+                                text={editedText[key] ?? seg.text}
+                                onSaved={(text) =>
+                                  setEditedText((prev) => ({ ...prev, [key]: text }))
+                                }
                                 onClick={() => seekTo(seg.startMs)}
                                 className={`transition-colors duration-300 ${
                                   isActive ? "bg-brand/15 font-semibold" : "hover:bg-surface-2"
@@ -486,6 +537,7 @@ export function DocumentView({
                           );
                         })}
                       </div>
+                      )}
                     </div>
                   </div>
                 );

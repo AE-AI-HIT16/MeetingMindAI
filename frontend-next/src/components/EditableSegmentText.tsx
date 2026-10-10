@@ -17,6 +17,7 @@ export function EditableSegmentText({
   className = "",
   inline = false,
   onClick,
+  onSaved,
 }: {
   jobId: string | null;
   segmentId: number | null;
@@ -26,6 +27,8 @@ export function EditableSegmentText({
   inline?: boolean;
   /** Single click on the text (e.g. play from this sentence). */
   onClick?: () => void;
+  /** Called with the saved text so the parent can keep it across remounts. */
+  onSaved?: (text: string) => void;
 }) {
   const { data: authSession } = useSession();
   const [saved, setSaved] = useState<string | null>(null);
@@ -53,6 +56,7 @@ export function EditableSegmentText({
     try {
       const updated = await updateSegment(jobId, segmentId, { text: draft }, authSession?.accessToken);
       setSaved(updated.text);
+      onSaved?.(updated.text);
       setDraft(null);
     } catch (err) {
       setError(err);
@@ -107,27 +111,15 @@ export function EditableSegmentText({
   }
 
   if (inline) {
+    // Inside a speaker block: the block header has the visible "Sửa" button.
     return (
       <span
-        className={`group/sentence cursor-pointer rounded-sm leading-relaxed text-ink ${className}`}
+        className={`cursor-pointer rounded-sm leading-relaxed text-ink ${className}`}
         onClick={onClick}
         onDoubleClick={startEdit}
         title={editable ? "Bấm để nghe · nhấp đúp để sửa" : "Bấm để nghe"}
       >
         {shown}
-        {editable && (
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              startEdit();
-            }}
-            aria-label="Sửa câu này"
-            className="ml-1 hidden translate-y-[-1px] rounded border border-line px-1 align-middle text-[10px] font-medium text-ink-soft hover:border-brand hover:text-brand-ink group-hover/sentence:inline"
-          >
-            Sửa
-          </button>
-        )}
       </span>
     );
   }
