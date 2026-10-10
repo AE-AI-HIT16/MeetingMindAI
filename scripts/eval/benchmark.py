@@ -31,6 +31,8 @@ def main() -> None:
     parser.add_argument("--config", type=Path, default=Path("configs/runpod_gpu.yaml"))
     parser.add_argument("--set", dest="overrides", action="append", default=[])
     parser.add_argument("--language", default="vi")
+    parser.add_argument("--batch-size", type=int, default=BATCH_SIZE,
+                        help="turns per RunPod call (backend job worker)")
     args = parser.parse_args()
     logging.basicConfig(level=logging.WARNING)
 
@@ -59,8 +61,8 @@ def main() -> None:
 
     t0 = time.perf_counter()
     words = 0
-    for index in range(0, len(turns), BATCH_SIZE):
-        batch = turns[index:index + BATCH_SIZE]
+    for index in range(0, len(turns), args.batch_size):
+        batch = turns[index:index + args.batch_size]
         chunks = [audio[int(t.start_ms * SR / 1000):int(t.end_ms * SR / 1000)] for t in batch]
         results = pipeline.transcribe_chunks(
             chunks,

@@ -30,7 +30,7 @@ from metrics import aggregate, score_meeting  # noqa: E402
 from meetasr.backend.utils.overlap_echo import is_overlap_echo, overlap_ratio  # noqa: E402
 
 SR = 16000
-BATCH_SIZE = 8
+BATCH_SIZE = 24  # same as the backend job worker
 
 
 def build_pipeline(config_path: Path, overrides: list[str]):
@@ -119,6 +119,7 @@ def run_meeting(
 
 
 def main() -> None:
+    global BATCH_SIZE
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--data", type=Path, required=True)
     parser.add_argument("--config", type=Path, default=Path("configs/runpod_gpu.yaml"))
@@ -131,6 +132,8 @@ def main() -> None:
     parser.add_argument("--context", default="")
     parser.add_argument("--skip-overlapped", action="store_true",
                         help="do not transcribe turns that are >= 60%% overlapped")
+    parser.add_argument("--batch-size", type=int, default=BATCH_SIZE,
+                        help="turns per RunPod call (backend job worker)")
     parser.add_argument("--keep-echo", action="store_true",
                         help="keep overlapped turns that repeat another speaker's words")
     parser.add_argument("--pad-ms", type=int, default=0,
@@ -140,6 +143,7 @@ def main() -> None:
 
     from meetasr.runpod.utils.audio import load_audio
 
+    BATCH_SIZE = args.batch_size
     pipeline = build_pipeline(args.config, args.overrides)
     meetings = sorted(args.data.glob("*.wav"))
     if args.limit:

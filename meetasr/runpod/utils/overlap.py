@@ -95,6 +95,7 @@ class SpeakerSegmenter:
         self.fill_gap_s = fill_gap_s
         self.min_speech_ratio = min_speech_ratio
         self.refine_turns = refine
+        self.provider = None
         self._session = None
 
     def _ensure_loaded(self) -> None:
@@ -111,10 +112,19 @@ class SpeakerSegmenter:
             path = hf_hub_download(self.model, self.filename)
         providers = ["CPUExecutionProvider"]
         if self.device.startswith("cuda") and "CUDAExecutionProvider" in ort.get_available_providers():
+            # onnxruntime-gpu >= 1.21 can load the CUDA/cuDNN libraries that
+            # torch's pip wheels already installed.
+            if hasattr(ort, "preload_dlls"):
+                try:
+                    ort.preload_dlls()
+                except Exception as exc:
+                    logger.warning("onnxruntime preload_dlls failed: %s", exc)
             providers.insert(0, "CUDAExecutionProvider")
         self._session = ort.InferenceSession(path, providers=providers)
         self._input = self._session.get_inputs()[0].name
-        logger.info("Segmentation model loaded: %s (%s)", path, providers[0])
+        # ORT silently falls back to CPU when CUDA libraries are missing.
+        self.provider = self._session.get_providers()[0]
+        logger.info("Segmentation model loaded: %s (%s)", path, self.provider)
 
     def __call__(self, audio: np.ndarray) -> LocalSegmentation:
         self._ensure_loaded()

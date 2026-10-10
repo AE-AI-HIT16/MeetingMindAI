@@ -49,6 +49,19 @@ def numpy_to_wav_bytes(audio: np.ndarray, sample_rate: int = 16000) -> bytes:
     return buf.getvalue()
 
 
+def numpy_to_flac_bytes(audio: np.ndarray, sample_rate: int = 16000) -> bytes:
+    """Lossless FLAC with the same 16-bit samples as ``numpy_to_wav_bytes``
+    (about half the size), so ASR input is unchanged."""
+    import io
+    import soundfile as sf
+
+    if audio.dtype != np.int16:
+        audio = (np.clip(audio, -1.0, 1.0) * 32767).astype(np.int16)
+    buf = io.BytesIO()
+    sf.write(buf, audio, sample_rate, format="FLAC", subtype="PCM_16")
+    return buf.getvalue()
+
+
 def numpy_to_diarization_audio_bytes(audio: np.ndarray, sample_rate: int = 16000) -> bytes:
     """Compress whole-file audio for the diarization (prepare) step.
 
@@ -589,7 +602,7 @@ class ASRService:
             if end <= start:
                 continue
             sent.append(seg)
-            audio_b64 = base64.b64encode(numpy_to_wav_bytes(prepared.audio[start:end])).decode()
+            audio_b64 = base64.b64encode(numpy_to_flac_bytes(prepared.audio[start:end])).decode()
             turn = turns[index] if turns else None
             profile = prepared.speaker_profiles.get(turn.speaker) if turn else None
             if turn is not None and turn.overlaps and profile is not None:

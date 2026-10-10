@@ -127,9 +127,10 @@ class JobQueue:
             # round-trip on one warm worker — per-turn parallel calls spent most of
             # the time on network/queue overhead and cold-started extra workers).
             # Persist/stream each batch in timeline order so the UI fills
-            # top-to-bottom. 8 turns per job (one GPU batch, results every few
-            # seconds; the UI reveals them one by one). <= 8 x 15 s WAV ≈ 5 MB.
-            BATCH_SIZE = 8
+            # top-to-bottom. 24 turns per job (fewer round-trips; Qwen batches
+            # 16 on the GPU). Worst case 24 x 15 s FLAC ≈ 10 MB base64, under
+            # the 20 MiB /runsync limit.
+            BATCH_SIZE = 24
             completed = 0
             transcribed_turns: list[tuple[SpeakerTurn, str]] = []
             for batch_start in range(0, len(work_items), BATCH_SIZE):

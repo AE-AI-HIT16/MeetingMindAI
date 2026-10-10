@@ -266,6 +266,8 @@ async def run_handler(job):
                 d for d in (os.listdir(os.path.join(hf_home, "hub")) if os.path.isdir(os.path.join(hf_home, "hub")) else [])
                 if d.startswith("models--")
             ),
+            "segmentation_provider": getattr(getattr(pipeline, "segmenter", None), "provider", None),
+            "asr_model": getattr(pipeline.asr, "model_name", None),
             **_load_stats,
             "loaded_seconds_ago": round(time.time() - _load_stats.get("load_started_at", time.time()), 1),
         }
