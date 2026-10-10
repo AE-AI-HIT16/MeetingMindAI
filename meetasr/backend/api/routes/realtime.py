@@ -302,6 +302,8 @@ async def realtime_stream(websocket: WebSocket, db: Session = Depends(get_db)):
                     db_job = session_db.get(Job, session.job_id)
                     if db_source:
                         db_source.storage_path = storage_key
+                        # Counted in the user's storage usage like uploads.
+                        db_source.file_size_bytes = len(wav_bytes)
                         session_db.add(db_source)
                     if db_job:
                         # (JobStage has no QUEUED — that AttributeError used to

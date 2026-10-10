@@ -94,7 +94,9 @@ def test_stop_archives_audio_and_queues_offline_job(harness):
     assert len(harness.storage.saved[0]) == 44 + 3 * SAMPLE_RATE * 2
     with Session(harness.engine) as s:
         assert s.exec(select(Job)).one().status == JobStatus.QUEUED
-        assert s.exec(select(Source)).one().storage_path.startswith("key/")
+        source = s.exec(select(Source)).one()
+        assert source.storage_path.startswith("key/")
+        assert source.file_size_bytes == 44 + 3 * SAMPLE_RATE * 2
 
 
 def test_warms_up_and_transcribes_tail_on_stop(harness):
