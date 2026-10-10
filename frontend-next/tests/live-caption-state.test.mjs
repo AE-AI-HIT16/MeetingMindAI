@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   EMPTY_CAPTION_STATE,
+  groupCaptionParagraphs,
   reduceLiveCaption,
   settleInterim,
   unconfirmedCaptions,
@@ -82,4 +83,46 @@ test("settleInterim keeps the visible interim as a line", () => {
   assert.equal(state.interim, null);
   assert.deepEqual(state.lines.map((l) => l.text), ["đã xong", "đang nói dở"]);
   assert.equal(settleInterim(state), state);
+});
+
+function line(id, text, startMs, endMs) {
+  return { id, text, isFinal: true, startMs, endMs };
+}
+
+test("groupCaptionParagraphs splits at pauses and keeps short gaps together", () => {
+  const lines = [
+    line(0, "xin chào", 0, 1000),
+    line(1, "mọi người", 1500, 2500), // 500 ms gap → same paragraph
+    line(2, "tôi là An", 5000, 6000), // 2.5 s pause → new paragraph
+  ];
+  const paragraphs = groupCaptionParagraphs(lines, null);
+
+  assert.deepEqual(
+    paragraphs.map(({ id, text, startMs, endMs }) => ({ id, text, startMs, endMs })),
+    [
+      { id: 0, text: "xin chào mọi người", startMs: 0, endMs: 2500 },
+      { id: 2, text: "tôi là An", startMs: 5000, endMs: 6000 },
+    ],
+  );
+});
+
+test("interim joins the last paragraph or opens a new one after a pause", () => {
+  const lines = [line(0, "câu một", 0, 1000)];
+
+  const joined = groupCaptionParagraphs(lines, { id: 5, text: "đang", isFinal: false, startMs: 1500, endMs: 1800 });
+  assert.equal(joined.length, 1);
+  assert.equal(joined[0].interim, "đang");
+
+  const separate = groupCaptionParagraphs(lines, { id: 5, text: "đang", isFinal: false, startMs: 4000, endMs: 4300 });
+  assert.equal(separate.length, 2);
+  assert.deepEqual([separate[1].id, separate[1].text, separate[1].interim], [5, "", "đang"]);
+});
+
+test("very long paragraphs are split even without a pause", () => {
+  const long = "a".repeat(310);
+  const paragraphs = groupCaptionParagraphs(
+    [line(0, long, 0, 1000), line(1, "tiếp", 1100, 1500)],
+    null,
+  );
+  assert.equal(paragraphs.length, 2);
 });

@@ -22,6 +22,17 @@ export function isWebSpeechSupported(): boolean {
 }
 
 /** Errors after which captions give up; the page falls back to server-only. */
+/**
+ * Chrome 135+ desktop accepts a MediaStreamTrack in start() (captions for tab
+ * audio). There is no feature detection for it (WebAudio/web-speech-api#126),
+ * so gate on the browser version; older versions would silently use the mic.
+ */
+export function isTrackCaptionSupported(): boolean {
+  if (!isWebSpeechSupported()) return false;
+  const chrome = navigator.userAgentData?.brands.find((b) => b.brand === "Google Chrome");
+  return Boolean(chrome && Number(chrome.version) >= 135);
+}
+
 const FATAL_ERRORS = new Set([
   "not-allowed",
   "service-not-allowed",
@@ -38,6 +49,7 @@ export function useWebSpeechCaption(lang = "vi-VN") {
   const recRef = useRef<SpeechRecognition | null>(null);
   const wantRunningRef = useRef(false);
   const startedAtRef = useRef(0);
+  const trackRef = useRef<MediaStreamTrack | undefined>(undefined);
   const deliveredFinalsRef = useRef(0);
   const restartTimesRef = useRef<number[]>([]);
 
@@ -64,12 +76,13 @@ export function useWebSpeechCaption(lang = "vi-VN") {
   }, []);
 
   const start = useCallback(
-    (startedAt: number) => {
+    (startedAt: number, track?: MediaStreamTrack) => {
       const Ctor = window.SpeechRecognition ?? window.webkitSpeechRecognition;
       if (!Ctor) return;
 
       stop();
       startedAtRef.current = startedAt;
+      trackRef.current = track;
       restartTimesRef.current = [];
       wantRunningRef.current = true;
       setState(EMPTY_CAPTION_STATE);
@@ -128,15 +141,15 @@ export function useWebSpeechCaption(lang = "vi-VN") {
         setTimeout(() => {
           if (!wantRunningRef.current || recRef.current !== rec) return;
           try {
-            rec.start();
+            rec.start(trackRef.current);
           } catch {
-            // InvalidStateError: already started
+            // InvalidStateError: already started / track ended
           }
         }, 250);
       };
 
       try {
-        rec.start();
+        rec.start(trackRef.current);
       } catch {
         wantRunningRef.current = false;
         setStatus("error");

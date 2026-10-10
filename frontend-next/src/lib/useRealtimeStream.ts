@@ -44,8 +44,11 @@ export interface RealtimeStreamOptions {
 }
 
 export interface RealtimeStreamActions {
-  /** Resolves to the recording start timestamp (ms), or null on failure. */
-  start: (source: AudioSource, options?: RealtimeStreamOptions) => Promise<number | null>;
+  /** Resolves once streaming starts (null on failure). */
+  start: (
+    source: AudioSource,
+    options?: RealtimeStreamOptions,
+  ) => Promise<{ startedAt: number; audioTrack: MediaStreamTrack } | null>;
   stop: () => void;
 }
 
@@ -196,6 +199,7 @@ export function useRealtimeStream(): RealtimeStreamState &
       const wsUrl = await buildWsUrl(options);
       const authSession = await getSession();
       const ws = new WebSocket(wsUrl);
+      wsRef.current = ws;
       ws.binaryType = "arraybuffer";
 
       await new Promise<void>((resolve, reject) => {
@@ -349,7 +353,7 @@ export function useRealtimeStream(): RealtimeStreamState &
 
       setIsRecording(true);
       acceptAudioRef.current = true;
-      return startTimeRef.current;
+      return { startedAt: startTimeRef.current, audioTrack: stream.getAudioTracks()[0] };
     } catch (err: unknown) {
       const msg =
         err instanceof Error ? err.message : "Lỗi không xác định khi ghi âm.";

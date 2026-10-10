@@ -8,6 +8,10 @@ SAMPLE_RATE = 16000
 MIN_WINDOW_SECONDS = 1
 MAX_WINDOW_SECONDS = 30
 
+# Tìm điểm cắt window trong ngần này giây cuối, theo khung 50 ms
+QUIET_SEARCH_SECONDS = 3.0
+QUIET_FRAME_SAMPLES = 800
+
 logger = logging.getLogger(__name__)
 
 
@@ -83,11 +87,27 @@ class SegmentWindowBuilder:
 
             # --------------------------------------------------
             # Nếu thêm segment sẽ vượt MAX_WINDOW_SECONDS
-            # -> gửi window hiện tại trước
+            # -> gửi window hiện tại trước, cắt tại chỗ yên lặng nhất
+            #    (cắt cứng giữa từ làm ASR ra chữ linh tinh ở 2 đầu window)
             # --------------------------------------------------
             if current_samples > 0:
-                await self.flush()
+                await self._flush_at_quiet_point()
 
+
+    async def _flush_at_quiet_point(self):
+        """Gửi phần đầu buffer tới điểm năng lượng thấp nhất trong
+        QUIET_SEARCH_SECONDS cuối; phần còn lại giữ cho window sau."""
+
+        audio = np.concatenate(self.buffer)
+        cut = quietest_cut(audio)  # luôn >= MIN_WINDOW_SECONDS → flush() gửi được
+
+        self.buffer = [audio[:cut]]
+        await self.flush()
+
+        rest = audio[cut:]
+        if len(rest):
+            self.buffer = [rest]
+            self.duration = len(rest) / SAMPLE_RATE
 
     async def flush(self):
 
@@ -110,3 +130,22 @@ class SegmentWindowBuilder:
 
         self.buffer.clear()
         self.duration = 0.0
+
+
+def quietest_cut(audio: np.ndarray) -> int:
+    """Sample index of the lowest-energy 50 ms frame within the last
+    QUIET_SEARCH_SECONDS (never earlier than MIN_WINDOW_SECONDS)."""
+
+    search_start = max(
+        int(MIN_WINDOW_SECONDS * SAMPLE_RATE),
+        len(audio) - int(QUIET_SEARCH_SECONDS * SAMPLE_RATE),
+    )
+    n_frames = (len(audio) - search_start) // QUIET_FRAME_SAMPLES
+    if n_frames <= 0:
+        return len(audio)
+
+    frames = audio[search_start:search_start + n_frames * QUIET_FRAME_SAMPLES]
+    energy = np.square(frames.reshape(n_frames, QUIET_FRAME_SAMPLES)).mean(axis=1)
+    best = int(np.argmin(energy))
+    # cut in the middle of the quietest frame
+    return search_start + best * QUIET_FRAME_SAMPLES + QUIET_FRAME_SAMPLES // 2

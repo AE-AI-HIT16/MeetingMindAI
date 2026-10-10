@@ -74,3 +74,58 @@ export function unconfirmedCaptions(
 ): CaptionLine[] {
   return lines.filter((line) => (line.startMs + line.endMs) / 2 >= confirmedEndMs);
 }
+
+export interface CaptionParagraph {
+  /** id of the first line (stable React key). */
+  id: number;
+  text: string;
+  startMs: number;
+  endMs: number;
+  /** Words still being recognized at the end of this paragraph. */
+  interim: string;
+}
+
+/** A pause longer than this starts a new paragraph (speaker turn / new idea). */
+export const PARAGRAPH_GAP_MS = 1200;
+const PARAGRAPH_MAX_CHARS = 300;
+
+/**
+ * Split captions into paragraphs at pauses. Web Speech has no speaker
+ * labels, so a pause is the best available turn boundary.
+ */
+export function groupCaptionParagraphs(
+  lines: CaptionLine[],
+  interim: CaptionLine | null,
+): CaptionParagraph[] {
+  const paragraphs: CaptionParagraph[] = [];
+  const startsNew = (startMs: number) => {
+    const last = paragraphs[paragraphs.length - 1];
+    return (
+      !last ||
+      startMs - last.endMs > PARAGRAPH_GAP_MS ||
+      last.text.length > PARAGRAPH_MAX_CHARS
+    );
+  };
+
+  for (const line of lines) {
+    if (startsNew(line.startMs)) {
+      paragraphs.push({ id: line.id, text: line.text, startMs: line.startMs, endMs: line.endMs, interim: "" });
+    } else {
+      const last = paragraphs[paragraphs.length - 1];
+      last.text = `${last.text} ${line.text}`;
+      last.endMs = line.endMs;
+    }
+  }
+
+  if (interim) {
+    if (startsNew(interim.startMs)) {
+      paragraphs.push({ id: interim.id, text: "", startMs: interim.startMs, endMs: interim.endMs, interim: interim.text });
+    } else {
+      const last = paragraphs[paragraphs.length - 1];
+      last.interim = interim.text;
+      last.endMs = interim.endMs;
+    }
+  }
+
+  return paragraphs;
+}

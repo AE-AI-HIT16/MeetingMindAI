@@ -154,3 +154,31 @@ def test_stop_starts_offline_job_immediately_when_asr_service_available(harness,
     assert started == [init["job_id"]]
     with Session(harness.engine) as s:
         assert s.exec(select(Job)).one().status == JobStatus.PROCESSING
+
+
+def test_quietest_cut_lands_in_silence_near_window_end():
+    from meetasr.backend.streaming.window_builder import quietest_cut
+
+    loud = np.full(SAMPLE_RATE * 15, 0.5, dtype=np.float32)
+    silent_at = int(13.2 * SAMPLE_RATE)
+    loud[silent_at:silent_at + 1600] = 0.0  # 100 ms pause
+
+    cut = quietest_cut(loud)
+    assert silent_at <= cut < silent_at + 1600
+
+
+def test_windows_are_cut_at_pauses_and_cover_whole_timeline(harness):
+    # 12 s of "speech" with a pause at 4.3 s; window=5 → first cut at the pause.
+    pcm = np.full(12 * SAMPLE_RATE, 8000, dtype=np.int16)
+    pcm[int(4.3 * SAMPLE_RATE):int(4.4 * SAMPLE_RATE)] = 0
+    with harness.client.websocket_connect("/v1/realtime/stream?window=5") as ws:
+        ws.receive_json()
+        audio = pcm.tobytes()
+        for i in range(0, len(audio), 3200):
+            ws.send_bytes(audio[i:i + 3200])
+        ws.send_json({"type": "stop"})
+        while ws.receive_json()["type"] != "stream_stopped":
+            pass
+
+    assert 4.3 <= harness.asr.windows[0] <= 4.4
+    assert sum(harness.asr.windows) == pytest.approx(12.0, abs=0.01)

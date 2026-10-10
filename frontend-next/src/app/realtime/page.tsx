@@ -5,9 +5,13 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useRealtimeStream } from "@/lib/useRealtimeStream";
 import type { AudioSource, SentenceInfo } from "@/lib/useRealtimeStream";
-import { isWebSpeechSupported, useWebSpeechCaption } from "@/lib/useWebSpeechCaption";
-import { unconfirmedCaptions } from "@/lib/liveCaptionState";
-import type { CaptionLine } from "@/lib/liveCaptionState";
+import {
+  isTrackCaptionSupported,
+  isWebSpeechSupported,
+  useWebSpeechCaption,
+} from "@/lib/useWebSpeechCaption";
+import { groupCaptionParagraphs, unconfirmedCaptions } from "@/lib/liveCaptionState";
+import type { CaptionParagraph } from "@/lib/liveCaptionState";
 import { formatDuration, formatStamp, getSpeakerStyle } from "@/lib/format";
 import { StatusBadge, Waveform } from "@/components/ui";
 
@@ -42,21 +46,32 @@ export default function RealtimePage() {
     isWebSpeechSupported,
     () => false,
   );
+  const trackCaptionSupported = useSyncExternalStore(
+    noopSubscribe,
+    isTrackCaptionSupported,
+    () => false,
+  );
   const [captionActive, setCaptionActive] = useState(false);
 
   // The system picks the mode; the user only presses record:
-  //  - Chrome/Edge + mic: browser Web Speech shows faded words instantly while
-  //    RunPod (warmed up on connect) confirms each 15 s window in solid text.
-  //  - Otherwise (Brave/Firefox/tab audio): server only, shorter 10 s windows
-  //    so the first solid text arrives sooner.
+  //  - Chrome/Edge + mic, or Chrome 135+ + tab audio: browser Web Speech shows
+  //    faded words instantly while RunPod (cold-started on connect) confirms
+  //    each 15 s window in solid text.
+  //  - Otherwise (Brave/Firefox/older Chrome tab audio): server only, shorter
+  //    10 s windows so the first solid text arrives sooner.
   const handleStart = async () => {
-    const useCaption = captionSupported && audioSource === "microphone";
-    const startedAt = await start(audioSource, {
+    const useCaption =
+      audioSource === "microphone" ? captionSupported : trackCaptionSupported;
+    const started = await start(audioSource, {
       windowSeconds: useCaption ? 15 : 10,
     });
-    setCaptionActive(useCaption && startedAt !== null);
-    if (useCaption && startedAt !== null) {
-      caption.start(startedAt);
+    setCaptionActive(useCaption && started !== null);
+    if (useCaption && started !== null) {
+      // Same track the server receives (required for tab audio).
+      caption.start(
+        started.startedAt,
+        trackCaptionSupported ? started.audioTrack : undefined,
+      );
     }
   };
 
@@ -71,17 +86,19 @@ export default function RealtimePage() {
     if (!isRecording) stopCaption();
   }, [isRecording, stopCaption]);
 
-  const pendingCaptions = captionActive
-    ? unconfirmedCaptions(caption.lines, confirmedEndMs)
-    : [];
   const interimCaption = captionActive ? caption.interim : null;
-  const hasContent =
-    transcripts.length > 0 || pendingCaptions.length > 0 || interimCaption !== null;
+  const captionParagraphs = captionActive
+    ? groupCaptionParagraphs(
+        unconfirmedCaptions(caption.lines, confirmedEndMs),
+        interimCaption,
+      )
+    : [];
+  const hasContent = transcripts.length > 0 || captionParagraphs.length > 0;
 
   // Auto-scroll transcript panel
   useEffect(() => {
     scrollRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [transcripts.length, pendingCaptions.length]);
+  }, [transcripts.length, captionParagraphs.length]);
 
   useEffect(() => {
     scrollRef.current?.scrollIntoView({ block: "end" });
@@ -299,9 +316,13 @@ export default function RealtimePage() {
                   endMs={t.endMs}
                 />
               ))}
-              {(pendingCaptions.length > 0 || interimCaption) && (
-                <CaptionBlock lines={pendingCaptions} interim={interimCaption} />
-              )}
+              {captionParagraphs.map((paragraph, i) => (
+                <CaptionParagraphBlock
+                  key={paragraph.id}
+                  paragraph={paragraph}
+                  showSeparator={transcripts.length > 0 || i > 0}
+                />
+              ))}
               {(isRecording || isFinalizing) && !interimCaption && (
                 <ListeningRow finalizing={isFinalizing} />
               )}
@@ -522,21 +543,38 @@ function TranscriptBlock({
   );
 }
 
-function CaptionBlock({
-  lines,
-  interim,
+function CaptionParagraphBlock({
+  paragraph,
+  showSeparator,
 }: {
-  lines: CaptionLine[];
-  interim: CaptionLine | null;
+  paragraph: CaptionParagraph;
+  showSeparator: boolean;
 }) {
+  // Same layout as a confirmed TranscriptBlock, but faded: the server replaces
+  // it with solid, speaker-labelled text once this range is confirmed.
   return (
-    // Faded until the server confirms this range, then replaced by solid text.
-    <p className="text-[15px] leading-relaxed text-ink-faint transition-opacity">
-      {lines.map((line) => (
-        <span key={line.id}>{line.text} </span>
-      ))}
-      {interim && <span className="caret">{interim.text}</span>}
-    </p>
+    <div className="animate-transcript">
+      {showSeparator && <div className="mb-4 ml-10 border-b border-line-soft" />}
+      <div className="flex items-start gap-3">
+        <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-surface-2 text-xs font-bold text-ink-faint">
+          …
+        </span>
+        <div className="min-w-0 flex-1">
+          <span className="font-mono text-[11px] text-ink-faint">
+            {formatStamp(paragraph.startMs)} - {formatStamp(paragraph.endMs)}
+          </span>
+          <p className="mt-1 text-[15px] leading-relaxed text-ink-faint">
+            {paragraph.text}
+            {paragraph.interim && (
+              <span className="caret">
+                {paragraph.text ? " " : ""}
+                {paragraph.interim}
+              </span>
+            )}
+          </p>
+        </div>
+      </div>
+    </div>
   );
 }
 

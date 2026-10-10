@@ -203,7 +203,12 @@ async def run_handler(job):
         from meetasr.runpod.utils.audio import load_audio
         audio = load_audio(audio_bytes)
         key = job_input.get('key')
-        result = await asyncio.to_thread(realtime_pipeline.transcribe, audio, key=key)
+        # Pin the language (backend sends "vi"): on "auto" Qwen3 sometimes
+        # mis-detects Vietnamese as Chinese.
+        language = job_input.get('language', 'auto')
+        result = await asyncio.to_thread(
+            realtime_pipeline.transcribe, audio, key=key, language=language
+        )
         return {
             "key": result.key,
             "text": result.text,

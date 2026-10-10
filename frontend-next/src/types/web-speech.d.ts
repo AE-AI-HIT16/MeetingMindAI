@@ -31,7 +31,8 @@ interface SpeechRecognition extends EventTarget {
   continuous: boolean;
   interimResults: boolean;
   maxAlternatives: number;
-  start(): void;
+  /** Chrome 135+: optional audio track instead of the default microphone. */
+  start(audioTrack?: MediaStreamTrack): void;
   stop(): void;
   abort(): void;
   onresult: ((event: SpeechRecognitionEvent) => void) | null;
@@ -47,4 +48,5 @@ interface Window {
 
 interface Navigator {
   brave?: { isBrave: () => Promise<boolean> };
+  userAgentData?: { brands: { brand: string; version: string }[] };
 }
